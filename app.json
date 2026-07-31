@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "BuildUp",
+    "slug": "buildup",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.buildup.app"
+    },
+    "android": {
+      "package": "com.buildup.app"
+    }
+  }
+}
