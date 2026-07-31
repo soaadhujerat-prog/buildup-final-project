@@ -225,7 +225,9 @@ const TicketRow: React.FC<{
           {typeLabel(ticket.type)}
           {isAdmin ? ` · ${userName}` : ''}
           {' · '}
-          {new Date(ticket.updatedAt).toLocaleDateString('he-IL')}
+          <Text style={{ writingDirection: 'ltr' }}>
+            {new Date(ticket.updatedAt).toLocaleDateString('he-IL')}
+          </Text>
         </Text>
       </View>
       <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />

@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.textMuted,
     textAlign: 'right',
-    writingDirection: 'rtl',
+    writingDirection: 'ltr',
     marginTop: 4,
   },
 

@@ -86,7 +86,9 @@ const JobCard: React.FC<JobCardProps> = ({
             size={14}
             color={Colors.textSecondary}
           />
-          <Text style={styles.detailText}>{formatShortDate(job.startDate)}</Text>
+          <Text style={[styles.detailText, { writingDirection: 'ltr' }]}>
+            {formatShortDate(job.startDate)}
+          </Text>
         </View>
 
         <View style={styles.detailItem}>
@@ -340,7 +342,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.primary,
     textAlign: 'right',
-    writingDirection: 'rtl',
+    writingDirection: 'ltr',
   },
 
   rateLabel: {

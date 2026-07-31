@@ -208,9 +208,9 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
         {/* Identity */}
         <Section title="פרטי קשר">
           <FieldRow label="שם מלא" value={user.fullName} />
-          <FieldRow label="תעודת זהות" value={user.idNumber} mono />
-          <FieldRow label="טלפון" value={user.phone} />
-          <FieldRow label="אימייל" value={user.email} />
+          <FieldRow label="תעודת זהות" value={user.idNumber} mono ltr />
+          <FieldRow label="טלפון" value={user.phone} ltr />
+          <FieldRow label="אימייל" value={user.email} ltr />
           <FieldRow label="עיר" value={user.city} />
         </Section>
 
@@ -240,8 +240,8 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
                 label="זמין"
                 value={w.isAvailable ? 'כן' : 'לא'}
               />
-              <FieldRow label="תעריף שעתי" value={`${w.hourlyRate} ₪`} />
-              <FieldRow label="תעריף יומי" value={`${w.dailyRate} ₪`} />
+              <FieldRow label="תעריף שעתי" value={`${w.hourlyRate} ₪`} ltr />
+              <FieldRow label="תעריף יומי" value={`${w.dailyRate} ₪`} ltr />
             </Section>
           </>
         )}
@@ -254,6 +254,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
               label="מספר רישום קבלנים"
               value={c.contractorRegistrationNumber}
               mono
+              ltr
             />
             <FieldRow label="אזור פעילות" value={c.areaOfOperation} />
             <FieldRow
@@ -279,7 +280,10 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
             <Text style={styles.blockedText}>{user.blockedReason}</Text>
             {user.blockedAt && (
               <Text style={styles.blockedMeta}>
-                נחסם ב-{new Date(user.blockedAt).toLocaleString('he-IL')}
+                נחסם ב-
+                <Text style={{ writingDirection: 'ltr' }}>
+                  {new Date(user.blockedAt).toLocaleString('he-IL')}
+                </Text>
               </Text>
             )}
           </View>
@@ -287,7 +291,9 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
 
         <Text style={styles.createdAt}>
           חבר במערכת מאז{' '}
-          {new Date(user.createdAt).toLocaleDateString('he-IL')}
+          <Text style={{ writingDirection: 'ltr' }}>
+            {new Date(user.createdAt).toLocaleDateString('he-IL')}
+          </Text>
         </Text>
       </ScrollView>
 
@@ -377,13 +383,20 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   </View>
 );
 
-const FieldRow: React.FC<{ label: string; value: string; mono?: boolean }> = ({
-  label,
-  value,
-  mono,
-}) => (
+const FieldRow: React.FC<{
+  label: string;
+  value: string;
+  mono?: boolean;
+  ltr?: boolean;
+}> = ({ label, value, mono, ltr }) => (
   <View style={styles.fRow}>
-    <Text style={[styles.fValue, mono && { fontFamily: 'monospace' }]}>
+    <Text
+      style={[
+        styles.fValue,
+        mono && { fontFamily: 'monospace' },
+        ltr && { writingDirection: 'ltr' },
+      ]}
+    >
       {value}
     </Text>
     <Text style={styles.fLabel}>{label}</Text>
@@ -483,7 +496,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.textSecondary,
     fontWeight: '700',
-    writingDirection: 'rtl',
+    writingDirection: 'ltr',
   },
 
   statsRow: {
@@ -530,9 +543,11 @@ const styles = StyleSheet.create({
   sectionBody: { gap: 6 },
 
   fRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -541,13 +556,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   fValue: {
     fontSize: FontSize.sm,
     color: Colors.text,
     fontWeight: '600',
-    flex: 1,
-    textAlign: 'left',
+    flexShrink: 1,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
 

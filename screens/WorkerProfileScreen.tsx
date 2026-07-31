@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     writingDirection: 'rtl',
   },
-  sectionBody: { gap: 6 },
+  sectionBody: { gap: 6, alignItems: 'flex-end', width: '100%' },
 
   body: {
     fontSize: FontSize.md,
@@ -522,9 +522,11 @@ const styles = StyleSheet.create({
   },
 
   fRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -533,13 +535,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   fValue: {
     fontSize: FontSize.sm,
     color: Colors.text,
     fontWeight: '600',
-    flex: 1,
-    textAlign: 'left',
+    flexShrink: 1,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
 

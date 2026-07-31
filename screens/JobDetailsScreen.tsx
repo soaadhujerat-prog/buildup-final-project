@@ -224,9 +224,9 @@ const JobDetailsScreen: React.FC<Props> = ({
             <Text style={styles.sectionTitle}>פרטים מעשיים</Text>
           </View>
           <FieldRow label="כתובת" value={job.address} />
-          <FieldRow label="תאריך התחלה" value={job.startDate} />
+          <FieldRow label="תאריך התחלה" value={job.startDate} ltr />
           <FieldRow label="משך" value={job.duration} />
-          <FieldRow label="תעריף יומי" value={`${job.dailyRate} ₪`} />
+          <FieldRow label="תעריף יומי" value={`${job.dailyRate} ₪`} ltr />
           <FieldRow
             label="עובדים דרושים"
             value={`${job.workersNeeded}`}
@@ -559,12 +559,15 @@ const JobDetailsScreen: React.FC<Props> = ({
 
 // ---------- subcomponents ----------
 
-const FieldRow: React.FC<{ label: string; value: string }> = ({
+const FieldRow: React.FC<{ label: string; value: string; ltr?: boolean }> = ({
   label,
   value,
+  ltr,
 }) => (
   <View style={styles.fRow}>
-    <Text style={styles.fValue}>{value}</Text>
+    <Text style={[styles.fValue, ltr && { writingDirection: 'ltr' }]}>
+      {value}
+    </Text>
     <Text style={styles.fLabel}>{label}</Text>
   </View>
 );
@@ -686,9 +689,11 @@ const styles = StyleSheet.create({
   },
 
   fRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -697,13 +702,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   fValue: {
     fontSize: FontSize.sm,
     color: Colors.text,
     fontWeight: '600',
-    flex: 1,
-    textAlign: 'left',
+    flexShrink: 1,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
 

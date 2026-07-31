@@ -72,6 +72,7 @@ const ContractorProfileScreen: React.FC<Props> = ({
             label="מספר רישום קבלנים"
             value={me.contractorRegistrationNumber}
             mono
+            ltr
           />
           <FieldRow label="פרטי רישיון" value={me.licenseDetails} />
           <FieldRow label="עיר" value={me.city} />
@@ -91,9 +92,9 @@ const ContractorProfileScreen: React.FC<Props> = ({
 
         {/* Contact */}
         <Section title="פרטי קשר">
-          <FieldRow label="תעודת זהות" value={me.idNumber} mono />
-          <FieldRow label="טלפון" value={me.phone} />
-          <FieldRow label="אימייל" value={me.email} />
+          <FieldRow label="תעודת זהות" value={me.idNumber} mono ltr />
+          <FieldRow label="טלפון" value={me.phone} ltr />
+          <FieldRow label="אימייל" value={me.email} ltr />
         </Section>
 
         {/* Bio */}
@@ -148,13 +149,20 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   </View>
 );
 
-const FieldRow: React.FC<{ label: string; value: string; mono?: boolean }> = ({
-  label,
-  value,
-  mono,
-}) => (
+const FieldRow: React.FC<{
+  label: string;
+  value: string;
+  mono?: boolean;
+  ltr?: boolean;
+}> = ({ label, value, mono, ltr }) => (
   <View style={styles.fRow}>
-    <Text style={[styles.fValue, mono && { fontFamily: 'monospace' }]}>
+    <Text
+      style={[
+        styles.fValue,
+        mono && { fontFamily: 'monospace' },
+        ltr && { writingDirection: 'ltr' },
+      ]}
+    >
       {value}
     </Text>
     <Text style={styles.fLabel}>{label}</Text>
@@ -300,9 +308,11 @@ const styles = StyleSheet.create({
   sectionBody: { gap: 6 },
 
   fRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -311,13 +321,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   fValue: {
     fontSize: FontSize.sm,
     color: Colors.text,
     fontWeight: '600',
-    flex: 1,
-    textAlign: 'left',
+    flexShrink: 1,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
 

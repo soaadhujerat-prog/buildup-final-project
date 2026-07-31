@@ -13,6 +13,7 @@
     "@react-navigation/bottom-tabs": "^6.5.20",
     "@react-navigation/native": "^6.1.17",
     "@react-navigation/native-stack": "^6.9.26",
+    "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.0",
     "expo-font": "~14.0.11",
     "expo-linear-gradient": "~15.0.8",

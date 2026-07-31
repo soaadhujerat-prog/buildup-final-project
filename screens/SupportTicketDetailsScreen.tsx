@@ -120,7 +120,10 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             <Text style={styles.metaItem}>סוג: {typeLabel}</Text>
             <Text style={styles.metaItem}>·</Text>
             <Text style={styles.metaItem}>
-              נפתח: {new Date(ticket.createdAt).toLocaleDateString('he-IL')}
+              נפתח:{' '}
+              <Text style={{ writingDirection: 'ltr' }}>
+                {new Date(ticket.createdAt).toLocaleDateString('he-IL')}
+              </Text>
             </Text>
           </View>
         </View>
@@ -158,13 +161,20 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
               </View>
             )}
             <View style={styles.fRow}>
-              <Text style={[styles.fValue, { fontFamily: 'monospace' }]}>
+              <Text
+                style={[
+                  styles.fValue,
+                  { fontFamily: 'monospace', writingDirection: 'ltr' },
+                ]}
+              >
                 {filer.idNumber}
               </Text>
               <Text style={styles.fLabel}>ת.ז</Text>
             </View>
             <View style={styles.fRow}>
-              <Text style={styles.fValue}>{filer.phone}</Text>
+              <Text style={[styles.fValue, { writingDirection: 'ltr' }]}>
+                {filer.phone}
+              </Text>
               <Text style={styles.fLabel}>טלפון</Text>
             </View>
           </View>
@@ -189,7 +199,10 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             <Text style={styles.bodyText}>{ticket.adminResponse}</Text>
             {ticket.resolvedAt && (
               <Text style={styles.resolvedMeta}>
-                נשלח ב-{new Date(ticket.resolvedAt).toLocaleString('he-IL')}
+                נשלח ב-
+                <Text style={{ writingDirection: 'ltr' }}>
+                  {new Date(ticket.resolvedAt).toLocaleString('he-IL')}
+                </Text>
               </Text>
             )}
           </View>
@@ -375,9 +388,11 @@ const styles = StyleSheet.create({
   },
 
   fRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -386,13 +401,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   fValue: {
     fontSize: FontSize.sm,
     color: Colors.text,
     fontWeight: '600',
-    flex: 1,
-    textAlign: 'left',
+    flexShrink: 1,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
 

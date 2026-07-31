@@ -260,9 +260,18 @@ const ApplicationRow: React.FC<{
       </View>
 
       <Text style={styles.appliedAt}>
-        הגשת בקשה: {new Date(app.appliedAt).toLocaleDateString('he-IL')}
-        {app.respondedAt &&
-          ` · נענתה: ${new Date(app.respondedAt).toLocaleDateString('he-IL')}`}
+        הגשת בקשה:{' '}
+        <Text style={{ writingDirection: 'ltr' }}>
+          {new Date(app.appliedAt).toLocaleDateString('he-IL')}
+        </Text>
+        {app.respondedAt && (
+          <>
+            {' · נענתה: '}
+            <Text style={{ writingDirection: 'ltr' }}>
+              {new Date(app.respondedAt).toLocaleDateString('he-IL')}
+            </Text>
+          </>
+        )}
       </Text>
 
       {app.contractorResponse && (

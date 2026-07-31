@@ -245,7 +245,12 @@ const UserRow: React.FC<{ user: Customer; onPress: () => void }> = ({
           <Text style={styles.name}>{user.fullName}</Text>
         </View>
         <Text style={styles.sub}>{subtitle}</Text>
-        <Text style={styles.meta}>ת.ז {user.idNumber} · {user.phone}</Text>
+        <Text style={styles.meta}>
+          ת.ז{' '}
+          <Text style={{ writingDirection: 'ltr' }}>
+            {user.idNumber} · {user.phone}
+          </Text>
+        </Text>
       </View>
       <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />
     </TouchableOpacity>

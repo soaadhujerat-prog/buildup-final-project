@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.text,
-    writingDirection: 'rtl',
+    writingDirection: 'ltr',
   },
 
   statLabel: {
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.primary,
-    writingDirection: 'rtl',
+    writingDirection: 'ltr',
   },
 
   skillsRow: {

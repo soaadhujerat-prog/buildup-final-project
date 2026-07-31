@@ -50,7 +50,10 @@ const RegistrationRejectedScreen: React.FC<Props> = ({
 
           {reg?.processedAt && (
             <Text style={styles.reasonMeta}>
-              נדחה ב-{new Date(reg.processedAt).toLocaleString('he-IL')}
+              נדחה ב-
+              <Text style={{ writingDirection: 'ltr' }}>
+                {new Date(reg.processedAt).toLocaleString('he-IL')}
+              </Text>
             </Text>
           )}
         </View>

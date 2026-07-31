@@ -225,7 +225,7 @@ const JobRow: React.FC<{
               size={14}
               color={Colors.textMuted}
             />
-            <Text style={styles.metaText}>
+            <Text style={[styles.metaText, { writingDirection: 'ltr' }]}>
               {new Date(job.postedAt).toLocaleDateString('he-IL')}
             </Text>
           </View>

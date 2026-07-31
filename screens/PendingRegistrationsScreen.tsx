@@ -158,7 +158,12 @@ const RegistrationRow: React.FC<{
         </View>
         <Text style={styles.rowSub}>{subtitle}</Text>
         <Text style={styles.rowMeta}>
-          הוגש: {new Date(record.submittedAt).toLocaleDateString('he-IL')} · ת.ז {data.idNumber}
+          הוגש:{' '}
+          <Text style={{ writingDirection: 'ltr' }}>
+            {new Date(record.submittedAt).toLocaleDateString('he-IL')}
+          </Text>
+          {' · ת.ז '}
+          <Text style={{ writingDirection: 'ltr' }}>{data.idNumber}</Text>
         </Text>
       </View>
       <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />

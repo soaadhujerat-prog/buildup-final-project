@@ -58,9 +58,9 @@ const RegistrationPendingScreen: React.FC<Props> = ({
 
             <Row label="סוג רישום" value={reg.role === 'worker' ? 'עובד' : 'קבלן'} />
             <Row label="שם מלא" value={reg.data.fullName} />
-            <Row label="תעודת זהות" value={reg.data.idNumber} />
-            <Row label="טלפון" value={reg.data.phone} />
-            <Row label="אימייל" value={reg.data.email} />
+            <Row label="תעודת זהות" value={reg.data.idNumber} ltr />
+            <Row label="טלפון" value={reg.data.phone} ltr />
+            <Row label="אימייל" value={reg.data.email} ltr />
             <Row label="עיר" value={reg.data.city} />
 
             {reg.role === 'worker' ? (
@@ -86,6 +86,7 @@ const RegistrationPendingScreen: React.FC<Props> = ({
                     (reg.data as ContractorRegistrationData)
                       .contractorRegistrationNumber
                   }
+                  ltr
                 />
               </>
             )}
@@ -93,6 +94,7 @@ const RegistrationPendingScreen: React.FC<Props> = ({
             <Row
               label="תאריך הגשה"
               value={new Date(reg.submittedAt).toLocaleString('he-IL')}
+              ltr
             />
           </View>
         )}
@@ -121,9 +123,15 @@ const RegistrationPendingScreen: React.FC<Props> = ({
   );
 };
 
-const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const Row: React.FC<{ label: string; value: string; ltr?: boolean }> = ({
+  label,
+  value,
+  ltr,
+}) => (
   <View style={styles.row}>
-    <Text style={styles.rowValue}>{value}</Text>
+    <Text style={[styles.rowValue, ltr && { writingDirection: 'ltr' }]}>
+      {value}
+    </Text>
     <Text style={styles.rowLabel}>{label}</Text>
   </View>
 );
@@ -198,9 +206,11 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   row: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -209,6 +219,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   rowValue: {
     fontSize: FontSize.sm,
@@ -216,7 +227,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     writingDirection: 'rtl',
     flexShrink: 1,
-    textAlign: 'left',
+    textAlign: 'right',
   },
 
   infoBox: {

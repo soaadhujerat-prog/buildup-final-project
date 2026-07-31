@@ -115,12 +115,14 @@ const SettingsScreen: React.FC<Props> = ({
           label="אימייל"
           value={currentUser.email}
           readOnly
+          ltr
         />
         <Row
           icon="call-outline"
           label="טלפון"
           value={currentUser.phone}
           readOnly
+          ltr
         />
         {isCustomer && (
           <Row
@@ -178,7 +180,8 @@ const Row: React.FC<{
   value?: string;
   readOnly?: boolean;
   onPress?: () => void;
-}> = ({ icon, label, value, readOnly, onPress }) => {
+  ltr?: boolean;
+}> = ({ icon, label, value, readOnly, onPress, ltr }) => {
   const Container: React.ComponentType<any> = readOnly
     ? View
     : TouchableOpacity;
@@ -191,7 +194,13 @@ const Row: React.FC<{
       <Ionicons name={icon} size={20} color={Colors.textSecondary} />
       <View style={{ flex: 1 }}>
         <Text style={styles.rowLabel}>{label}</Text>
-        {value && <Text style={styles.rowValue}>{value}</Text>}
+        {value && (
+          <Text
+            style={[styles.rowValue, ltr && { writingDirection: 'ltr' }]}
+          >
+            {value}
+          </Text>
+        )}
       </View>
       {!readOnly && (
         <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />

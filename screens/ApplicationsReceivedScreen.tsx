@@ -307,7 +307,10 @@ const ApplicationRow: React.FC<{
       )}
 
       <Text style={styles.appliedAt}>
-        הוגש: {new Date(app.appliedAt).toLocaleDateString('he-IL')}
+        הוגש:{' '}
+        <Text style={{ writingDirection: 'ltr' }}>
+          {new Date(app.appliedAt).toLocaleDateString('he-IL')}
+        </Text>
       </Text>
 
       {app.status === 'pending' && (

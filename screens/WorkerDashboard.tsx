@@ -292,7 +292,10 @@ const WorkerDashboard: React.FC<Props> = ({
                   {job.title}
                 </Text>
                 <Text style={styles.rowSub}>
-                  {job.profession} · {job.city} · {job.dailyRate}₪/יום
+                  {job.profession} · {job.city} ·{' '}
+                  <Text style={{ writingDirection: 'ltr' }}>
+                    {job.dailyRate}₪/יום
+                  </Text>
                 </Text>
               </View>
               {job.urgent && (
@@ -336,7 +339,7 @@ const WorkerDashboard: React.FC<Props> = ({
                   <Text style={styles.rowTitle} numberOfLines={1}>
                     {job?.title ?? 'משרה'}
                   </Text>
-                  <Text style={styles.rowSub}>
+                  <Text style={[styles.rowSub, { writingDirection: 'ltr' }]}>
                     {new Date(inv.sentAt).toLocaleDateString('he-IL')}
                   </Text>
                 </View>

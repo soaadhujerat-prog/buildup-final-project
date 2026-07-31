@@ -156,9 +156,9 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
 
         {/* Contact */}
         <Section title="פרטי קשר">
-          <FieldRow label="ת.ז" value={me.idNumber} mono />
-          <FieldRow label="טלפון" value={me.phone} />
-          <FieldRow label="אימייל" value={me.email} />
+          <FieldRow label="ת.ז" value={me.idNumber} mono ltr />
+          <FieldRow label="טלפון" value={me.phone} ltr />
+          <FieldRow label="אימייל" value={me.email} ltr />
         </Section>
 
         <TouchableOpacity
@@ -188,13 +188,20 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   </View>
 );
 
-const FieldRow: React.FC<{ label: string; value: string; mono?: boolean }> = ({
-  label,
-  value,
-  mono,
-}) => (
+const FieldRow: React.FC<{
+  label: string;
+  value: string;
+  mono?: boolean;
+  ltr?: boolean;
+}> = ({ label, value, mono, ltr }) => (
   <View style={styles.fRow}>
-    <Text style={[styles.fValue, mono && { fontFamily: 'monospace' }]}>
+    <Text
+      style={[
+        styles.fValue,
+        mono && { fontFamily: 'monospace' },
+        ltr && { writingDirection: 'ltr' },
+      ]}
+    >
       {value}
     </Text>
     <Text style={styles.fLabel}>{label}</Text>
@@ -369,7 +376,7 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     writingDirection: 'rtl',
   },
-  sectionBody: { gap: 6 },
+  sectionBody: { gap: 6, alignItems: 'flex-end', width: '100%' },
 
   body: {
     fontSize: FontSize.md,
@@ -380,9 +387,11 @@ const styles = StyleSheet.create({
   },
 
   fRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -391,13 +400,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   fValue: {
     fontSize: FontSize.sm,
     color: Colors.text,
     fontWeight: '600',
-    flex: 1,
-    textAlign: 'left',
+    flexShrink: 1,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
 

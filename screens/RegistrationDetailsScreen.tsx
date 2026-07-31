@@ -165,9 +165,9 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         {/* Identity */}
         <Section title="פרטים אישיים">
           <FieldRow label="שם מלא" value={data.fullName} />
-          <FieldRow label="תעודת זהות" value={data.idNumber} mono />
-          <FieldRow label="טלפון" value={data.phone} />
-          <FieldRow label="אימייל" value={data.email} />
+          <FieldRow label="תעודת זהות" value={data.idNumber} mono ltr />
+          <FieldRow label="טלפון" value={data.phone} ltr />
+          <FieldRow label="אימייל" value={data.email} ltr />
           <FieldRow label="עיר" value={data.city} />
         </Section>
 
@@ -204,8 +204,8 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
                 label="אזורים מועדפים"
                 value={wd.preferredAreas.join(', ') || '—'}
               />
-              <FieldRow label="תעריף שעתי" value={`${wd.hourlyRate} ₪`} />
-              <FieldRow label="תעריף יומי" value={`${wd.dailyRate} ₪`} />
+              <FieldRow label="תעריף שעתי" value={`${wd.hourlyRate} ₪`} ltr />
+              <FieldRow label="תעריף יומי" value={`${wd.dailyRate} ₪`} ltr />
             </Section>
           </>
         )}
@@ -218,6 +218,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
               label="מספר רישום קבלנים"
               value={cd.contractorRegistrationNumber}
               mono
+              ltr
             />
             <FieldRow label="אזור פעילות" value={cd.areaOfOperation} />
             <FieldRow
@@ -235,7 +236,10 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         )}
 
         <Text style={styles.submittedAt}>
-          הוגש ב-{new Date(reg.submittedAt).toLocaleString('he-IL')}
+          הוגש ב-
+          <Text style={{ writingDirection: 'ltr' }}>
+            {new Date(reg.submittedAt).toLocaleString('he-IL')}
+          </Text>
         </Text>
       </ScrollView>
 
@@ -352,16 +356,18 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   </View>
 );
 
-const FieldRow: React.FC<{ label: string; value: string; mono?: boolean }> = ({
-  label,
-  value,
-  mono,
-}) => (
+const FieldRow: React.FC<{
+  label: string;
+  value: string;
+  mono?: boolean;
+  ltr?: boolean;
+}> = ({ label, value, mono, ltr }) => (
   <View style={styles.fRow}>
     <Text
       style={[
         styles.fValue,
         mono && { fontFamily: 'monospace' },
+        ltr && { writingDirection: 'ltr' },
       ]}
     >
       {value}
@@ -478,9 +484,11 @@ const styles = StyleSheet.create({
   sectionBody: { gap: 6 },
 
   fRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    width: '100%',
+    gap: 6,
     paddingVertical: 6,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -489,13 +497,14 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    flexShrink: 0,
   },
   fValue: {
     fontSize: FontSize.sm,
     color: Colors.text,
     fontWeight: '600',
-    flex: 1,
-    textAlign: 'left',
+    flexShrink: 1,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
   checkRight: {

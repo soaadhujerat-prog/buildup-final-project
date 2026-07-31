@@ -236,9 +236,18 @@ const InvitationRow: React.FC<{
       )}
 
       <Text style={styles.sentAt}>
-        נשלח: {new Date(inv.sentAt).toLocaleDateString('he-IL')}
-        {inv.respondedAt &&
-          ` · נענה: ${new Date(inv.respondedAt).toLocaleDateString('he-IL')}`}
+        נשלח:{' '}
+        <Text style={{ writingDirection: 'ltr' }}>
+          {new Date(inv.sentAt).toLocaleDateString('he-IL')}
+        </Text>
+        {inv.respondedAt && (
+          <>
+            {' · נענה: '}
+            <Text style={{ writingDirection: 'ltr' }}>
+              {new Date(inv.respondedAt).toLocaleDateString('he-IL')}
+            </Text>
+          </>
+        )}
       </Text>
     </View>
   );

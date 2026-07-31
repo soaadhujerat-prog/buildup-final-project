@@ -213,7 +213,10 @@ const AdminDashboardScreen: React.FC<Props> = ({
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowTitle}>{reg.data.fullName}</Text>
                 <Text style={styles.rowSub}>
-                  {reg.role === 'worker' ? 'עובד' : 'קבלן'} · ת.ז {reg.data.idNumber}
+                  {reg.role === 'worker' ? 'עובד' : 'קבלן'} · ת.ז{' '}
+                  <Text style={{ writingDirection: 'ltr' }}>
+                    {reg.data.idNumber}
+                  </Text>
                 </Text>
               </View>
               <StatusBadge label="ממתין" tone="warning" small />
