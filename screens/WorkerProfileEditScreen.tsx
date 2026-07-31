@@ -13,7 +13,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import {
+  Colors,
+  Spacing,
+  Radius,
+  FontSize,
+  Shadow,
+  FilterChip as FC,
+} from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import {
   AREAS_ISRAEL,
@@ -77,7 +84,10 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     );
   };
 
+  const [submitting, setSubmitting] = useState(false);
+
   const handleSave = () => {
+    if (submitting) return;
     if (!phone.trim()) return Alert.alert('שגיאה', 'טלפון חובה');
     if (!email.trim() || !email.includes('@'))
       return Alert.alert('שגיאה', 'אימייל לא תקין');
@@ -94,6 +104,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     if (preferredAreas.length === 0)
       return Alert.alert('שגיאה', 'יש לבחור לפחות אזור עבודה אחד');
 
+    setSubmitting(true);
     updateWorkerProfile(me.id, {
       phone: phone.trim(),
       email: email.trim(),
@@ -118,6 +129,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     Alert.alert('נשמר', 'הפרופיל שלך עודכן בהצלחה.', [
       { text: 'אישור', onPress: onBack },
     ]);
+    setSubmitting(false);
   };
 
   return (
@@ -126,7 +138,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={[styles.headerBar, { paddingTop: insets.top + Spacing.sm }]}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>עריכת פרופיל</Text>
@@ -249,11 +261,14 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
         </Section>
 
         <TouchableOpacity
-          style={styles.saveBtn}
+          style={[styles.saveBtn, submitting && { opacity: 0.7 }]}
           onPress={handleSave}
           activeOpacity={0.85}
+          disabled={submitting}
         >
-          <Text style={styles.saveText}>שמור שינויים</Text>
+          <Text style={styles.saveText}>
+            {submitting ? 'שומר...' : 'שמור שינויים'}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -403,11 +418,13 @@ const styles = StyleSheet.create({
 
   chipRow: { flexDirection: 'row-reverse', gap: 8 },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
+    height: FC.height,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: FC.paddingHorizontal,
+    borderRadius: FC.borderRadius,
+    borderWidth: FC.borderWidth,
+    borderColor: Colors.textMuted,
     backgroundColor: Colors.white,
   },
   chipActive: {

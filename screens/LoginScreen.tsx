@@ -89,6 +89,7 @@ const LoginScreen: React.FC<Props> = ({
             style={styles.backBtn}
             onPress={onBack}
             activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons name="chevron-forward" size={26} color={Colors.text} />
           </TouchableOpacity>
@@ -152,6 +153,7 @@ const LoginScreen: React.FC<Props> = ({
                 style={styles.eyeBtn}
                 onPress={() => setShowPassword(!showPassword)}
                 activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Ionicons
                   name={showPassword ? 'eye-off-outline' : 'eye-outline'}

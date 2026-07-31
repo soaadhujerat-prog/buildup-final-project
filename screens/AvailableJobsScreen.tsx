@@ -11,7 +11,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import {
+  Colors,
+  Spacing,
+  Radius,
+  FontSize,
+  Shadow,
+  FilterChip as FC,
+} from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import {
@@ -39,6 +46,19 @@ const AvailableJobsScreen: React.FC<Props> = ({
   );
   const [city, setCity] = useState('כל הערים');
   const [urgentOnly, setUrgentOnly] = useState(false);
+
+  const hasActiveFilters =
+    profCategory !== 'כל המקצועות' ||
+    city !== 'כל הערים' ||
+    urgentOnly ||
+    search.trim().length > 0;
+
+  const clearFilters = () => {
+    setProfCategory('כל המקצועות');
+    setCity('כל הערים');
+    setUrgentOnly(false);
+    setSearch('');
+  };
 
   const filtered = useMemo(() => {
     return jobs
@@ -75,7 +95,7 @@ const AvailableJobsScreen: React.FC<Props> = ({
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>חיפוש עבודות</Text>
@@ -112,9 +132,9 @@ const AvailableJobsScreen: React.FC<Props> = ({
         horizontal
         style={styles.filterScroll}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={[styles.chipRow, { paddingTop: 0, paddingBottom: 0 }]}
+        contentContainerStyle={[styles.chipRow, { paddingTop: 0 }]}
       >
-        {CITIES_ISRAEL.slice(0, 12).map((c) => (
+        {CITIES_ISRAEL.map((c) => (
           <Chip
             key={c}
             label={c}
@@ -129,6 +149,7 @@ const AvailableJobsScreen: React.FC<Props> = ({
           style={styles.toggleChip}
           onPress={() => setUrgentOnly(!urgentOnly)}
           activeOpacity={0.85}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Ionicons
             name={urgentOnly ? 'checkbox' : 'square-outline'}
@@ -144,7 +165,17 @@ const AvailableJobsScreen: React.FC<Props> = ({
             רק משרות דחופות
           </Text>
         </TouchableOpacity>
-        <Text style={styles.resultCount}>{filtered.length} משרות</Text>
+        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
+          {hasActiveFilters && (
+            <TouchableOpacity
+              onPress={clearFilters}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.clearFiltersText}>נקה סינון</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={styles.resultCount}>{filtered.length} משרות</Text>
+        </View>
       </View>
 
       {filtered.length === 0 ? (
@@ -321,10 +352,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
+    height: FC.height,
+    paddingHorizontal: FC.paddingHorizontal,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: FC.borderRadius,
+    borderWidth: FC.borderWidth,
     borderColor: Colors.border,
     backgroundColor: Colors.white,
   },
@@ -362,6 +395,12 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textMuted,
     fontWeight: '600',
+  },
+  clearFiltersText: {
+    fontSize: FontSize.sm,
+    color: Colors.primary,
+    fontWeight: '700',
+    writingDirection: 'rtl',
   },
 
   results: {

@@ -36,6 +36,19 @@ const SearchWorkersScreen: React.FC<Props> = ({
   const [city, setCity] = useState('כל הערים');
   const [availableOnly, setAvailableOnly] = useState(false);
 
+  const hasActiveFilters =
+    profCategory !== 'כל המקצועות' ||
+    city !== 'כל הערים' ||
+    availableOnly ||
+    search.trim().length > 0;
+
+  const clearFilters = () => {
+    setProfCategory('כל המקצועות');
+    setCity('כל הערים');
+    setAvailableOnly(false);
+    setSearch('');
+  };
+
   const filtered = useMemo(() => {
     return workers
       .filter((w) => w.status === 'approved')
@@ -66,7 +79,7 @@ const SearchWorkersScreen: React.FC<Props> = ({
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>חיפוש עובדים</Text>
@@ -105,7 +118,7 @@ const SearchWorkersScreen: React.FC<Props> = ({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={[styles.chipRow, { paddingTop: 0, paddingBottom: 0 }]}
       >
-        {CITIES_ISRAEL.slice(0, 12).map((c) => (
+        {CITIES_ISRAEL.map((c) => (
           <Chip
             key={c}
             label={c}
@@ -138,7 +151,17 @@ const SearchWorkersScreen: React.FC<Props> = ({
             רק זמינים מיד
           </Text>
         </TouchableOpacity>
-        <Text style={styles.resultCount}>{filtered.length} תוצאות</Text>
+        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
+          {hasActiveFilters && (
+            <TouchableOpacity
+              onPress={clearFilters}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.clearFiltersText}>נקה סינון</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={styles.resultCount}>{filtered.length} תוצאות</Text>
+        </View>
       </View>
 
       {filtered.length === 0 ? (
@@ -150,6 +173,15 @@ const SearchWorkersScreen: React.FC<Props> = ({
           />
           <Text style={styles.emptyTitle}>לא נמצאו עובדים</Text>
           <Text style={styles.emptySub}>נסה לשנות את הסינון</Text>
+          {hasActiveFilters && (
+            <TouchableOpacity
+              onPress={clearFilters}
+              style={styles.emptyCta}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.emptyCtaText}>נקה סינון</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <FlatList
@@ -309,7 +341,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: FC.paddingHorizontal,
     borderRadius: FC.borderRadius,
     borderWidth: FC.borderWidth,
-    borderColor: Colors.border,
+    borderColor: Colors.textMuted,
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
@@ -338,6 +370,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
+    paddingVertical: 10,
   },
   availChipActive: {},
   availChipText: {
@@ -351,6 +384,12 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textMuted,
     fontWeight: '600',
+  },
+  clearFiltersText: {
+    fontSize: FontSize.sm,
+    color: Colors.primary,
+    fontWeight: '700',
+    writingDirection: 'rtl',
   },
 
   results: {
@@ -484,6 +523,20 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  emptyCta: {
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  emptyCtaText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
     writingDirection: 'rtl',
   },
 });

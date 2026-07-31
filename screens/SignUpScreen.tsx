@@ -203,7 +203,7 @@ const SignUpScreen: React.FC<Props> = ({
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+          <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Ionicons name="chevron-forward" size={26} color={Colors.text} />
           </TouchableOpacity>
         </View>
@@ -654,7 +654,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: Radius.full,
     borderWidth: 1.5,
-    borderColor: Colors.border,
+    borderColor: Colors.textMuted,
     backgroundColor: Colors.white,
   },
   chipActive: {

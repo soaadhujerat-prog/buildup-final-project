@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Animated,
   Dimensions,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,13 @@ const SplashScreen: React.FC<Props> = ({ onFinish }) => {
   const scaleAnim = useRef(new Animated.Value(0.5)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const taglineAnim = useRef(new Animated.Value(0)).current;
+  const finishedRef = useRef(false);
+
+  const finish = () => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    onFinish();
+  };
 
   useEffect(() => {
     Animated.sequence([
@@ -43,17 +51,18 @@ const SplashScreen: React.FC<Props> = ({ onFinish }) => {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      setTimeout(onFinish, 1200);
+      setTimeout(finish, 1200);
     });
   }, []);
 
   return (
-    <LinearGradient
-      colors={[Colors.primary, Colors.primaryDark, Colors.secondary]}
-      style={styles.container}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-    >
+    <TouchableWithoutFeedback onPress={finish}>
+      <LinearGradient
+        colors={[Colors.primary, Colors.primaryDark, Colors.secondary]}
+        style={styles.container}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
       {/* Background decoration */}
       <View style={styles.circle1} />
       <View style={styles.circle2} />
@@ -93,14 +102,15 @@ const SplashScreen: React.FC<Props> = ({ onFinish }) => {
         מחברים בין קבלנים לעובדים{'\n'}בתחום הבנייה
       </Animated.Text>
 
-      <View style={styles.footer}>
-        <View style={styles.loadingDots}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={styles.dot} />
-          ))}
+        <View style={styles.footer}>
+          <View style={styles.loadingDots}>
+            {[0, 1, 2].map((i) => (
+              <View key={i} style={styles.dot} />
+            ))}
+          </View>
         </View>
-      </View>
-    </LinearGradient>
+      </LinearGradient>
+    </TouchableWithoutFeedback>
   );
 };
 

@@ -14,7 +14,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import {
+  Colors,
+  Spacing,
+  Radius,
+  FontSize,
+  Shadow,
+  FilterChip as FC,
+} from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import {
   CITIES_ISRAEL,
@@ -69,6 +76,8 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
     if (!city.trim()) return 'יש לבחור עיר';
     if (!address.trim()) return 'כתובת המשרה חובה';
     if (!startDate.trim()) return 'תאריך התחלה חובה';
+    if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(startDate.trim()))
+      return 'תאריך התחלה חייב להיות בפורמט DD/MM/YYYY';
     if (!duration.trim()) return 'משך הפרויקט חובה';
     if (!dailyRate || isNaN(Number(dailyRate)) || Number(dailyRate) <= 0)
       return 'תעריף יומי חייב להיות מספר חיובי';
@@ -123,7 +132,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={[styles.headerBar, { paddingTop: insets.top + Spacing.sm }]}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>פרסם משרה חדשה</Text>
@@ -199,6 +208,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
             value={startDate}
             onChange={setStartDate}
             placeholder="DD/MM/YYYY"
+            keyboardType="numbers-and-punctuation"
           />
           <Field
             label="משך משוער"
@@ -249,7 +259,12 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
               onValueChange={setUrgent}
               trackColor={{ false: Colors.border, true: Colors.danger }}
             />
-            <Text style={styles.switchLabel}>משרה דחופה</Text>
+            <TouchableOpacity
+              onPress={() => setUrgent(!urgent)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.switchLabel}>משרה דחופה</Text>
+            </TouchableOpacity>
           </View>
         </Section>
 
@@ -299,7 +314,12 @@ const Field: React.FC<{
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-  keyboardType?: 'default' | 'numeric' | 'phone-pad' | 'email-address';
+  keyboardType?:
+    | 'default'
+    | 'numeric'
+    | 'phone-pad'
+    | 'email-address'
+    | 'numbers-and-punctuation';
 }> = ({ label, value, onChange, placeholder, keyboardType = 'default' }) => (
   <View style={styles.inputGroup}>
     <View style={styles.labelRow}>
@@ -414,11 +434,13 @@ const styles = StyleSheet.create({
 
   chipRow: { flexDirection: 'row-reverse', gap: 8 },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
+    height: FC.height,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: FC.paddingHorizontal,
+    borderRadius: FC.borderRadius,
+    borderWidth: FC.borderWidth,
+    borderColor: Colors.textMuted,
     backgroundColor: Colors.white,
   },
   chipActive: {

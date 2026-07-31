@@ -5,9 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Modal,
   TextInput,
   Alert,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -96,6 +98,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
     blockUser(user.id, currentUser?.id ?? 'adm1', blockReason.trim());
     setBlockModalVisible(false);
     setBlockReason('');
+    Alert.alert('המשתמש נחסם', `${user.fullName} נחסם/ה בהצלחה.`);
   };
 
   const handleUnblock = () => {
@@ -107,8 +110,13 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
         {
           text: 'בטל חסימה',
           style: 'default',
-          onPress: () =>
-            unblockUser(user.id, currentUser?.id ?? 'adm1'),
+          onPress: () => {
+            unblockUser(user.id, currentUser?.id ?? 'adm1');
+            Alert.alert(
+              'החסימה בוטלה',
+              `החסימה של ${user.fullName} בוטלה בהצלחה.`
+            );
+          },
         },
       ]
     );
@@ -117,7 +125,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>פרטי משתמש</Text>
@@ -209,8 +217,18 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
         <Section title="פרטי קשר">
           <FieldRow label="שם מלא" value={user.fullName} />
           <FieldRow label="תעודת זהות" value={user.idNumber} mono ltr />
-          <FieldRow label="טלפון" value={user.phone} ltr />
-          <FieldRow label="אימייל" value={user.email} ltr />
+          <FieldRow
+            label="טלפון"
+            value={user.phone}
+            ltr
+            onPress={() => Linking.openURL(`tel:${user.phone}`)}
+          />
+          <FieldRow
+            label="אימייל"
+            value={user.email}
+            ltr
+            onPress={() => Linking.openURL(`mailto:${user.email}`)}
+          />
           <FieldRow label="עיר" value={user.city} />
         </Section>
 
@@ -330,40 +348,46 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
         animationType="slide"
         onRequestClose={() => setBlockModalVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>חסימת משתמש</Text>
-            </View>
-            <Text style={styles.modalSub}>
-              ציין סיבה לחסימה. הסיבה תוצג למשתמש במסך החסימה.
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              value={blockReason}
-              onChangeText={setBlockReason}
-              placeholder="לדוגמה: דיווחים חוזרים על התנהגות בלתי הולמת"
-              placeholderTextColor={Colors.textMuted}
-              multiline
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => setBlockModalVisible(false)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.modalBtnCancelText}>ביטול</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnConfirm]}
-                onPress={handleBlockConfirm}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.modalBtnConfirmText}>אשר חסימה</Text>
-              </TouchableOpacity>
-            </View>
+        <TouchableWithoutFeedback
+          onPress={() => setBlockModalVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.modalCard}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>חסימת משתמש</Text>
+                </View>
+                <Text style={styles.modalSub}>
+                  ציין סיבה לחסימה. הסיבה תוצג למשתמש במסך החסימה.
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={blockReason}
+                  onChangeText={setBlockReason}
+                  placeholder="לדוגמה: דיווחים חוזרים על התנהגות בלתי הולמת"
+                  placeholderTextColor={Colors.textMuted}
+                  multiline
+                />
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.modalBtn, styles.modalBtnCancel]}
+                    onPress={() => setBlockModalVisible(false)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.modalBtnCancelText}>ביטול</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalBtn, styles.modalBtnConfirm]}
+                    onPress={handleBlockConfirm}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.modalBtnConfirmText}>אשר חסימה</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -388,17 +412,36 @@ const FieldRow: React.FC<{
   value: string;
   mono?: boolean;
   ltr?: boolean;
-}> = ({ label, value, mono, ltr }) => (
+  onPress?: () => void;
+}> = ({ label, value, mono, ltr, onPress }) => (
   <View style={styles.fRow}>
-    <Text
-      style={[
-        styles.fValue,
-        mono && { fontFamily: 'monospace' },
-        ltr && { writingDirection: 'ltr' },
-      ]}
-    >
-      {value}
-    </Text>
+    {onPress ? (
+      <TouchableOpacity
+        onPress={onPress}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Text
+          style={[
+            styles.fValue,
+            { color: Colors.primary, textDecorationLine: 'underline' },
+            mono && { fontFamily: 'monospace' },
+            ltr && { writingDirection: 'ltr' },
+          ]}
+        >
+          {value}
+        </Text>
+      </TouchableOpacity>
+    ) : (
+      <Text
+        style={[
+          styles.fValue,
+          mono && { fontFamily: 'monospace' },
+          ltr && { writingDirection: 'ltr' },
+        ]}
+      >
+        {value}
+      </Text>
+    )}
     <Text style={styles.fLabel}>{label}</Text>
   </View>
 );

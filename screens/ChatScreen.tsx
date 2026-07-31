@@ -53,10 +53,10 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
 
   const handleSend = () => {
     if (!draft.trim()) return;
-    setDraft('');
     Alert.alert(
       'מצב הדגמה',
-      'שליחת הודעות תופעל לאחר חיבור ה-Backend. הצ\'אט מוצג כעת לתצוגה בלבד.'
+      'שליחת הודעות תופעל לאחר חיבור ה-Backend. הצ\'אט מוצג כעת לתצוגה בלבד.',
+      [{ text: 'הבנתי', onPress: () => setDraft('') }]
     );
   };
 
@@ -66,7 +66,7 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={[styles.headerBar, { paddingTop: insets.top + Spacing.sm }]}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
@@ -100,6 +100,19 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
         contentContainerStyle={styles.messagesContainer}
         showsVerticalScrollIndicator={false}
       >
+        {conversation.messages.length === 0 && (
+          <View style={styles.emptyChat}>
+            <Ionicons
+              name="chatbubbles-outline"
+              size={48}
+              color={Colors.textMuted}
+            />
+            <Text style={styles.emptyChatText}>עדיין אין הודעות בשיחה</Text>
+            <Text style={styles.emptyChatSub}>
+              כתוב הודעה כדי להתחיל את השיחה
+            </Text>
+          </View>
+        )}
         {conversation.messages.map((m, idx) => {
           // For demo, treat the participant as the "other" and any message
           // sender that's not the current user as theirs.
@@ -218,6 +231,23 @@ const styles = StyleSheet.create({
   messagesContainer: {
     padding: Spacing.lg,
     gap: 8,
+  },
+  emptyChat: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    gap: 8,
+  },
+  emptyChatText: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+  },
+  emptyChatSub: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    writingDirection: 'rtl',
   },
   dateBadge: {
     alignSelf: 'center',

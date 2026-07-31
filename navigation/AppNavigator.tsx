@@ -16,6 +16,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  BackHandler,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -145,12 +146,43 @@ type AdminTab =
 const AppNavigator: React.FC = () => {
   const { currentUser, logout } = useApp();
 
-  const [route, setRoute] = useState<Route | null>(null); // null = on a tab
+  // History stack for the post-login drilldown area — the last entry is the
+  // active screen; popping it (goBack) reveals whatever the user actually
+  // came from instead of always bouncing to the tab root or a hardcoded
+  // screen. Pre-login auth screens use `resetTo`, which behaves exactly like
+  // the old single-value `setRoute` (always a 1-item stack), so that flow is
+  // unchanged.
+  const [routeStack, setRouteStack] = useState<Route[]>([]);
+  const route = routeStack.length > 0 ? routeStack[routeStack.length - 1] : null;
   const [home, setHome] = useState<RoleHome | null>(null);
   const [workerTab, setWorkerTab] = useState<WorkerTab>('dashboard');
   const [contractorTab, setContractorTab] =
     useState<ContractorTab>('dashboard');
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
+
+  // ---- Route-stack helpers ----------------------------------------------------
+
+  // Drill deeper — back will return to the screen we came from.
+  const push = useCallback((r: Route) => {
+    setRouteStack((prev) => [...prev, r]);
+  }, []);
+
+  // Replace the current screen (e.g. after a submit) — back skips the
+  // now-irrelevant form/source screen and returns to whatever was before it.
+  const replaceTop = useCallback((r: Route) => {
+    setRouteStack((prev) => (prev.length > 0 ? [...prev.slice(0, -1), r] : [r]));
+  }, []);
+
+  // Pop one screen off the stack (real "back").
+  const goBack = useCallback(() => {
+    setRouteStack((prev) => prev.slice(0, -1));
+  }, []);
+
+  // Reset the whole stack — used for auth-flow transitions and for leaving a
+  // drilldown back to the tab root (r === null).
+  const resetTo = useCallback((r: Route | null) => {
+    setRouteStack(r ? [r] : []);
+  }, []);
 
   // Auth fallback: when currentUser changes, route into the correct shell
   useEffect(() => {
@@ -158,21 +190,21 @@ const AppNavigator: React.FC = () => {
       // logged out — only push to Welcome if we're already past Splash/auth
       if (home !== null) {
         setHome(null);
-        setRoute({ name: 'Welcome' });
+        resetTo({ name: 'Welcome' });
       }
       return;
     }
     if (currentUser.role === 'admin') {
       setHome({ kind: 'admin' });
-      setRoute(null);
+      resetTo(null);
       setAdminTab('dashboard');
     } else if (currentUser.role === 'contractor') {
       setHome({ kind: 'contractor' });
-      setRoute(null);
+      resetTo(null);
       setContractorTab('dashboard');
     } else if (currentUser.role === 'worker') {
       setHome({ kind: 'worker' });
-      setRoute(null);
+      resetTo(null);
       setWorkerTab('dashboard');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -181,17 +213,32 @@ const AppNavigator: React.FC = () => {
   // Initial route = Splash (kicks off the app)
   useEffect(() => {
     if (route === null && home === null) {
-      setRoute({ name: 'Splash' });
+      resetTo({ name: 'Splash' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Android hardware back button: pop the drilldown stack while inside a
+  // logged-in role's area, matching the on-screen back arrow. Pre-login
+  // auth screens keep relying on their own onBack (goWelcome etc.), and at
+  // the tab root (empty stack) we let the OS handle it (default behavior).
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (home !== null && routeStack.length > 0) {
+        setRouteStack((prev) => prev.slice(0, -1));
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [home, routeStack.length]);
 
   // ---- Helpers ----------------------------------------------------------------
 
   const goWelcome = useCallback(() => {
     setHome(null);
-    setRoute({ name: 'Welcome' });
-  }, []);
+    resetTo({ name: 'Welcome' });
+  }, [resetTo]);
 
   const handleLogout = useCallback(() => {
     logout();
@@ -204,17 +251,17 @@ const AppNavigator: React.FC = () => {
       return;
     }
     if (r.reason === 'pending' && r.registration) {
-      setRoute({
+      resetTo({
         name: 'RegistrationPending',
         registrationId: r.registration.id,
       });
     } else if (r.reason === 'rejected' && r.registration) {
-      setRoute({
+      resetTo({
         name: 'RegistrationRejected',
         registrationId: r.registration.id,
       });
     } else if (r.reason === 'blocked' && r.user) {
-      setRoute({
+      resetTo({
         name: 'BlockedAccount',
         userOrRegistrationId: r.user.id,
       });
@@ -231,7 +278,7 @@ const AppNavigator: React.FC = () => {
         case 'job_request':
           // Contractor: open the job (its details show candidates)
           if (role === 'contractor' && relatedId)
-            setRoute({ name: 'ContractorJobDetails', jobId: relatedId });
+            push({ name: 'ContractorJobDetails', jobId: relatedId });
           break;
         case 'application_accepted':
         case 'application_rejected':
@@ -239,38 +286,44 @@ const AppNavigator: React.FC = () => {
         case 'job_rejected':
           // Worker: open MyApplications (relatedId = applicationId, not used directly)
           if (role === 'worker') setWorkerTab('my-applications');
-          setRoute(null);
+          resetTo(null);
           break;
         case 'invitation_received':
           // Worker: open invitations list
-          if (role === 'worker') setRoute({ name: 'WorkerInvitations' });
+          if (role === 'worker') push({ name: 'WorkerInvitations' });
           break;
         case 'invitation_accepted':
         case 'invitation_declined':
           // Contractor: open sent invitations
           if (role === 'contractor')
-            setRoute({ name: 'ContractorSentInvitations' });
+            push({ name: 'ContractorSentInvitations' });
           break;
         case 'new_message':
-          setRoute({ name: 'Messages' });
+          push({ name: 'Messages' });
           break;
         case 'support_response':
           if (relatedId)
-            setRoute({ name: 'SupportTicketDetails', ticketId: relatedId });
-          else setRoute({ name: 'SupportTickets' });
+            push({ name: 'SupportTicketDetails', ticketId: relatedId });
+          else push({ name: 'SupportTickets' });
           break;
         case 'new_pending_registration':
-          if (role === 'admin' && relatedId)
-            setRoute({
+          if (role === 'admin' && relatedId) {
+            push({
               name: 'AdminRegistrationDetails',
               registrationId: relatedId,
             });
-          else if (role === 'admin') setAdminTab('pending-registrations');
+          } else if (role === 'admin') {
+            setAdminTab('pending-registrations');
+            resetTo(null);
+          }
           break;
         case 'new_support_ticket':
-          if (role === 'admin' && relatedId)
-            setRoute({ name: 'SupportTicketDetails', ticketId: relatedId });
-          else if (role === 'admin') setAdminTab('support-tickets');
+          if (role === 'admin' && relatedId) {
+            push({ name: 'SupportTicketDetails', ticketId: relatedId });
+          } else if (role === 'admin') {
+            setAdminTab('support-tickets');
+            resetTo(null);
+          }
           break;
         case 'registration_approved':
         case 'registration_rejected':
@@ -280,24 +333,24 @@ const AppNavigator: React.FC = () => {
         case 'system':
         default:
           // Default: just dismiss the notifications screen
-          setRoute(null);
+          resetTo(null);
           break;
       }
     },
-    [currentUser]
+    [currentUser, push, resetTo]
   );
 
   // ---- Auth/status screens --------------------------------------------------
 
   if (route?.name === 'Splash') {
-    return <SplashScreen onFinish={() => setRoute({ name: 'Welcome' })} />;
+    return <SplashScreen onFinish={() => resetTo({ name: 'Welcome' })} />;
   }
   if (route?.name === 'Welcome') {
     return (
       <WelcomeScreen
-        onLogin={(role) => setRoute({ name: 'Login', role })}
-        onSignUp={(role) => setRoute({ name: 'SignUp', role })}
-        onAdminLogin={() => setRoute({ name: 'AdminLogin' })}
+        onLogin={(role) => resetTo({ name: 'Login', role })}
+        onSignUp={(role) => resetTo({ name: 'SignUp', role })}
+        onAdminLogin={() => resetTo({ name: 'AdminLogin' })}
       />
     );
   }
@@ -307,7 +360,7 @@ const AppNavigator: React.FC = () => {
         role={route.role}
         onLoginResult={handleLoginResult}
         onBack={goWelcome}
-        onGoSignUp={() => setRoute({ name: 'SignUp', role: route.role })}
+        onGoSignUp={() => resetTo({ name: 'SignUp', role: route.role })}
       />
     );
   }
@@ -316,10 +369,10 @@ const AppNavigator: React.FC = () => {
       <SignUpScreen
         role={route.role}
         onRegistered={(registrationId) =>
-          setRoute({ name: 'RegistrationPending', registrationId })
+          resetTo({ name: 'RegistrationPending', registrationId })
         }
         onBack={goWelcome}
-        onGoLogin={() => setRoute({ name: 'Login', role: route.role })}
+        onGoLogin={() => resetTo({ name: 'Login', role: route.role })}
       />
     );
   }
@@ -366,7 +419,7 @@ const AppNavigator: React.FC = () => {
         return (
           <JobDetailsScreen
             jobId={route.jobId}
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenWorkerProfile={() => {
               /* worker viewing job — N/A */
             }}
@@ -378,33 +431,33 @@ const AppNavigator: React.FC = () => {
       case 'WorkerInvitations':
         return (
           <WorkerInvitationsScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenJobDetails={(jobId) =>
-              setRoute({ name: 'WorkerJobDetails', jobId })
+              push({ name: 'WorkerJobDetails', jobId })
             }
           />
         );
       case 'WorkerMyAssignments':
         return (
           <MyAssignmentsScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenJobDetails={(jobId) =>
-              setRoute({ name: 'WorkerJobDetails', jobId })
+              push({ name: 'WorkerJobDetails', jobId })
             }
           />
         );
       case 'WorkerAvailability':
-        return <AvailabilityManagementScreen onBack={() => setRoute(null)} />;
+        return <AvailabilityManagementScreen onBack={goBack} />;
       case 'WorkerProfileEdit':
-        return <WorkerProfileEditScreen onBack={() => setRoute(null)} />;
+        return <WorkerProfileEditScreen onBack={goBack} />;
 
       // Contractor
       case 'ContractorPostJob':
         return (
           <PostJobScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onPosted={(jobId) =>
-              setRoute({ name: 'ContractorJobDetails', jobId })
+              replaceTop({ name: 'ContractorJobDetails', jobId })
             }
           />
         );
@@ -412,24 +465,24 @@ const AppNavigator: React.FC = () => {
         return (
           <JobDetailsScreen
             jobId={route.jobId}
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenWorkerProfile={(workerId) =>
-              setRoute({ name: 'ContractorWorkerProfile', workerId })
+              push({ name: 'ContractorWorkerProfile', workerId })
             }
             onOpenSmartMatchForJob={(jobId) =>
-              setRoute({ name: 'ContractorSmartMatch', initialJobId: jobId })
+              push({ name: 'ContractorSmartMatch', initialJobId: jobId })
             }
             onOpenSentInvitations={() =>
-              setRoute({ name: 'ContractorSentInvitations' })
+              push({ name: 'ContractorSentInvitations' })
             }
           />
         );
       case 'ContractorSearchWorkers':
         return (
           <SearchWorkersScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenWorkerProfile={(workerId) =>
-              setRoute({ name: 'ContractorWorkerProfile', workerId })
+              push({ name: 'ContractorWorkerProfile', workerId })
             }
           />
         );
@@ -437,9 +490,9 @@ const AppNavigator: React.FC = () => {
         return (
           <WorkerProfileScreen
             workerId={route.workerId}
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenJobDetails={(jobId) =>
-              setRoute({ name: 'ContractorJobDetails', jobId })
+              push({ name: 'ContractorJobDetails', jobId })
             }
           />
         );
@@ -447,24 +500,24 @@ const AppNavigator: React.FC = () => {
         return (
           <SmartMatchScreen
             initialJobId={route.initialJobId}
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenWorkerProfile={(workerId) =>
-              setRoute({ name: 'ContractorWorkerProfile', workerId })
+              push({ name: 'ContractorWorkerProfile', workerId })
             }
             onOpenJobDetails={(jobId) =>
-              setRoute({ name: 'ContractorJobDetails', jobId })
+              push({ name: 'ContractorJobDetails', jobId })
             }
           />
         );
       case 'ContractorSentInvitations':
         return (
           <SentInvitationsScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenWorkerProfile={(workerId) =>
-              setRoute({ name: 'ContractorWorkerProfile', workerId })
+              push({ name: 'ContractorWorkerProfile', workerId })
             }
             onOpenJobDetails={(jobId) =>
-              setRoute({ name: 'ContractorJobDetails', jobId })
+              push({ name: 'ContractorJobDetails', jobId })
             }
           />
         );
@@ -474,14 +527,14 @@ const AppNavigator: React.FC = () => {
         return (
           <RegistrationDetailsScreen
             registrationId={route.registrationId}
-            onBack={() => setRoute(null)}
+            onBack={goBack}
           />
         );
       case 'AdminUserDetails':
         return (
           <AdminUserDetailsScreen
             userId={route.userId}
-            onBack={() => setRoute(null)}
+            onBack={goBack}
           />
         );
 
@@ -489,9 +542,9 @@ const AppNavigator: React.FC = () => {
       case 'Messages':
         return (
           <MessagesScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenConversation={(conversationId) =>
-              setRoute({ name: 'Chat', conversationId })
+              push({ name: 'Chat', conversationId })
             }
           />
         );
@@ -499,26 +552,26 @@ const AppNavigator: React.FC = () => {
         return (
           <ChatScreen
             conversationId={route.conversationId}
-            onBack={() => setRoute({ name: 'Messages' })}
+            onBack={goBack}
           />
         );
       case 'Notifications':
         return (
           <NotificationsScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onNavigate={navigateFromNotification}
           />
         );
       case 'SupportTickets':
         return (
           <SupportTicketsScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onOpenTicket={(ticketId) =>
-              setRoute({ name: 'SupportTicketDetails', ticketId })
+              push({ name: 'SupportTicketDetails', ticketId })
             }
             onOpenNewTicket={
               currentUser.role !== 'admin'
-                ? () => setRoute({ name: 'OpenSupportTicket' })
+                ? () => push({ name: 'OpenSupportTicket' })
                 : undefined
             }
           />
@@ -527,25 +580,25 @@ const AppNavigator: React.FC = () => {
         return (
           <SupportTicketDetailsScreen
             ticketId={route.ticketId}
-            onBack={() => setRoute({ name: 'SupportTickets' })}
+            onBack={goBack}
           />
         );
       case 'OpenSupportTicket':
         return (
           <OpenSupportTicketScreen
-            onBack={() => setRoute({ name: 'SupportTickets' })}
+            onBack={goBack}
             onSubmitted={(ticketId) =>
-              setRoute({ name: 'SupportTicketDetails', ticketId })
+              replaceTop({ name: 'SupportTicketDetails', ticketId })
             }
           />
         );
       case 'Settings':
         return (
           <SettingsScreen
-            onBack={() => setRoute(null)}
+            onBack={goBack}
             onEditProfile={
               currentUser.role === 'worker'
-                ? () => setRoute({ name: 'WorkerProfileEdit' })
+                ? () => push({ name: 'WorkerProfileEdit' })
                 : undefined
             }
             onLogout={handleLogout}
@@ -561,7 +614,7 @@ const AppNavigator: React.FC = () => {
       <WorkerHome
         tab={workerTab}
         setTab={setWorkerTab}
-        navigate={setRoute}
+        navigate={push}
         onLogout={handleLogout}
       />
     );
@@ -571,7 +624,7 @@ const AppNavigator: React.FC = () => {
       <ContractorHome
         tab={contractorTab}
         setTab={setContractorTab}
-        navigate={setRoute}
+        navigate={push}
         onLogout={handleLogout}
       />
     );
@@ -581,7 +634,7 @@ const AppNavigator: React.FC = () => {
       <AdminHome
         tab={adminTab}
         setTab={setAdminTab}
-        navigate={setRoute}
+        navigate={push}
         onLogout={handleLogout}
       />
     );

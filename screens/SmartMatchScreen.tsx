@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   Alert,
 } from 'react-native';
@@ -79,27 +80,24 @@ const SmartMatchScreen: React.FC<Props> = ({
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>התאמה חכמה</Text>
       </View>
 
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 60 }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Intro */}
-        <View style={styles.intro}>
-          <Ionicons name="sparkles" size={20} color={Colors.primary} />
-          <Text style={styles.introText}>
-            המערכת מדרגת עובדים מאושרים על פי מקצוע, מיקום, זמינות
-            והסמכות.
-          </Text>
-        </View>
-
-        {/* Job picker */}
-        {myOpenJobs.length === 0 ? (
+      {myOpenJobs.length === 0 ? (
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 60 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.intro}>
+            <Ionicons name="sparkles" size={20} color={Colors.primary} />
+            <Text style={styles.introText}>
+              המערכת מדרגת עובדים מאושרים על פי מקצוע, מיקום, זמינות
+              והסמכות.
+            </Text>
+          </View>
           <View style={styles.emptyWrap}>
             <Ionicons
               name="briefcase-outline"
@@ -111,93 +109,103 @@ const SmartMatchScreen: React.FC<Props> = ({
               פרסם משרה חדשה כדי להפעיל התאמה חכמה.
             </Text>
           </View>
-        ) : (
-          <>
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>בחר משרה</Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.jobChipRow}
-            >
-              {myOpenJobs.map((j) => {
-                const active = j.id === selectedJobId;
-                return (
-                  <TouchableOpacity
-                    key={j.id}
-                    style={[styles.jobChip, active && styles.jobChipActive]}
-                    onPress={() => setSelectedJobId(j.id)}
-                    activeOpacity={0.85}
-                  >
-                    <Text
-                      style={[
-                        styles.jobChipTitle,
-                        active && styles.jobChipTitleActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {j.title}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.jobChipMeta,
-                        active && styles.jobChipMetaActive,
-                      ]}
-                    >
-                      {j.profession} · {j.city}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            {selectedJob && (
-              <TouchableOpacity
-                style={styles.jobDetailsLink}
-                onPress={() => onOpenJobDetails(selectedJob.id)}
-                activeOpacity={0.85}
-              >
-                <Ionicons
-                  name="information-circle-outline"
-                  size={16}
-                  color={Colors.secondary}
-                />
-                <Text style={styles.jobDetailsLinkText}>
-                  הצג פרטי משרה
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Ranked list */}
-            <View style={styles.sectionHead}>
-              <Text style={styles.sectionTitle}>
-                {ranked.length} מועמדים מתאימים
-              </Text>
-            </View>
-
-            {ranked.length === 0 ? (
-              <View style={styles.empty}>
-                <Text style={styles.emptyText}>
-                  אין עובדים מתאימים כרגע. נסה משרה אחרת.
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={ranked}
+          keyExtractor={(m) => m.worker.id}
+          contentContainerStyle={{ paddingBottom: 60 }}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <>
+              <View style={styles.intro}>
+                <Ionicons name="sparkles" size={20} color={Colors.primary} />
+                <Text style={styles.introText}>
+                  המערכת מדרגת עובדים מאושרים על פי מקצוע, מיקום, זמינות
+                  והסמכות.
                 </Text>
               </View>
-            ) : (
-              ranked.map((m) => (
-                <MatchCard
-                  key={m.worker.id}
-                  match={m}
-                  invited={invitedWorkerIds.has(m.worker.id)}
-                  onPressWorker={() => onOpenWorkerProfile(m.worker.id)}
-                  onInvite={() =>
-                    handleInvite(m.worker.id, m.worker.fullName)
-                  }
-                />
-              ))
-            )}
-          </>
-        )}
-      </ScrollView>
+
+              <View style={styles.sectionHead}>
+                <Text style={styles.sectionTitle}>בחר משרה</Text>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.jobChipRow}
+              >
+                {myOpenJobs.map((j) => {
+                  const active = j.id === selectedJobId;
+                  return (
+                    <TouchableOpacity
+                      key={j.id}
+                      style={[styles.jobChip, active && styles.jobChipActive]}
+                      onPress={() => setSelectedJobId(j.id)}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.jobChipTitle,
+                          active && styles.jobChipTitleActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {j.title}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.jobChipMeta,
+                          active && styles.jobChipMetaActive,
+                        ]}
+                      >
+                        {j.profession} · {j.city}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {selectedJob && (
+                <TouchableOpacity
+                  style={styles.jobDetailsLink}
+                  onPress={() => onOpenJobDetails(selectedJob.id)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={16}
+                    color={Colors.secondary}
+                  />
+                  <Text style={styles.jobDetailsLinkText}>
+                    הצג פרטי משרה
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <View style={styles.sectionHead}>
+                <Text style={styles.sectionTitle}>
+                  {ranked.length} מועמדים מתאימים
+                </Text>
+              </View>
+            </>
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyText}>
+                אין עובדים מתאימים כרגע. נסה משרה אחרת.
+              </Text>
+            </View>
+          }
+          renderItem={({ item: m }) => (
+            <MatchCard
+              match={m}
+              invited={invitedWorkerIds.has(m.worker.id)}
+              onPressWorker={() => onOpenWorkerProfile(m.worker.id)}
+              onInvite={() => handleInvite(m.worker.id, m.worker.fullName)}
+            />
+          )}
+        />
+      )}
     </View>
   );
 };
@@ -364,7 +372,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: Radius.md,
     borderWidth: 1.5,
-    borderColor: Colors.border,
+    borderColor: Colors.textMuted,
     backgroundColor: Colors.white,
     minWidth: 180,
     alignItems: 'flex-end',

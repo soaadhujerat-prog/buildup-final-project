@@ -12,7 +12,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import {
+  Colors,
+  Spacing,
+  Radius,
+  FontSize,
+  Shadow,
+  FilterChip as FC,
+} from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { AREAS_ISRAEL } from '../data/mockData';
 import { Worker } from '../types';
@@ -49,16 +56,28 @@ const AvailabilityManagementScreen: React.FC<Props> = ({ onBack }) => {
     );
   };
 
+  const [submitting, setSubmitting] = useState(false);
+
   const handleSave = () => {
+    if (submitting) return;
     if (preferredAreas.length === 0) {
       Alert.alert('שגיאה', 'יש לבחור לפחות אזור עבודה אחד');
       return;
     }
+    if (
+      availableFrom.trim() &&
+      !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(availableFrom.trim())
+    ) {
+      Alert.alert('שגיאה', 'תאריך זמינות חייב להיות בפורמט DD/MM/YYYY');
+      return;
+    }
+    setSubmitting(true);
     setWorkerAvailability(me.id, isAvailable);
     updateWorkerProfile(me.id, {
       availableFrom: availableFrom.trim() || undefined,
       preferredAreas,
     });
+    setSubmitting(false);
     Alert.alert('נשמר', 'ההגדרות עודכנו בהצלחה.', [
       { text: 'אישור', onPress: onBack },
     ]);
@@ -67,7 +86,7 @@ const AvailabilityManagementScreen: React.FC<Props> = ({ onBack }) => {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>ניהול זמינות</Text>
@@ -107,6 +126,7 @@ const AvailabilityManagementScreen: React.FC<Props> = ({ onBack }) => {
             onChangeText={setAvailableFrom}
             placeholder="DD/MM/YYYY"
             placeholderTextColor={Colors.textMuted}
+            keyboardType="numbers-and-punctuation"
           />
         </Section>
 
@@ -156,11 +176,14 @@ const AvailabilityManagementScreen: React.FC<Props> = ({ onBack }) => {
         </View>
 
         <TouchableOpacity
-          style={styles.saveBtn}
+          style={[styles.saveBtn, submitting && { opacity: 0.7 }]}
           onPress={handleSave}
           activeOpacity={0.85}
+          disabled={submitting}
         >
-          <Text style={styles.saveText}>שמור שינויים</Text>
+          <Text style={styles.saveText}>
+            {submitting ? 'שומר...' : 'שמור שינויים'}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -266,7 +289,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     color: Colors.text,
     textAlign: 'right',
-    writingDirection: 'rtl',
+    writingDirection: 'ltr',
   },
 
   areaGrid: {
@@ -277,12 +300,13 @@ const styles = StyleSheet.create({
   areaChip: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: Radius.full,
+    height: FC.height,
+    paddingHorizontal: FC.paddingHorizontal,
+    borderRadius: FC.borderRadius,
     backgroundColor: Colors.gray50,
-    borderWidth: 1.5,
+    borderWidth: FC.borderWidth,
     borderColor: 'transparent',
   },
   areaChipActive: {

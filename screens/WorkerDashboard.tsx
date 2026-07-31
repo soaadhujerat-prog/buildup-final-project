@@ -188,7 +188,11 @@ const WorkerDashboard: React.FC<Props> = ({
               thumbColor={Colors.white}
             />
             <View style={{ flex: 1 }}>
-              <TouchableOpacity onPress={onOpenAvailability}>
+              <TouchableOpacity
+                onPress={onOpenAvailability}
+                style={{ flex: 1, paddingVertical: 6 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Text style={styles.availTitle}>
                   {me.isAvailable ? 'זמין לעבודה' : 'לא זמין כרגע'}
                 </Text>
@@ -431,12 +435,12 @@ const SectionHeader: React.FC<{
   onAction?: () => void;
 }> = ({ title, actionLabel, onAction }) => (
   <View style={styles.sectionHead}>
+    <Text style={styles.sectionTitle}>{title}</Text>
     {actionLabel && (
       <TouchableOpacity onPress={onAction} activeOpacity={0.7}>
         <Text style={styles.sectionAction}>{actionLabel}</Text>
       </TouchableOpacity>
     )}
-    <Text style={styles.sectionTitle}>{title}</Text>
   </View>
 );
 

@@ -52,7 +52,7 @@ const SettingsScreen: React.FC<Props> = ({
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>הגדרות</Text>
@@ -144,13 +144,13 @@ const SettingsScreen: React.FC<Props> = ({
         <Row
           icon="document-text-outline"
           label="תנאי שימוש"
-          value="—"
+          value="בקרוב"
           readOnly
         />
         <Row
           icon="shield-checkmark-outline"
           label="מדיניות פרטיות"
-          value="—"
+          value="בקרוב"
           readOnly
         />
 

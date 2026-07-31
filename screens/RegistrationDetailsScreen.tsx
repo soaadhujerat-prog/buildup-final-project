@@ -5,9 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   TextInput,
   Modal,
   Alert,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -68,7 +70,9 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           style: 'default',
           onPress: () => {
             approveRegistration(reg.id, currentUser?.id ?? 'adm1');
-            onBack();
+            Alert.alert('הרישום אושר', `${data.fullName} אושר/ה בהצלחה.`, [
+              { text: 'אישור', onPress: onBack },
+            ]);
           },
         },
       ]
@@ -80,15 +84,34 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
       Alert.alert('שגיאה', 'יש לציין סיבת דחייה');
       return;
     }
-    rejectRegistration(reg.id, currentUser?.id ?? 'adm1', rejectReason.trim());
-    setRejectModalVisible(false);
-    onBack();
+    Alert.alert(
+      'דחיית רישום',
+      `האם לדחות את הרישום של ${data.fullName}?`,
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'דחה',
+          style: 'destructive',
+          onPress: () => {
+            rejectRegistration(
+              reg.id,
+              currentUser?.id ?? 'adm1',
+              rejectReason.trim()
+            );
+            setRejectModalVisible(false);
+            Alert.alert('הרישום נדחה', `הרישום של ${data.fullName} נדחה.`, [
+              { text: 'אישור', onPress: onBack },
+            ]);
+          },
+        },
+      ]
+    );
   };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>פרטי בקשת רישום</Text>
@@ -148,16 +171,19 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           )}
         </Section>
 
-        {/* ID photo placeholder — in production this will be the uploaded ID image */}
+        {/* Verification feature not built yet — shown clearly as unavailable, not as real data */}
         <Section title="צילום תעודת זהות">
           <View style={styles.idPhotoPlaceholder}>
-            <Ionicons name="card-outline" size={40} color={Colors.textMuted} />
-            <Text style={styles.idPhotoLabel}>צילום ת.ז שהועלה</Text>
-            <Text style={styles.idPhotoMeta}>
-              {data.idNumber} · {data.fullName}
-            </Text>
-            <Text style={styles.idPhotoNote}>
-              (Placeholder — backend העלאת קבצים יחובר בשלב הפיתוח הבא)
+            <Ionicons
+              name="cloud-upload-outline"
+              size={40}
+              color={Colors.textMuted}
+            />
+            <Text style={styles.idPhotoLabel}>העלאת מסמכים תתאפשר בקרוב</Text>
+            <Text
+              style={[styles.idPhotoMeta, { writingDirection: 'ltr' }]}
+            >
+              {data.idNumber}
             </Text>
           </View>
         </Section>
@@ -166,8 +192,18 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         <Section title="פרטים אישיים">
           <FieldRow label="שם מלא" value={data.fullName} />
           <FieldRow label="תעודת זהות" value={data.idNumber} mono ltr />
-          <FieldRow label="טלפון" value={data.phone} ltr />
-          <FieldRow label="אימייל" value={data.email} ltr />
+          <FieldRow
+            label="טלפון"
+            value={data.phone}
+            ltr
+            onPress={() => Linking.openURL(`tel:${data.phone}`)}
+          />
+          <FieldRow
+            label="אימייל"
+            value={data.email}
+            ltr
+            onPress={() => Linking.openURL(`mailto:${data.email}`)}
+          />
           <FieldRow label="עיר" value={data.city} />
         </Section>
 
@@ -272,40 +308,46 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         animationType="slide"
         onRequestClose={() => setRejectModalVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>דחיית רישום</Text>
-            </View>
-            <Text style={styles.modalSub}>
-              ציין סיבה ברורה. הסיבה תוצג למבקש במסך הסטטוס שלו.
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              value={rejectReason}
-              onChangeText={setRejectReason}
-              placeholder="לדוגמה: תעודת הזהות לא אומתה"
-              placeholderTextColor={Colors.textMuted}
-              multiline
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => setRejectModalVisible(false)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.modalBtnCancelText}>ביטול</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnConfirm]}
-                onPress={handleReject}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.modalBtnConfirmText}>שלח דחייה</Text>
-              </TouchableOpacity>
-            </View>
+        <TouchableWithoutFeedback
+          onPress={() => setRejectModalVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.modalCard}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>דחיית רישום</Text>
+                </View>
+                <Text style={styles.modalSub}>
+                  ציין סיבה ברורה. הסיבה תוצג למבקש במסך הסטטוס שלו.
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={rejectReason}
+                  onChangeText={setRejectReason}
+                  placeholder="לדוגמה: תעודת הזהות לא אומתה"
+                  placeholderTextColor={Colors.textMuted}
+                  multiline
+                />
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.modalBtn, styles.modalBtnCancel]}
+                    onPress={() => setRejectModalVisible(false)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.modalBtnCancelText}>ביטול</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalBtn, styles.modalBtnConfirm]}
+                    onPress={handleReject}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.modalBtnConfirmText}>שלח דחייה</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -361,17 +403,36 @@ const FieldRow: React.FC<{
   value: string;
   mono?: boolean;
   ltr?: boolean;
-}> = ({ label, value, mono, ltr }) => (
+  onPress?: () => void;
+}> = ({ label, value, mono, ltr, onPress }) => (
   <View style={styles.fRow}>
-    <Text
-      style={[
-        styles.fValue,
-        mono && { fontFamily: 'monospace' },
-        ltr && { writingDirection: 'ltr' },
-      ]}
-    >
-      {value}
-    </Text>
+    {onPress ? (
+      <TouchableOpacity
+        onPress={onPress}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Text
+          style={[
+            styles.fValue,
+            { color: Colors.primary, textDecorationLine: 'underline' },
+            mono && { fontFamily: 'monospace' },
+            ltr && { writingDirection: 'ltr' },
+          ]}
+        >
+          {value}
+        </Text>
+      </TouchableOpacity>
+    ) : (
+      <Text
+        style={[
+          styles.fValue,
+          mono && { fontFamily: 'monospace' },
+          ltr && { writingDirection: 'ltr' },
+        ]}
+      >
+        {value}
+      </Text>
+    )}
     <Text style={styles.fLabel}>{label}</Text>
   </View>
 );

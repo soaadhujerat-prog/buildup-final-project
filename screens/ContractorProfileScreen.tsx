@@ -43,11 +43,11 @@ const ContractorProfileScreen: React.FC<Props> = ({
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>הפרופיל שלי</Text>
-        <TouchableOpacity onPress={onOpenSettings} style={styles.settingsBtn}>
+        <TouchableOpacity onPress={onOpenSettings} style={styles.settingsBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="settings-outline" size={22} color={Colors.text} />
         </TouchableOpacity>
       </View>
@@ -107,19 +107,18 @@ const ContractorProfileScreen: React.FC<Props> = ({
         <TouchableOpacity
           style={styles.editBtn}
           onPress={() =>
-            Alert.alert(
-              'עריכת פרופיל',
-              'עריכת פרופיל מלאה תהיה זמינה בשלב הבא של הפיתוח. בינתיים ניתן לעדכן פרטים דרך הגדרות.'
-            )
+            Alert.alert('בקרוב', 'עריכת פרופיל קבלן תתאפשר בעדכון הבא.')
           }
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="עריכת פרופיל - בקרוב"
         >
           <Ionicons
             name="create-outline"
             size={18}
-            color={Colors.primary}
+            color={Colors.textMuted}
           />
-          <Text style={styles.editBtnText}>ערוך פרופיל</Text>
+          <Text style={styles.editBtnText}>ערוך פרופיל (בקרוב)</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -243,54 +242,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     writingDirection: 'rtl',
   },
-  heroBadges: { marginTop: 8 },
-  ratingChip: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#FEF3C7',
-    borderRadius: Radius.full,
-  },
-  ratingText: {
-    fontSize: FontSize.sm,
-    color: Colors.text,
-    fontWeight: '700',
-  },
-  noReviews: {
-    fontSize: FontSize.sm,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-  },
-
-  statsRow: {
-    flexDirection: 'row-reverse',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  statChip: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    backgroundColor: Colors.white,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    alignItems: 'flex-end',
-    gap: 4,
-    ...Shadow.small,
-  },
-  statValue: {
-    fontSize: FontSize.xxl,
-    fontWeight: '800',
-    color: Colors.text,
-  },
-  statLabel: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    writingDirection: 'rtl',
-  },
-
   section: {
     backgroundColor: Colors.white,
     borderRadius: Radius.md,
@@ -365,12 +316,12 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 14,
     borderRadius: Radius.full,
-    borderWidth: 2,
-    borderColor: Colors.primary,
+    borderWidth: 1,
+    borderColor: Colors.border,
     backgroundColor: Colors.white,
   },
   editBtnText: {
-    color: Colors.primary,
+    color: Colors.textMuted,
     fontSize: FontSize.md,
     fontWeight: '700',
     writingDirection: 'rtl',

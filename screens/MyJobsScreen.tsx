@@ -60,7 +60,7 @@ const MyJobsScreen: React.FC<Props> = ({
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>המשרות שלי</Text>
@@ -140,14 +140,16 @@ const MyJobsScreen: React.FC<Props> = ({
         />
       )}
 
-      <TouchableOpacity
-        style={[styles.fab, { bottom: insets.bottom + 16 }]}
-        onPress={onOpenPostJob}
-        activeOpacity={0.85}
-      >
-        <Ionicons name="add" size={26} color={Colors.white} />
-        <Text style={styles.fabText}>פרסם משרה</Text>
-      </TouchableOpacity>
+      {!(filtered.length === 0 && filter === 'all') && (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: insets.bottom + 16 }]}
+          onPress={onOpenPostJob}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={26} color={Colors.white} />
+          <Text style={styles.fabText}>פרסם משרה</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -273,7 +275,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: FC.paddingHorizontal,
     borderRadius: FC.borderRadius,
     borderWidth: FC.borderWidth,
-    borderColor: Colors.border,
+    borderColor: Colors.textMuted,
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',

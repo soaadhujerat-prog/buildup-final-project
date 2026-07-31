@@ -60,7 +60,7 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+          <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Ionicons name="chevron-forward" size={26} color={Colors.white} />
           </TouchableOpacity>
         </View>
@@ -109,6 +109,7 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
             <View style={styles.inputWrapper}>
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Ionicons
                   name={showPassword ? 'eye-off-outline' : 'eye-outline'}
@@ -147,16 +148,18 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.demoBox}>
-          <Ionicons
-            name="information-circle"
-            size={16}
-            color={Colors.textSecondary}
-          />
-          <Text style={styles.demoText}>
-            אב טיפוס: ניתן להתחבר עם ID 000000001 וסיסמה כלשהי.
-          </Text>
-        </View>
+        {__DEV__ && (
+          <View style={styles.demoBox}>
+            <Ionicons
+              name="information-circle"
+              size={16}
+              color={Colors.textSecondary}
+            />
+            <Text style={styles.demoText}>
+              אב טיפוס (dev בלבד): ניתן להתחבר עם ID 000000001 וסיסמה כלשהי.
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );

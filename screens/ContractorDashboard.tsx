@@ -422,12 +422,12 @@ const SectionHeader: React.FC<{
   onAction?: () => void;
 }> = ({ title, actionLabel, onAction }) => (
   <View style={styles.sectionHead}>
+    <Text style={styles.sectionTitle}>{title}</Text>
     {actionLabel && (
       <TouchableOpacity onPress={onAction} activeOpacity={0.7}>
         <Text style={styles.sectionAction}>{actionLabel}</Text>
       </TouchableOpacity>
     )}
-    <Text style={styles.sectionTitle}>{title}</Text>
   </View>
 );
 

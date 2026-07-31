@@ -133,6 +133,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     color: Colors.textSecondary,
     fontFamily: 'monospace',
+    writingDirection: 'ltr',
   },
 
   infoBox: {
