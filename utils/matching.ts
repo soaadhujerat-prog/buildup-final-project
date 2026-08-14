@@ -49,9 +49,9 @@ export const CITY_AREA: Record<string, string> = {
 export const areaOf = (city: string): string => CITY_AREA[city] ?? 'אחר';
 
 // ---------------------------------------------------------------------------
-// Weights (max points). Total = 100. Certifications are a bonus cap of 10
-// redistributed from profession/rating if needed — here we keep it tidy:
-//   profession 40 + location 25 + rating 20 + availability 15 = 100
+// Weights (max points). Total = 100. There is no rating factor — the app
+// has no real review mechanism for workers, so ranking never depends on it.
+//   profession 50 + location 30 + availability 20 = 100
 //   certifications: gates access (required certs missing => penalty), not
 //   extra points, so the 100-scale stays honest.
 // ---------------------------------------------------------------------------

@@ -3,12 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Job } from '../types';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
-import {
-  formatCurrency,
-  getJobStatusColor,
-  getJobStatusLabel,
-  formatShortDate,
-} from '../utils/helpers';
+import { formatCurrency, formatShortDate } from '../utils/helpers';
+import { getRegistrationStatus } from '../services/jobStatusService';
 
 interface JobCardProps {
   job: Job;
@@ -34,8 +30,10 @@ const JobCard: React.FC<JobCardProps> = ({
   isWorkerView = false,
   onApply,
 }) => {
-  const statusColor = getJobStatusColor(job.status);
-  const statusLabel = getJobStatusLabel(job.status);
+  const registrationStatus = getRegistrationStatus(job);
+  const statusColor =
+    registrationStatus.tone === 'success' ? Colors.success : Colors.info;
+  const statusLabel = registrationStatus.label;
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>

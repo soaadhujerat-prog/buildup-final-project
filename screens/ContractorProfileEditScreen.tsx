@@ -1,0 +1,390 @@
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import { useApp } from '../context/AppContext';
+import ChipInput from '../components/ChipInput';
+import { AREAS_ISRAEL, CITIES_ISRAEL } from '../data/mockData';
+import { Contractor } from '../types';
+
+interface Props {
+  onBack: () => void;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^0\d{8,9}$/;
+
+const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
+  const insets = useSafeAreaInsets();
+  const { currentUser, updateContractorProfile } = useApp();
+  const me = currentUser as Contractor | undefined;
+
+  const [fullName, setFullName] = useState(me?.fullName ?? '');
+  const [companyName, setCompanyName] = useState(me?.companyName ?? '');
+  const [phone, setPhone] = useState(me?.phone ?? '');
+  const [email, setEmail] = useState(me?.email ?? '');
+  const [regNumber, setRegNumber] = useState(
+    me?.contractorRegistrationNumber ?? ''
+  );
+  const [city, setCity] = useState(me?.city ?? 'תל אביב');
+  const [areaOfOperation, setAreaOfOperation] = useState(
+    me?.areaOfOperation ?? AREAS_ISRAEL[0]
+  );
+  const [projectTypes, setProjectTypes] = useState<string[]>(
+    me?.projectTypes ?? []
+  );
+  const [licenseDetails, setLicenseDetails] = useState(me?.licenseDetails ?? '');
+  const [bio, setBio] = useState(me?.bio ?? '');
+  const [submitting, setSubmitting] = useState(false);
+
+  const cityChoices = CITIES_ISRAEL.filter((c) => c !== 'כל הערים');
+
+  if (!me || me.role !== 'contractor') {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+        <Text style={styles.notFound}>אין משתמש פעיל</Text>
+      </View>
+    );
+  }
+
+  const handleSave = () => {
+    if (submitting) return;
+    if (!fullName.trim()) return Alert.alert('שגיאה', 'שם מלא חובה');
+    if (!companyName.trim()) return Alert.alert('שגיאה', 'שם החברה חובה');
+    if (!PHONE_RE.test(phone.trim()))
+      return Alert.alert('שגיאה', 'מספר טלפון לא תקין');
+    if (!EMAIL_RE.test(email.trim()))
+      return Alert.alert('שגיאה', 'כתובת אימייל לא תקינה');
+    if (!regNumber.trim())
+      return Alert.alert('שגיאה', 'מספר רישום קבלנים חובה');
+    if (!licenseDetails.trim())
+      return Alert.alert('שגיאה', 'פרטי רישיון חובה');
+    if (projectTypes.length === 0)
+      return Alert.alert('שגיאה', 'יש להוסיף לפחות סוג פרויקט אחד');
+
+    setSubmitting(true);
+    try {
+      updateContractorProfile(me.id, {
+        fullName: fullName.trim(),
+        companyName: companyName.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        contractorRegistrationNumber: regNumber.trim(),
+        city,
+        areaOfOperation,
+        projectTypes,
+        licenseDetails: licenseDetails.trim(),
+        bio: bio.trim(),
+      });
+      Alert.alert('נשמר', 'הפרופיל שלך עודכן בהצלחה.', [
+        { text: 'אישור', onPress: onBack },
+      ]);
+    } catch {
+      Alert.alert('שגיאה', 'שמירת הפרופיל נכשלה. נסה שוב.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <View style={[styles.headerBar, { paddingTop: insets.top + Spacing.sm }]}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={styles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="chevron-forward" size={26} color={Colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>עריכת פרופיל</Text>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 60 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Section title="פרטים אישיים">
+          <Field label="שם מלא" value={fullName} onChange={setFullName} />
+          <Field
+            label="שם החברה"
+            value={companyName}
+            onChange={setCompanyName}
+          />
+        </Section>
+
+        <Section title="פרטי קשר">
+          <Field
+            label="טלפון"
+            value={phone}
+            onChange={setPhone}
+            keyboardType="phone-pad"
+            ltr
+          />
+          <Field
+            label="אימייל"
+            value={email}
+            onChange={setEmail}
+            keyboardType="email-address"
+            ltr
+          />
+          <Picker
+            label="עיר"
+            value={city}
+            options={cityChoices}
+            onChange={setCity}
+          />
+        </Section>
+
+        <Section title="פרטי הקבלנות">
+          <Field
+            label="מספר רישום קבלנים"
+            value={regNumber}
+            onChange={setRegNumber}
+            keyboardType="numeric"
+            ltr
+          />
+          <Field
+            label="פרטי רישיון / סיווג"
+            value={licenseDetails}
+            onChange={setLicenseDetails}
+          />
+          <Picker
+            label="אזור פעילות"
+            value={areaOfOperation}
+            options={AREAS_ISRAEL}
+            onChange={setAreaOfOperation}
+          />
+          <ChipInput
+            label="סוגי פרויקטים"
+            values={projectTypes}
+            onChange={setProjectTypes}
+            placeholder="הוסף סוג פרויקט..."
+          />
+        </Section>
+
+        <Section title="אודות">
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>תיאור קצר על החברה</Text>
+            </View>
+            <TextInput
+              style={[styles.input, styles.textarea]}
+              value={bio}
+              onChangeText={setBio}
+              placeholder="ספר/י על החברה, תחומי התמחות, ניסיון..."
+              placeholderTextColor={Colors.textMuted}
+              multiline
+            />
+          </View>
+        </Section>
+
+        <TouchableOpacity
+          style={[styles.saveBtn, submitting && { opacity: 0.7 }]}
+          onPress={handleSave}
+          activeOpacity={0.85}
+          disabled={submitting}
+        >
+          <Text style={styles.saveText}>
+            {submitting ? 'שומר...' : 'שמור שינויים'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};
+
+// ---------- subcomponents ----------
+
+const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
+  title,
+  children,
+}) => (
+  <View style={styles.section}>
+    <View style={styles.sectionHead}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+    <View style={styles.sectionBody}>{children}</View>
+  </View>
+);
+
+const Field: React.FC<{
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  keyboardType?: 'default' | 'numeric' | 'phone-pad' | 'email-address';
+  ltr?: boolean;
+}> = ({ label, value, onChange, keyboardType = 'default', ltr }) => (
+  <View style={styles.inputGroup}>
+    <View style={styles.labelRow}>
+      <Text style={styles.label}>{label}</Text>
+    </View>
+    <TextInput
+      style={[styles.input, ltr && { textAlign: 'left', writingDirection: 'ltr' }]}
+      value={value}
+      onChangeText={onChange}
+      keyboardType={keyboardType}
+      autoCapitalize="none"
+      placeholderTextColor={Colors.textMuted}
+    />
+  </View>
+);
+
+const Picker: React.FC<{
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+}> = ({ label, value, options, onChange }) => (
+  <View style={styles.inputGroup}>
+    <View style={styles.labelRow}>
+      <Text style={styles.label}>{label}</Text>
+    </View>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.chipRow}
+    >
+      {options.map((o) => {
+        const active = o === value;
+        return (
+          <TouchableOpacity
+            key={o}
+            onPress={() => onChange(o)}
+            style={[styles.chip, active && styles.chipActive]}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.chipText, active && styles.chipTextActive]}>
+              {o}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  </View>
+);
+
+// ---------- styles ----------
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.background },
+
+  headerBar: {
+    position: 'relative',
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
+    backgroundColor: Colors.white,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  backBtn: {
+    position: 'absolute',
+    right: Spacing.lg,
+    bottom: Spacing.md,
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.text,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+
+  notFound: {
+    fontSize: FontSize.lg,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginTop: 60,
+  },
+
+  section: {
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    ...Shadow.small,
+  },
+  sectionHead: { width: '100%', alignItems: 'flex-end', marginBottom: 8 },
+  sectionTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+  sectionBody: { gap: Spacing.md },
+
+  inputGroup: { width: '100%', gap: 6 },
+  labelRow: { width: '100%', alignItems: 'flex-end' },
+  label: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: Colors.text,
+    writingDirection: 'rtl',
+  },
+  input: {
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.gray50,
+    padding: Spacing.md,
+    fontSize: FontSize.md,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  textarea: { minHeight: 110, textAlignVertical: 'top' },
+
+  chipRow: { flexDirection: 'row-reverse', gap: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.textMuted,
+    backgroundColor: Colors.white,
+  },
+  chipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  chipText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+  },
+  chipTextActive: { color: Colors.white },
+
+  saveBtn: {
+    backgroundColor: Colors.primary,
+    paddingVertical: 16,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    ...Shadow.medium,
+  },
+  saveText: {
+    color: Colors.white,
+    fontSize: FontSize.lg,
+    fontWeight: '700',
+    writingDirection: 'rtl',
+  },
+});
+
+export default ContractorProfileEditScreen;

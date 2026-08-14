@@ -249,14 +249,6 @@ const WorkerCard: React.FC<{
             />
             <Text style={styles.metaText}>{worker.city}</Text>
           </View>
-          {worker.rating !== undefined && (worker.reviewCount ?? 0) > 0 && (
-            <View style={styles.metaItem}>
-              <Ionicons name="star" size={14} color={Colors.warning} />
-              <Text style={styles.metaText}>
-                {worker.rating.toFixed(1)} ({worker.reviewCount ?? 0})
-              </Text>
-            </View>
-          )}
         </View>
       </View>
       <View style={styles.rateBox}>

@@ -11,7 +11,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import { Conversation } from '../types';
+import { getOtherParticipantId } from '../services/conversationService';
+import { formatConversationTime } from '../utils/helpers';
+import { Conversation, Worker } from '../types';
 
 interface Props {
   onBack: () => void;
@@ -22,21 +24,17 @@ const MessagesScreen: React.FC<Props> = ({ onBack, onOpenConversation }) => {
   const insets = useSafeAreaInsets();
   const { currentUser, conversations, getUserById } = useApp();
 
-  // Each Conversation has participantId (the other party) — but the mock
-  // conversations are written from a fixed viewer. We treat any conversation
-  // whose participantId is the current user OR whose first message references
-  // current user as relevant. For demo correctness, we also surface conversations
-  // where any message touches currentUser.id.
+  // A conversation is "mine" whenever I'm one of its two participantIds —
+  // no more guessing from message contents. Sorted newest-first so sending a
+  // message bumps that conversation straight to the top.
   const myConversations: Conversation[] = useMemo(() => {
     if (!currentUser) return [];
-    return conversations.filter((c) => {
-      // If I am the participant, the conversation is for me.
-      if (c.participantId === currentUser.id) return true;
-      // If any message involves me, the conversation is for me.
-      return c.messages.some(
-        (m) => m.senderId === currentUser.id || m.receiverId === currentUser.id
+    return conversations
+      .filter((c) => c.participantIds.includes(currentUser.id))
+      .sort(
+        (a, b) =>
+          new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
       );
-    });
   }, [conversations, currentUser]);
 
   return (
@@ -68,10 +66,15 @@ const MessagesScreen: React.FC<Props> = ({ onBack, onOpenConversation }) => {
           contentContainerStyle={{ paddingTop: Spacing.md }}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           renderItem={({ item }) => {
-            // Resolve the *other* party from current user's perspective
-            const otherId = item.participantId;
-            const other = getUserById(otherId);
+            // Resolve the *other* party relative to whoever is logged in —
+            // never a fixed field, so this is correct for both sides.
+            const otherId = currentUser
+              ? getOtherParticipantId(item, currentUser.id)
+              : undefined;
+            const other = otherId ? getUserById(otherId) : undefined;
             const otherIsContractor = other?.role === 'contractor';
+            const otherProfession =
+              other?.role === 'worker' ? (other as Worker).profession : undefined;
 
             return (
               <TouchableOpacity
@@ -99,15 +102,15 @@ const MessagesScreen: React.FC<Props> = ({ onBack, onOpenConversation }) => {
                 <View style={{ flex: 1 }}>
                   <View style={styles.headRow}>
                     <Text style={styles.timeText}>
-                      {item.lastMessageTime}
+                      {formatConversationTime(item.lastMessageAt)}
                     </Text>
                     <Text style={styles.name} numberOfLines={1}>
-                      {item.participantName}
+                      {other?.fullName ?? 'משתמש'}
                     </Text>
                   </View>
-                  {item.participantProfession && (
+                  {otherProfession && (
                     <Text style={styles.profession} numberOfLines={1}>
-                      {item.participantProfession}
+                      {otherProfession}
                     </Text>
                   )}
                   <Text style={styles.lastMsg} numberOfLines={1}>
@@ -189,6 +192,7 @@ const styles = StyleSheet.create({
   timeText: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
+    writingDirection: 'ltr',
   },
   profession: {
     fontSize: FontSize.xs,

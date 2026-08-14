@@ -11,6 +11,9 @@
     },
     "android": {
       "package": "com.buildup.app"
-    }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker"
+    ]
   }
 }

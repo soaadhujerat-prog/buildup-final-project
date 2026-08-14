@@ -164,7 +164,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
                 tone={user.status === 'approved' ? 'success' : 'danger'}
                 small
               />
-              {user.rating !== undefined && (user.reviewCount ?? 0) > 0 && (
+              {!isWorker && user.rating !== undefined && (user.reviewCount ?? 0) > 0 && (
                 <View style={styles.ratingRow}>
                   <Ionicons name="star" size={14} color={Colors.warning} />
                   <Text style={styles.ratingText}>

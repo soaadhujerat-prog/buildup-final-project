@@ -60,6 +60,8 @@ import SearchWorkersScreen from '../screens/SearchWorkersScreen';
 import WorkerProfileScreen from '../screens/WorkerProfileScreen';
 import SmartMatchScreen from '../screens/SmartMatchScreen';
 import ContractorProfileScreen from '../screens/ContractorProfileScreen';
+import ContractorProfileEditScreen from '../screens/ContractorProfileEditScreen';
+import JobStaffingScreen from '../screens/JobStaffingScreen';
 
 // Admin
 import AdminDashboardScreen from '../screens/AdminDashboardScreen';
@@ -105,6 +107,8 @@ type Route =
   | { name: 'ContractorWorkerProfile'; workerId: string }
   | { name: 'ContractorSmartMatch'; initialJobId?: string }
   | { name: 'ContractorSentInvitations' }
+  | { name: 'ContractorJobStaffing'; jobId: string }
+  | { name: 'ContractorProfileEdit' }
   // Admin drilldowns
   | { name: 'AdminRegistrationDetails'; registrationId: string }
   | { name: 'AdminUserDetails'; userId: string }
@@ -144,7 +148,7 @@ type AdminTab =
 // =============================================================================
 
 const AppNavigator: React.FC = () => {
-  const { currentUser, logout } = useApp();
+  const { currentUser, logout, getOrCreateConversation } = useApp();
 
   // History stack for the post-login drilldown area — the last entry is the
   // active screen; popping it (goBack) reveals whatever the user actually
@@ -239,6 +243,22 @@ const AppNavigator: React.FC = () => {
     setHome(null);
     resetTo({ name: 'Welcome' });
   }, [resetTo]);
+
+  // Find-or-create THE conversation with `otherUserId` and push straight
+  // into it — used by every "שלח הודעה" button (worker/contractor profile,
+  // job details, staffing screen, ...) so the same pair always lands in the
+  // exact same WhatsApp-style thread, no matter which screen it was opened
+  // from. Conversations only store participantIds, so no name/profession
+  // needs to travel through here — each screen resolves the other
+  // participant's details itself via getUserById.
+  const openChatWith = useCallback(
+    (otherUserId: string) => {
+      if (!currentUser) return;
+      const conversation = getOrCreateConversation(currentUser.id, otherUserId);
+      push({ name: 'Chat', conversationId: conversation.id });
+    },
+    [currentUser, getOrCreateConversation, push]
+  );
 
   const handleLogout = useCallback(() => {
     logout();
@@ -426,6 +446,9 @@ const AppNavigator: React.FC = () => {
             onOpenSmartMatchForJob={() => {
               /* contractor-only */
             }}
+            onOpenChatWithContractor={(contractorId) =>
+              openChatWith(contractorId)
+            }
           />
         );
       case 'WorkerInvitations':
@@ -444,6 +467,7 @@ const AppNavigator: React.FC = () => {
             onOpenJobDetails={(jobId) =>
               push({ name: 'WorkerJobDetails', jobId })
             }
+            onOpenChat={(contractorId) => openChatWith(contractorId)}
           />
         );
       case 'WorkerAvailability':
@@ -475,8 +499,30 @@ const AppNavigator: React.FC = () => {
             onOpenSentInvitations={() =>
               push({ name: 'ContractorSentInvitations' })
             }
+            onOpenStaffing={(jobId) =>
+              push({ name: 'ContractorJobStaffing', jobId })
+            }
           />
         );
+      case 'ContractorJobStaffing':
+        return (
+          <JobStaffingScreen
+            jobId={route.jobId}
+            onBack={goBack}
+            onOpenWorkerProfile={(workerId) =>
+              push({ name: 'ContractorWorkerProfile', workerId })
+            }
+            onOpenChat={(workerId) => openChatWith(workerId)}
+            onOpenSearchWorkers={() =>
+              push({ name: 'ContractorSearchWorkers' })
+            }
+            onOpenSmartMatch={() =>
+              push({ name: 'ContractorSmartMatch', initialJobId: route.jobId })
+            }
+          />
+        );
+      case 'ContractorProfileEdit':
+        return <ContractorProfileEditScreen onBack={goBack} />;
       case 'ContractorSearchWorkers':
         return (
           <SearchWorkersScreen
@@ -494,6 +540,7 @@ const AppNavigator: React.FC = () => {
             onOpenJobDetails={(jobId) =>
               push({ name: 'ContractorJobDetails', jobId })
             }
+            onOpenChat={(workerId) => openChatWith(workerId)}
           />
         );
       case 'ContractorSmartMatch':
@@ -808,6 +855,7 @@ const ContractorHome: React.FC<{
           <ContractorProfileScreen
             onBack={() => setTab('dashboard')}
             onOpenSettings={() => navigate({ name: 'Settings' })}
+            onOpenEdit={() => navigate({ name: 'ContractorProfileEdit' })}
             onLogout={onLogout}
           />
         );

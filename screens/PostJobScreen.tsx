@@ -23,6 +23,7 @@ import {
   FilterChip as FC,
 } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import DatePickerField from '../components/DatePickerField';
 import {
   CITIES_ISRAEL,
   PROFESSIONS_BY_CATEGORY,
@@ -203,12 +204,11 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
         </Section>
 
         <Section title="תקופה ותגמול">
-          <Field
+          <DatePickerField
             label="תאריך התחלה"
             value={startDate}
             onChange={setStartDate}
-            placeholder="DD/MM/YYYY"
-            keyboardType="numbers-and-punctuation"
+            minimumDate={new Date()}
           />
           <Field
             label="משך משוער"

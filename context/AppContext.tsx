@@ -29,7 +29,9 @@ import {
   JobPost,
   Application,
   Invitation,
+  Assignment,
   Conversation,
+  Message,
   AppNotification,
   SupportTicket,
   SupportTicketType,
@@ -48,6 +50,22 @@ import {
   MOCK_NOTIFICATIONS,
   MOCK_SUPPORT_TICKETS,
 } from '../data/mockData';
+
+import {
+  buildAssignmentFromApplication,
+  buildAssignmentFromInvitation,
+  hasActiveAssignment,
+  getStaffingProgress as computeStaffingProgress,
+  StaffingProgress,
+} from '../services/assignmentService';
+
+import {
+  findConversation,
+  buildConversation,
+  buildMessage,
+  normalizeConversation,
+  dedupeConversations,
+} from '../services/conversationService';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,6 +94,7 @@ interface AppState {
   jobs: JobPost[];
   applications: Application[];
   invitations: Invitation[];
+  assignments: Assignment[];
 
   conversations: Conversation[];
   notifications: AppNotification[];
@@ -139,6 +158,14 @@ interface AppState {
     patch: Partial<Contractor>
   ) => void;
 
+  // Messaging — one conversation per pair of users, WhatsApp-style (no job
+  // scoping: the same two people always share a single thread).
+  getOrCreateConversation: (
+    currentUserId: string,
+    otherUserId: string
+  ) => Conversation;
+  sendMessage: (conversationId: string, senderId: string, text: string) => Message;
+
   // Support
   openSupportTicket: (
     userId: string,
@@ -166,6 +193,9 @@ interface AppState {
   getInvitationsForContractor: (contractorId: string) => Invitation[];
   getInvitationsForWorker: (workerId: string) => Invitation[];
   getJobsForContractor: (contractorId: string) => JobPost[];
+  getAssignmentsForJob: (jobId: string) => Assignment[];
+  getAssignmentsForWorker: (workerId: string) => Assignment[];
+  getStaffingProgress: (jobId: string) => StaffingProgress;
   getNotificationsForUser: (userId: string) => AppNotification[];
   getTicketsForUser: (userId: string) => SupportTicket[];
 }
@@ -206,7 +236,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [applications, setApplications] = useState<Application[]>(MOCK_APPLICATIONS);
   const [invitations, setInvitations] = useState<Invitation[]>(MOCK_INVITATIONS);
 
-  const [conversations] = useState<Conversation[]>(MOCK_CONVERSATIONS);
+  // Seed assignments once from whatever applications/invitations already came
+  // in as 'accepted' in the mock data, so staffing counts are consistent with
+  // the rest of the prototype from first render — never a separate hardcoded
+  // number.
+  const [assignments, setAssignments] = useState<Assignment[]>(() => {
+    const seeded: Assignment[] = [];
+    MOCK_APPLICATIONS.filter((a) => a.status === 'accepted').forEach((a) => {
+      const job = MOCK_JOBS.find((j) => j.id === a.jobId);
+      if (job) seeded.push(buildAssignmentFromApplication(a, job));
+    });
+    MOCK_INVITATIONS.filter((i) => i.status === 'accepted').forEach((i) => {
+      const job = MOCK_JOBS.find((j) => j.id === i.jobId);
+      if (job && !hasActiveAssignment(seeded, job.id, i.workerId)) {
+        seeded.push(buildAssignmentFromInvitation(i, job));
+      }
+    });
+    return seeded;
+  });
+
+  // Normalize once at load — MOCK_CONVERSATIONS ships as legacy-shaped
+  // records (single participantId, no participantIds array); this is the
+  // one place that converts them to the real Conversation shape, exactly
+  // like a real migration would when reading old records from a database.
+  // dedupeConversations is a safety net that merges any records that ended
+  // up sharing the same pair of participants, so a pair never shows up as
+  // more than one thread in MessagesScreen.
+  const [conversations, setConversations] = useState<Conversation[]>(() =>
+    dedupeConversations(MOCK_CONVERSATIONS.map(normalizeConversation))
+  );
   const [notifications, setNotifications] =
     useState<AppNotification[]>(MOCK_NOTIFICATIONS);
   const [supportTickets, setSupportTickets] =
@@ -417,8 +475,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           hourlyRate: d.hourlyRate,
           dailyRate: d.dailyRate,
           bio: d.bio ?? '',
-          rating: undefined,
-          reviewCount: 0,
           completedJobsCount: 0,
         };
         setWorkers((prev) => [...prev, worker]);
@@ -647,6 +703,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       );
       if (targetApp) {
         const job = jobs.find((j) => j.id === targetApp!.jobId);
+        if (accepted && job) {
+          setAssignments((prev) =>
+            hasActiveAssignment(prev, job.id, targetApp!.workerId)
+              ? prev
+              : [...prev, buildAssignmentFromApplication(targetApp!, job)]
+          );
+        }
         pushNotification({
           userId: targetApp.workerId,
           type: accepted ? 'application_accepted' : 'application_rejected',
@@ -709,6 +772,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         })
       );
       if (target) {
+        const job = jobs.find((j) => j.id === target!.jobId);
+        if (accepted && job) {
+          setAssignments((prev) =>
+            hasActiveAssignment(prev, job.id, target!.workerId)
+              ? prev
+              : [...prev, buildAssignmentFromInvitation(target!, job)]
+          );
+        }
         const worker = workers.find((w) => w.id === target!.workerId);
         pushNotification({
           userId: target.contractorId,
@@ -721,7 +792,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
       }
     },
-    [workers, pushNotification]
+    [jobs, workers, pushNotification]
   );
 
   // ---------------------------------------------------------------------
@@ -769,6 +840,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         : cu
     );
   }, []);
+
+  // ---------------------------------------------------------------------
+  // Messaging
+  // ---------------------------------------------------------------------
+
+  const getOrCreateConversation = useCallback<
+    AppState['getOrCreateConversation']
+  >(
+    (currentUserId, otherUserId) => {
+      const existing = findConversation(conversations, currentUserId, otherUserId);
+      if (existing) return existing;
+
+      const fresh = buildConversation({ currentUserId, otherUserId });
+      setConversations((prev) => [fresh, ...prev]);
+      return fresh;
+    },
+    [conversations]
+  );
+
+  const sendMessage = useCallback<AppState['sendMessage']>(
+    (conversationId, senderId, text) => {
+      const conversation = conversations.find((c) => c.id === conversationId);
+      const receiverId =
+        conversation?.participantIds.find((id) => id !== senderId) ??
+        senderId;
+      const message = buildMessage(senderId, receiverId, text);
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                messages: [...c.messages, message],
+                lastMessage: message.content,
+                lastMessageAt: message.timestamp,
+                updatedAt: message.timestamp,
+              }
+            : c
+        )
+      );
+      return message;
+    },
+    [conversations]
+  );
 
   // ---------------------------------------------------------------------
   // Support
@@ -901,6 +1015,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     [jobs]
   );
 
+  const getAssignmentsForJob = useCallback<AppState['getAssignmentsForJob']>(
+    (jobId) => assignments.filter((a) => a.jobId === jobId),
+    [assignments]
+  );
+
+  const getAssignmentsForWorker = useCallback<
+    AppState['getAssignmentsForWorker']
+  >(
+    (workerId) => assignments.filter((a) => a.workerId === workerId),
+    [assignments]
+  );
+
+  const getStaffingProgress = useCallback<AppState['getStaffingProgress']>(
+    (jobId) => {
+      const job = jobs.find((j) => j.id === jobId);
+      return computeStaffingProgress(assignments, jobId, job?.workersNeeded ?? 0);
+    },
+    [assignments, jobs]
+  );
+
   const getNotificationsForUser = useCallback<
     AppState['getNotificationsForUser']
   >(
@@ -930,6 +1064,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       jobs,
       applications,
       invitations,
+      assignments,
       conversations,
       notifications,
       supportTickets,
@@ -958,6 +1093,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updateWorkerProfile,
       updateContractorProfile,
 
+      getOrCreateConversation,
+      sendMessage,
+
       openSupportTicket,
       respondToTicket,
 
@@ -971,6 +1109,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       getInvitationsForContractor,
       getInvitationsForWorker,
       getJobsForContractor,
+      getAssignmentsForJob,
+      getAssignmentsForWorker,
+      getStaffingProgress,
       getNotificationsForUser,
       getTicketsForUser,
     }),
@@ -983,6 +1124,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       jobs,
       applications,
       invitations,
+      assignments,
       conversations,
       notifications,
       supportTickets,
@@ -1005,6 +1147,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setWorkerAvailability,
       updateWorkerProfile,
       updateContractorProfile,
+      getOrCreateConversation,
+      sendMessage,
       openSupportTicket,
       respondToTicket,
       markNotificationRead,
@@ -1016,6 +1160,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       getInvitationsForContractor,
       getInvitationsForWorker,
       getJobsForContractor,
+      getAssignmentsForJob,
+      getAssignmentsForWorker,
+      getStaffingProgress,
       getNotificationsForUser,
       getTicketsForUser,
     ]

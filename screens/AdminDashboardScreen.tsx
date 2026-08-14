@@ -320,7 +320,9 @@ const QuickAction: React.FC<{
     activeOpacity={0.85}
     onPress={onPress}
   >
-    <Ionicons name={icon} size={26} color={Colors.secondary} />
+    <View style={styles.quickIconWrap}>
+      <Ionicons name={icon} size={22} color={Colors.secondary} />
+    </View>
     <Text style={styles.quickLabel}>{label}</Text>
   </TouchableOpacity>
 );
@@ -493,6 +495,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     ...Shadow.medium,
+  },
+  quickIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.adminPrimaryFaint,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   quickLabel: {
     fontSize: FontSize.sm,

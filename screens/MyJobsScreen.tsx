@@ -13,6 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import StaffingProgress from '../components/StaffingProgress';
+import { StaffingProgress as StaffingProgressData } from '../services/assignmentService';
+import { getRegistrationStatus } from '../services/jobStatusService';
 import { Contractor, JobPost } from '../types';
 
 interface Props {
@@ -29,7 +32,8 @@ const MyJobsScreen: React.FC<Props> = ({
   onOpenPostJob,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, jobs, getApplicationsForJob } = useApp();
+  const { currentUser, jobs, getApplicationsForJob, getStaffingProgress } =
+    useApp();
   const me = currentUser as Contractor | undefined;
 
   const [filter, setFilter] = useState<Filter>('all');
@@ -134,6 +138,7 @@ const MyJobsScreen: React.FC<Props> = ({
             <JobRow
               job={item}
               applicationsCount={getApplicationsForJob(item.id).length}
+              staffing={getStaffingProgress(item.id)}
               onPress={() => onOpenJobDetails(item.id)}
             />
           )}
@@ -187,11 +192,10 @@ const Chip: React.FC<{
 const JobRow: React.FC<{
   job: JobPost;
   applicationsCount: number;
+  staffing: StaffingProgressData;
   onPress: () => void;
-}> = ({ job, applicationsCount, onPress }) => {
-  const isOpen = job.acceptingApplications;
-  const tone = isOpen ? 'success' : 'info';
-  const label = isOpen ? 'פתוחה להרשמה' : 'סגורה להרשמה';
+}> = ({ job, applicationsCount, staffing, onPress }) => {
+  const registrationStatus = getRegistrationStatus(job);
 
   return (
     <TouchableOpacity
@@ -204,7 +208,11 @@ const JobRow: React.FC<{
       </View>
       <View style={{ flex: 1 }}>
         <View style={styles.rowTop}>
-          <StatusBadge label={label} tone={tone} small />
+          <StatusBadge
+            label={registrationStatus.label}
+            tone={registrationStatus.tone}
+            small
+          />
           <Text style={styles.title} numberOfLines={1}>
             {job.title}
           </Text>
@@ -231,6 +239,9 @@ const JobRow: React.FC<{
               {new Date(job.postedAt).toLocaleDateString('he-IL')}
             </Text>
           </View>
+        </View>
+        <View style={{ marginTop: 8 }}>
+          <StaffingProgress progress={staffing} compact />
         </View>
       </View>
       <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />

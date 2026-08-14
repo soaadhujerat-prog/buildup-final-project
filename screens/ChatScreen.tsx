@@ -8,13 +8,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { getOtherParticipantId } from '../services/conversationService';
 
 interface Props {
   conversationId: string;
@@ -23,7 +23,7 @@ interface Props {
 
 const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, conversations, getUserById } = useApp();
+  const { currentUser, conversations, getUserById, sendMessage } = useApp();
   const scrollRef = useRef<ScrollView>(null);
 
   const conversation = useMemo(
@@ -32,10 +32,12 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
   );
 
   const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState(false);
 
   useEffect(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 100);
-  }, [conversation]);
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+  }, [conversation?.messages.length]);
 
   if (!conversation || !currentUser) {
     return (
@@ -48,16 +50,23 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
     );
   }
 
-  const other = getUserById(conversation.participantId);
+  const otherId = getOtherParticipantId(conversation, currentUser.id);
+  const other = otherId ? getUserById(otherId) : undefined;
   const otherIsContractor = other?.role === 'contractor';
 
   const handleSend = () => {
-    if (!draft.trim()) return;
-    Alert.alert(
-      'מצב הדגמה',
-      'שליחת הודעות תופעל לאחר חיבור ה-Backend. הצ\'אט מוצג כעת לתצוגה בלבד.',
-      [{ text: 'הבנתי', onPress: () => setDraft('') }]
-    );
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setSendError(false);
+    try {
+      sendMessage(conversationId, currentUser.id, text);
+      setDraft('');
+    } catch {
+      setSendError(true);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -71,11 +80,11 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {conversation.participantName}
+            {other?.fullName ?? 'משתמש'}
           </Text>
-          {conversation.participantProfession && (
+          {other?.role === 'worker' && (
             <Text style={styles.headerSub} numberOfLines={1}>
-              {conversation.participantProfession}
+              {other.profession}
             </Text>
           )}
         </View>
@@ -168,17 +177,27 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
         })}
       </ScrollView>
 
+      {sendError && (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle" size={16} color={Colors.danger} />
+          <Text style={styles.errorBannerText}>
+            שליחת ההודעה נכשלה. נסה שוב.
+          </Text>
+        </View>
+      )}
+
       <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
         <TouchableOpacity
-          style={styles.sendBtn}
+          style={[styles.sendBtn, sending && { opacity: 0.6 }]}
           onPress={handleSend}
           activeOpacity={0.85}
-          disabled={!draft.trim()}
+          disabled={!draft.trim() || sending}
+          accessibilityLabel="שלח הודעה"
         >
           <Ionicons
             name="send"
             size={18}
-            color={draft.trim() ? Colors.white : Colors.textMuted}
+            color={draft.trim() && !sending ? Colors.white : Colors.textMuted}
           />
         </TouchableOpacity>
         <TextInput
@@ -247,6 +266,19 @@ const styles = StyleSheet.create({
   emptyChatSub: {
     fontSize: FontSize.sm,
     color: Colors.textMuted,
+    writingDirection: 'rtl',
+  },
+  errorBanner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 8,
+    backgroundColor: '#FEF2F2',
+  },
+  errorBannerText: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
     writingDirection: 'rtl',
   },
   dateBadge: {

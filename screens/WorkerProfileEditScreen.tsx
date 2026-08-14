@@ -22,6 +22,7 @@ import {
   FilterChip as FC,
 } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import ChipInput from '../components/ChipInput';
 import {
   AREAS_ISRAEL,
   CITIES_ISRAEL,
@@ -49,9 +50,9 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const [experienceYears, setExperienceYears] = useState(
     String(me?.experienceYears ?? '')
   );
-  const [skills, setSkills] = useState((me?.skills ?? []).join(', '));
-  const [certifications, setCertifications] = useState(
-    (me?.certifications ?? []).join(', ')
+  const [skills, setSkills] = useState<string[]>(me?.skills ?? []);
+  const [certifications, setCertifications] = useState<string[]>(
+    me?.certifications ?? []
   );
   const [hourlyRate, setHourlyRate] = useState(String(me?.hourlyRate ?? ''));
   const [dailyRate, setDailyRate] = useState(String(me?.dailyRate ?? ''));
@@ -112,14 +113,8 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
       professionCategory: profCategory,
       profession,
       experienceYears: exp,
-      skills: skills
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      certifications: certifications
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      skills,
+      certifications,
       hourlyRate: hr,
       dailyRate: dr,
       bio: bio.trim(),
@@ -192,15 +187,17 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
             onChange={setExperienceYears}
             keyboardType="numeric"
           />
-          <Field
-            label="מיומנויות (מופרד בפסיקים)"
-            value={skills}
+          <ChipInput
+            label="מיומנויות"
+            values={skills}
             onChange={setSkills}
+            placeholder="הוסף מיומנות..."
           />
-          <Field
-            label="הסמכות (מופרד בפסיקים)"
-            value={certifications}
+          <ChipInput
+            label="הסמכות"
+            values={certifications}
             onChange={setCertifications}
+            placeholder="הוסף הסמכה..."
           />
         </Section>
 

@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,12 +16,14 @@ import { Contractor } from '../types';
 interface Props {
   onBack: () => void;
   onOpenSettings: () => void;
+  onOpenEdit: () => void;
   onLogout: () => void;
 }
 
 const ContractorProfileScreen: React.FC<Props> = ({
   onBack,
   onOpenSettings,
+  onOpenEdit,
   onLogout,
 }) => {
   const insets = useSafeAreaInsets();
@@ -106,19 +107,17 @@ const ContractorProfileScreen: React.FC<Props> = ({
 
         <TouchableOpacity
           style={styles.editBtn}
-          onPress={() =>
-            Alert.alert('בקרוב', 'עריכת פרופיל קבלן תתאפשר בעדכון הבא.')
-          }
+          onPress={onOpenEdit}
           activeOpacity={0.85}
           accessibilityRole="button"
-          accessibilityLabel="עריכת פרופיל - בקרוב"
+          accessibilityLabel="עריכת פרופיל"
         >
           <Ionicons
             name="create-outline"
             size={18}
-            color={Colors.textMuted}
+            color={Colors.primary}
           />
-          <Text style={styles.editBtnText}>ערוך פרופיל (בקרוב)</Text>
+          <Text style={styles.editBtnText}>ערוך פרופיל</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -316,12 +315,12 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 14,
     borderRadius: Radius.full,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: 2,
+    borderColor: Colors.primary,
     backgroundColor: Colors.white,
   },
   editBtnText: {
-    color: Colors.textMuted,
+    color: Colors.primary,
     fontSize: FontSize.md,
     fontWeight: '700',
     writingDirection: 'rtl',

@@ -13,7 +13,7 @@ import {
   JobPost,
   Application,
   Invitation,
-  Conversation,
+  LegacyConversationRecord,
   AppNotification,
   RegistrationRecord,
   SupportTicket,
@@ -70,8 +70,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 120,
     dailyRate: 800,
     bio: 'חשמלאי מוסמך עם 12 שנות ניסיון בפרויקטים גדולים ובניה רב-קומתית.',
-    rating: 4.8,
-    reviewCount: 47,
     completedJobsCount: 134,
   },
   {
@@ -94,8 +92,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 110,
     dailyRate: 750,
     bio: 'אינסטלטור מנוסה עם התמחות בפרויקטים מורכבים ושיפוצים.',
-    rating: 4.6,
-    reviewCount: 32,
     completedJobsCount: 89,
   },
   {
@@ -119,8 +115,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 95,
     dailyRate: 650,
     bio: 'בנאי ותיק עם ניסיון בבניית מבנים מכל הסוגים. עובד עם תכניות ומדויק מאוד.',
-    rating: 4.9,
-    reviewCount: 61,
     completedJobsCount: 210,
   },
   {
@@ -143,8 +137,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 100,
     dailyRate: 680,
     bio: 'גבסן מיומן עם עין אסתטית מצוינת. מתמחה בתקרות מיוחדות ועיצוביות.',
-    rating: 4.7,
-    reviewCount: 28,
     completedJobsCount: 67,
   },
   {
@@ -167,8 +159,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 105,
     dailyRate: 720,
     bio: 'רצף מקצועי עם ניסיון בסוגי אריחים מגוונים. עבודה מדויקת ונקייה.',
-    rating: 4.5,
-    reviewCount: 19,
     completedJobsCount: 78,
   },
   {
@@ -191,8 +181,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 90,
     dailyRate: 620,
     bio: 'צבע מנוסה עם ידע בטכניקות צביעה מתקדמות ועיצוב פנים.',
-    rating: 4.4,
-    reviewCount: 14,
     completedJobsCount: 55,
   },
   {
@@ -215,8 +203,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 130,
     dailyRate: 900,
     bio: 'מסגר בכיר עם מעל 18 שנות ניסיון. מתמחה בעבודות מתכת מורכבות.',
-    rating: 4.9,
-    reviewCount: 83,
     completedJobsCount: 312,
   },
   {
@@ -240,8 +226,6 @@ export const MOCK_WORKERS: Worker[] = [
     hourlyRate: 115,
     dailyRate: 780,
     bio: 'נגר עם ניסיון רב בנגרות בניין ועבודות גמר עץ ברמה גבוהה.',
-    rating: 4.3,
-    reviewCount: 22,
     completedJobsCount: 91,
   },
 ];
@@ -579,14 +563,26 @@ export const MOCK_INVITATIONS: Invitation[] = [
 // Conversations & Messages
 // ---------------------------------------------------------------------------
 
-export const MOCK_CONVERSATIONS: Conversation[] = [
+// Real, chronologically-consistent timestamps computed relative to "now" at
+// load time, so the mock data always correctly exercises the app's
+// today/yesterday/older display logic no matter when it's actually run.
+const relativeTimestamp = (daysAgo: number, hour: number, minute: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+};
+
+// These 3 records are intentionally left in their original (pre-participantIds)
+// shape — id + participantId, no participantIds — so AppContext's load-time
+// normalizeConversation() has real legacy records to convert, exercising the
+// same migration path a future Firestore import would need. Nothing
+// downstream reads this raw shape directly.
+export const MOCK_CONVERSATIONS: LegacyConversationRecord[] = [
   {
     id: 'conv1',
     participantId: 'w1',
-    participantName: 'משה לוי',
-    participantProfession: 'חשמלאי',
     lastMessage: 'בסדר, אני זמין ביום שני בשעה 8 בבוקר',
-    lastMessageTime: '10:32',
     unreadCount: 2,
     messages: [
       {
@@ -594,7 +590,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'c1',
         receiverId: 'w1',
         content: 'שלום משה, ראיתי את הפרופיל שלך ואני מעוניין לדבר על הפרויקט',
-        timestamp: '09:15',
+        timestamp: relativeTimestamp(0, 9, 15),
         isRead: true,
       },
       {
@@ -602,7 +598,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'w1',
         receiverId: 'c1',
         content: 'שלום! בשמחה, מה הפרויקט?',
-        timestamp: '09:45',
+        timestamp: relativeTimestamp(0, 9, 45),
         isRead: true,
       },
       {
@@ -610,7 +606,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'c1',
         receiverId: 'w1',
         content: 'בניין מגורים 8 קומות בתל אביב, דרוש חשמלאי מוסמך לחודשיים וחצי',
-        timestamp: '09:50',
+        timestamp: relativeTimestamp(0, 9, 50),
         isRead: true,
       },
       {
@@ -618,7 +614,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'w1',
         receiverId: 'c1',
         content: 'מצוין, מה התשלום היומי?',
-        timestamp: '10:15',
+        timestamp: relativeTimestamp(0, 10, 15),
         isRead: true,
       },
       {
@@ -626,7 +622,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'c1',
         receiverId: 'w1',
         content: '850 ₪ ליום, כולל ביטוחים. מתי אתה יכול להתחיל?',
-        timestamp: '10:20',
+        timestamp: relativeTimestamp(0, 10, 20),
         isRead: true,
       },
       {
@@ -634,7 +630,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'w1',
         receiverId: 'c1',
         content: 'בסדר, אני זמין ביום שני בשעה 8 בבוקר',
-        timestamp: '10:32',
+        timestamp: relativeTimestamp(0, 10, 32),
         isRead: false,
       },
     ],
@@ -642,10 +638,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
   {
     id: 'conv2',
     participantId: 'w7',
-    participantName: 'נסים בוזגלו',
-    participantProfession: 'מסגר',
     lastMessage: 'שלח לי את הכתובת ואגיע לאמוד',
-    lastMessageTime: 'אתמול',
     unreadCount: 0,
     messages: [
       {
@@ -653,7 +646,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'c1',
         receiverId: 'w7',
         content: 'נסים, צריך מעקות לגרמי מדרגות. 6 קומות',
-        timestamp: '15:00',
+        timestamp: relativeTimestamp(1, 15, 0),
         isRead: true,
       },
       {
@@ -661,7 +654,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'w7',
         receiverId: 'c1',
         content: 'שלח לי את הכתובת ואגיע לאמוד',
-        timestamp: '15:30',
+        timestamp: relativeTimestamp(1, 15, 30),
         isRead: true,
       },
     ],
@@ -669,10 +662,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
   {
     id: 'conv3',
     participantId: 'w4',
-    participantName: 'אחמד חלבי',
-    participantProfession: 'גבסן',
     lastMessage: 'תודה רבה! יהיה לי כבוד לעבוד אתך',
-    lastMessageTime: 'לפני 3 ימים',
     unreadCount: 0,
     messages: [
       {
@@ -680,7 +670,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'c1',
         receiverId: 'w4',
         content: 'אחמד, קיבלת את העבודה! מתחיל ב-20 ליולי',
-        timestamp: '11:00',
+        timestamp: relativeTimestamp(3, 11, 0),
         isRead: true,
       },
       {
@@ -688,7 +678,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         senderId: 'w4',
         receiverId: 'c1',
         content: 'תודה רבה! יהיה לי כבוד לעבוד אתך',
-        timestamp: '11:05',
+        timestamp: relativeTimestamp(3, 11, 5),
         isRead: true,
       },
     ],

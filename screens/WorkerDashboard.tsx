@@ -416,11 +416,20 @@ const QuickAction: React.FC<{
     activeOpacity={0.85}
     onPress={onPress}
   >
-    <Ionicons
-      name={icon}
-      size={26}
-      color={primary ? Colors.white : Colors.primary}
-    />
+    <View
+      style={[
+        styles.quickIconWrap,
+        primary
+          ? { backgroundColor: 'rgba(255,255,255,0.2)' }
+          : { backgroundColor: Colors.primaryFaint },
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={22}
+        color={primary ? Colors.white : Colors.primary}
+      />
+    </View>
     <Text
       style={[styles.quickLabel, primary && styles.quickLabelPrimary]}
     >
@@ -626,6 +635,13 @@ const styles = StyleSheet.create({
     ...Shadow.medium,
   },
   quickCardPrimary: { backgroundColor: Colors.primary },
+  quickIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   quickLabel: {
     fontSize: FontSize.xs,
     fontWeight: '700',

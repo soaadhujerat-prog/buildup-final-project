@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Switch,
   Alert,
 } from 'react-native';
@@ -21,6 +20,7 @@ import {
   FilterChip as FC,
 } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import DatePickerField from '../components/DatePickerField';
 import { AREAS_ISRAEL } from '../data/mockData';
 import { Worker } from '../types';
 
@@ -120,13 +120,11 @@ const AvailabilityManagementScreen: React.FC<Props> = ({ onBack }) => {
           <Text style={styles.help}>
             אם אינך זמין מיידית אבל תהיה זמין בעתיד הקרוב, אפשר לציין מתי.
           </Text>
-          <TextInput
-            style={styles.input}
+          <DatePickerField
+            label="זמין החל מ-"
             value={availableFrom}
-            onChangeText={setAvailableFrom}
-            placeholder="DD/MM/YYYY"
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="numbers-and-punctuation"
+            onChange={setAvailableFrom}
+            minimumDate={new Date()}
           />
         </Section>
 

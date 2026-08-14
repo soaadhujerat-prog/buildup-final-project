@@ -74,14 +74,6 @@ const WorkerCard: React.FC<WorkerCardProps> = ({
         <>
           <View style={styles.statsRow}>
             <View style={styles.stat}>
-              <Ionicons name="star" size={14} color={Colors.warning} />
-              <Text style={styles.statValue}>{worker.rating}</Text>
-              <Text style={styles.statLabel}>({worker.reviewCount})</Text>
-            </View>
-
-            <View style={styles.statDivider} />
-
-            <View style={styles.stat}>
               <Ionicons
                 name="checkmark-circle-outline"
                 size={14}

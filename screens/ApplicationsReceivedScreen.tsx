@@ -170,7 +170,6 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
                 workerProfession={worker?.profession ?? ''}
                 workerExperience={worker?.experienceYears ?? 0}
                 workerCity={worker?.city ?? ''}
-                workerRating={worker?.rating}
                 jobTitle={job?.title ?? '—'}
                 onPressWorker={() =>
                   worker && onOpenWorkerProfile(worker.id)
@@ -223,7 +222,6 @@ const ApplicationRow: React.FC<{
   workerProfession: string;
   workerExperience: number;
   workerCity: string;
-  workerRating?: number;
   jobTitle: string;
   onPressWorker: () => void;
   onPressJob: () => void;
@@ -235,7 +233,6 @@ const ApplicationRow: React.FC<{
   workerProfession,
   workerExperience,
   workerCity,
-  workerRating,
   jobTitle,
   onPressWorker,
   onPressJob,
@@ -273,14 +270,6 @@ const ApplicationRow: React.FC<{
           <Text style={styles.workerMeta}>
             {workerProfession} · {workerExperience} שנות ניסיון · {workerCity}
           </Text>
-          {workerRating !== undefined && (
-            <View style={styles.ratingRow}>
-              <Ionicons name="star" size={12} color={Colors.warning} />
-              <Text style={styles.ratingText}>
-                {workerRating.toFixed(1)}
-              </Text>
-            </View>
-          )}
         </View>
       </TouchableOpacity>
 

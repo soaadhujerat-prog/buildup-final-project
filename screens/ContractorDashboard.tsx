@@ -13,6 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import StaffingProgress from '../components/StaffingProgress';
+import { getRegistrationStatus, isOpenForApplications } from '../services/jobStatusService';
 import { Contractor, Worker } from '../types';
 
 interface Props {
@@ -50,6 +52,7 @@ const ContractorDashboard: React.FC<Props> = ({
     invitations,
     notifications,
     getUserById,
+    getStaffingProgress,
   } = useApp();
 
   const me = currentUser as Contractor | undefined;
@@ -61,11 +64,10 @@ const ContractorDashboard: React.FC<Props> = ({
   );
   const myJobIds = useMemo(() => myJobs.map((j) => j.id), [myJobs]);
 
-  const activeJobs = useMemo(
-    () =>
-      myJobs.filter(
-        (j) => j.status !== 'completed' && j.status !== 'cancelled'
-      ),
+  // Registration Status is the single source of truth for "open to
+  // applications" — never job.status, never jobs.length.
+  const openForApplicationsJobs = useMemo(
+    () => myJobs.filter(isOpenForApplications),
     [myJobs]
   );
 
@@ -176,8 +178,8 @@ const ContractorDashboard: React.FC<Props> = ({
           <StatCard
             icon="briefcase-outline"
             tint={Colors.primary}
-            label="משרות פעילות"
-            value={activeJobs.length}
+            label="משרות פתוחות להרשמה"
+            value={openForApplicationsJobs.length}
             onPress={onOpenMyJobs}
           />
           <StatCard
@@ -306,6 +308,8 @@ const ContractorDashboard: React.FC<Props> = ({
             const candidatesCount = applications.filter(
               (a) => a.jobId === job.id
             ).length;
+            const registrationStatus = getRegistrationStatus(job);
+            const staffing = getStaffingProgress(job.id);
             return (
               <TouchableOpacity
                 key={job.id}
@@ -329,26 +333,13 @@ const ContractorDashboard: React.FC<Props> = ({
                   <Text style={styles.rowSub}>
                     {candidatesCount} מועמדים · {job.city}
                   </Text>
+                  <View style={styles.rowStaffing}>
+                    <StaffingProgress progress={staffing} compact />
+                  </View>
                 </View>
                 <StatusBadge
-                  label={
-                    job.status === 'open'
-                      ? 'פתוח'
-                      : job.status === 'in_progress'
-                      ? 'בתהליך'
-                      : job.status === 'completed'
-                      ? 'הושלם'
-                      : 'בוטל'
-                  }
-                  tone={
-                    job.status === 'open'
-                      ? 'success'
-                      : job.status === 'in_progress'
-                      ? 'warning'
-                      : job.status === 'completed'
-                      ? 'info'
-                      : 'neutral'
-                  }
+                  label={registrationStatus.label}
+                  tone={registrationStatus.tone}
                   small
                 />
               </TouchableOpacity>
@@ -403,11 +394,20 @@ const QuickAction: React.FC<{
     activeOpacity={0.85}
     onPress={onPress}
   >
-    <Ionicons
-      name={icon}
-      size={26}
-      color={primary ? Colors.white : Colors.secondary}
-    />
+    <View
+      style={[
+        styles.quickIconWrap,
+        primary
+          ? { backgroundColor: 'rgba(255,255,255,0.2)' }
+          : { backgroundColor: Colors.primaryFaint },
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={22}
+        color={primary ? Colors.white : Colors.secondary}
+      />
+    </View>
     <Text
       style={[styles.quickLabel, primary && styles.quickLabelPrimary]}
     >
@@ -590,6 +590,13 @@ const styles = StyleSheet.create({
     ...Shadow.medium,
   },
   quickCardPrimary: { backgroundColor: Colors.primary },
+  quickIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   quickLabel: {
     fontSize: FontSize.xs,
     fontWeight: '700',
@@ -630,6 +637,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
+  rowStaffing: { marginTop: 6, maxWidth: 160 },
 
   empty: {
     flexDirection: 'row-reverse',

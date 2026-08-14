@@ -65,9 +65,9 @@ export interface Worker extends BaseUser {
   hourlyRate: number;
   dailyRate: number;
   bio: string;
-  // Derived values — computed from Applications/Reviews collections in context.
-  rating?: number;
-  reviewCount?: number;
+  // Derived value — computed from the Assignment collection in context.
+  // No `rating`/`reviewCount`: the app has no real review mechanism for
+  // workers yet, so it must never show a fabricated number.
   completedJobsCount?: number;
 }
 
@@ -208,6 +208,29 @@ export interface Invitation {
 }
 
 // ---------------------------------------------------------------------------
+// Assignments (real staffing — a worker actually confirmed onto a job)
+// ---------------------------------------------------------------------------
+
+export type AssignmentSource = 'application' | 'invitation';
+export type AssignmentStatus = 'active' | 'completed' | 'cancelled';
+
+/** Created the moment a contractor accepts a worker's application, or a
+ *  worker accepts a contractor's invitation. This is the single source of
+ *  truth for "who is actually staffed on this job" — never derive staffing
+ *  counts from Application/Invitation counts directly. */
+export interface Assignment {
+  id: string;
+  jobId: string;
+  contractorId: string;
+  workerId: string;
+  source: AssignmentSource;
+  sourceId?: string; // the Application or Invitation id that created this
+  status: AssignmentStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Smart Match
 // ---------------------------------------------------------------------------
 
@@ -237,16 +260,40 @@ export interface Message {
   isRead: boolean;
 }
 
+/** A conversation is identified purely by its two participants — like
+ *  WhatsApp, exactly one conversation ever exists per pair, no matter which
+ *  screen (worker profile, staffing, job details, ...) opened it. There is
+ *  no job scoping: a contractor and a worker share a single thread across
+ *  every job they ever discuss. Every screen resolves "who's the other
+ *  person" at render time relative to whoever is currently logged in
+ *  (`participantIds.find(id => id !== currentUser.id)`), so the same
+ *  conversation displays correctly for both sides. */
 export interface Conversation {
   id: string;
-  participantId: string;
-  participantName: string;
-  participantAvatar?: string;
-  participantProfession?: string;
+  participantIds: string[];
   lastMessage: string;
-  lastMessageTime: string;
+  lastMessageAt: string;
   unreadCount: number;
   messages: Message[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Shape of the original hand-written mock conversations, kept only so
+ *  `normalizeConversation` (services/conversationService.ts) can convert old
+ *  records to the real `Conversation` shape at load time without losing any
+ *  data. Nothing in the app should read this shape directly. */
+export interface LegacyConversationRecord {
+  id: string;
+  participantId?: string;
+  participantIds?: string[];
+  lastMessage: string;
+  lastMessageTime?: string;
+  lastMessageAt?: string;
+  unreadCount?: number;
+  messages: Message[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // ---------------------------------------------------------------------------

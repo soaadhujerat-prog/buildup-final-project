@@ -15,18 +15,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import { callPhone } from '../utils/contact';
 import { Contractor, Worker } from '../types';
 
 interface Props {
   workerId: string;
   onBack: () => void;
   onOpenJobDetails?: (jobId: string) => void;
+  onOpenChat?: (workerId: string) => void;
 }
 
 const WorkerProfileScreen: React.FC<Props> = ({
   workerId,
   onBack,
   onOpenJobDetails,
+  onOpenChat,
 }) => {
   const insets = useSafeAreaInsets();
   const { currentUser, getUserById, jobs, sendInvitation, invitations } =
@@ -111,14 +114,6 @@ const WorkerProfileScreen: React.FC<Props> = ({
                 tone={worker.isAvailable ? 'success' : 'neutral'}
                 small
               />
-              {worker.rating !== undefined && (worker.reviewCount ?? 0) > 0 && (
-                <View style={styles.ratingChip}>
-                  <Ionicons name="star" size={12} color={Colors.warning} />
-                  <Text style={styles.ratingText}>
-                    {worker.rating.toFixed(1)} ({worker.reviewCount ?? 0})
-                  </Text>
-                </View>
-              )}
             </View>
           </View>
         </View>
@@ -231,8 +226,34 @@ const WorkerProfileScreen: React.FC<Props> = ({
       </ScrollView>
 
       {/* Invite action — contractor only */}
-      {isContractor && (
+      {isContractor && worker && (
         <View style={[styles.actionBar, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={styles.contactRow}>
+            <TouchableOpacity
+              style={styles.contactBtn}
+              onPress={() =>
+                onOpenChat?.(worker.id)
+              }
+              activeOpacity={0.85}
+              accessibilityLabel={`שלח הודעה ל${worker.fullName}`}
+            >
+              <Ionicons
+                name="chatbubble-outline"
+                size={16}
+                color={Colors.primary}
+              />
+              <Text style={styles.contactBtnText}>שלח הודעה</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.contactBtn}
+              onPress={() => callPhone(worker.phone)}
+              activeOpacity={0.85}
+              accessibilityLabel={`התקשר ל${worker.fullName}`}
+            >
+              <Ionicons name="call-outline" size={16} color={Colors.primary} />
+              <Text style={styles.contactBtnText}>התקשר</Text>
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             style={styles.inviteBtn}
             onPress={() => setPickerVisible(true)}
@@ -608,6 +629,28 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
+  },
+  contactRow: {
+    flexDirection: 'row-reverse',
+    gap: 8,
+    marginBottom: Spacing.sm,
+  },
+  contactBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  contactBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
   },
   inviteBtn: {
     flexDirection: 'row-reverse',

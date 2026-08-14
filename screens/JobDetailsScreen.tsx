@@ -13,6 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import StaffingProgress from '../components/StaffingProgress';
+import { getRegistrationStatus } from '../services/jobStatusService';
+import { callPhone } from '../utils/contact';
 import { Application, Contractor, Worker } from '../types';
 
 interface Props {
@@ -21,6 +24,8 @@ interface Props {
   onOpenWorkerProfile: (workerId: string) => void;
   onOpenSmartMatchForJob: (jobId: string) => void;
   onOpenSentInvitations?: () => void; // contractor only
+  onOpenStaffing?: (jobId: string) => void; // contractor only
+  onOpenChatWithContractor?: (contractorId: string) => void; // worker only
 }
 
 const JobDetailsScreen: React.FC<Props> = ({
@@ -29,6 +34,8 @@ const JobDetailsScreen: React.FC<Props> = ({
   onOpenWorkerProfile,
   onOpenSmartMatchForJob,
   onOpenSentInvitations,
+  onOpenStaffing,
+  onOpenChatWithContractor,
 }) => {
   const insets = useSafeAreaInsets();
   const {
@@ -36,6 +43,7 @@ const JobDetailsScreen: React.FC<Props> = ({
     getJobById,
     getUserById,
     getApplicationsForJob,
+    getStaffingProgress,
     invitations,
     applyToJob,
     respondToApplication,
@@ -110,10 +118,7 @@ const JobDetailsScreen: React.FC<Props> = ({
     ]);
   };
 
-  const statusLabel = job.acceptingApplications ? 'פתוחה להרשמה' : 'סגורה להרשמה';
-  const statusTone: 'success' | 'info' = job.acceptingApplications
-    ? 'success'
-    : 'info';
+  const registrationStatus = getRegistrationStatus(job);
 
   const handleToggleApplications = () => {
     const opening = !job.acceptingApplications;
@@ -151,7 +156,11 @@ const JobDetailsScreen: React.FC<Props> = ({
         {/* Hero */}
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
-            <StatusBadge label={statusLabel} tone={statusTone} small />
+            <StatusBadge
+              label={registrationStatus.label}
+              tone={registrationStatus.tone}
+              small
+            />
             {job.urgent && <StatusBadge label="דחוף" tone="danger" small />}
           </View>
           <Text style={styles.heroTitle}>{job.title}</Text>
@@ -207,6 +216,38 @@ const JobDetailsScreen: React.FC<Props> = ({
                   </View>
                 )}
             </View>
+            {currentUser?.role === 'worker' && (
+              <View style={styles.contactRow}>
+                <TouchableOpacity
+                  style={styles.contactBtn}
+                  onPress={() =>
+                    onOpenChatWithContractor?.(contractor.id)
+                  }
+                  activeOpacity={0.85}
+                  accessibilityLabel="שלח הודעה לקבלן"
+                >
+                  <Ionicons
+                    name="chatbubble-outline"
+                    size={16}
+                    color={Colors.primary}
+                  />
+                  <Text style={styles.contactBtnText}>שלח הודעה</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.contactBtn}
+                  onPress={() => callPhone(contractor.phone)}
+                  activeOpacity={0.85}
+                  accessibilityLabel="התקשר לקבלן"
+                >
+                  <Ionicons
+                    name="call-outline"
+                    size={16}
+                    color={Colors.primary}
+                  />
+                  <Text style={styles.contactBtnText}>התקשר</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 
@@ -276,6 +317,22 @@ const JobDetailsScreen: React.FC<Props> = ({
         {/* === CONTRACTOR MODE: Management hub === */}
         {isContractorOwner && (
           <>
+            {/* Staffing summary */}
+            <View style={styles.section}>
+              <View style={styles.sectionHead}>
+                <Text style={styles.sectionTitle}>מצב שיבוץ</Text>
+              </View>
+              <StaffingProgress progress={getStaffingProgress(job.id)} />
+              <TouchableOpacity
+                style={styles.manageStaffingBtn}
+                onPress={() => onOpenStaffing?.(job.id)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="people" size={16} color={Colors.primary} />
+                <Text style={styles.manageStaffingText}>ניהול שיבוצים</Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Candidates section */}
             <View style={styles.section}>
               <View style={styles.sectionHeadRow}>
@@ -653,6 +710,45 @@ const styles = StyleSheet.create({
     ...Shadow.small,
   },
   sectionHead: { width: '100%', alignItems: 'flex-end', marginBottom: 8 },
+  contactRow: {
+    flexDirection: 'row-reverse',
+    gap: 8,
+    marginTop: Spacing.md,
+  },
+  contactBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  contactBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+  manageStaffingBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: Spacing.md,
+    paddingVertical: 12,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  manageStaffingText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
   sectionHeadRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',

@@ -15,6 +15,34 @@ export const formatShortDate = (dateString: string): string => {
   });
 };
 
+/** For conversation-list / chat timestamps — never show a raw ISO string.
+ *  Today → "HH:mm", yesterday → "אתמול", anything older → "DD/MM/YYYY". */
+export const formatConversationTime = (isoString: string): string => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+
+  const now = new Date();
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (isSameDay(date, now)) {
+    return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (isSameDay(date, yesterday)) return 'אתמול';
+
+  return date.toLocaleDateString('he-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+};
+
 export const formatCurrency = (amount: number): string => {
   return `${amount.toLocaleString('he-IL')} ₪`;
 };
@@ -45,26 +73,6 @@ export const getMatchLabel = (score: number): string => {
   if (score >= 70) return 'התאמה טובה';
   if (score >= 50) return 'התאמה בינונית';
   return 'התאמה חלשה';
-};
-
-export const getJobStatusLabel = (status: string): string => {
-  const labels: Record<string, string> = {
-    open: 'פתוח',
-    in_progress: 'בתהליך',
-    completed: 'הושלם',
-    cancelled: 'בוטל',
-  };
-  return labels[status] || status;
-};
-
-export const getJobStatusColor = (status: string): string => {
-  const colors: Record<string, string> = {
-    open: '#22C55E',
-    in_progress: '#F97316',
-    completed: '#6B7280',
-    cancelled: '#EF4444',
-  };
-  return colors[status] || '#6B7280';
 };
 
 export const getRequestStatusLabel = (status: string): string => {

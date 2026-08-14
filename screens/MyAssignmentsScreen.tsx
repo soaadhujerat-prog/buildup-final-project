@@ -12,71 +12,59 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
-import { Contractor, JobPost, Worker } from '../types';
+import { callPhone } from '../utils/contact';
+import { Assignment, Contractor, JobPost, Worker } from '../types';
 
 interface Props {
   onBack: () => void;
   onOpenJobDetails: (jobId: string) => void;
+  onOpenChat: (contractorId: string) => void;
 }
 
 interface AssignmentRow {
   job: JobPost;
-  source: 'application' | 'invitation' | 'both';
-  assignedAt: string;
+  assignment: Assignment;
 }
 
-const MyAssignmentsScreen: React.FC<Props> = ({ onBack, onOpenJobDetails }) => {
+const STATUS_LABEL: Record<Assignment['status'], string> = {
+  active: 'פעיל',
+  completed: 'הושלם',
+  cancelled: 'בוטל',
+};
+const STATUS_TONE: Record<Assignment['status'], 'success' | 'info' | 'danger'> = {
+  active: 'success',
+  completed: 'info',
+  cancelled: 'danger',
+};
+
+const MyAssignmentsScreen: React.FC<Props> = ({
+  onBack,
+  onOpenJobDetails,
+  onOpenChat,
+}) => {
   const insets = useSafeAreaInsets();
-  const {
-    currentUser,
-    jobs,
-    applications,
-    invitations,
-    getUserById,
-  } = useApp();
+  const { currentUser, getJobById, getAssignmentsForWorker, getUserById } =
+    useApp();
   const me = currentUser as Worker | undefined;
 
-  // Real-source assignments:
-  //  - accepted application by this worker, OR
-  //  - accepted invitation to this worker.
-  // Deduped by jobId; if assigned via both, source = 'both'.
+  // Real staffing data only — never re-derive from application/invitation
+  // counts. An Assignment exists here exactly because a contractor accepted
+  // this worker's application, or the worker accepted a contractor's
+  // invitation (see AppContext.respondToApplication/respondToInvitation).
   const assignments = useMemo<AssignmentRow[]>(() => {
     if (!me) return [];
-    const map = new Map<string, AssignmentRow>();
-
-    applications.forEach((a) => {
-      if (a.workerId !== me.id || a.status !== 'accepted') return;
-      const job = jobs.find((j) => j.id === a.jobId);
-      if (!job) return;
-      const at = a.respondedAt ?? a.appliedAt;
-      map.set(job.id, { job, source: 'application', assignedAt: at });
-    });
-
-    invitations.forEach((i) => {
-      if (i.workerId !== me.id || i.status !== 'accepted') return;
-      const job = jobs.find((j) => j.id === i.jobId);
-      if (!job) return;
-      const at = i.respondedAt ?? i.sentAt;
-      const existing = map.get(job.id);
-      if (existing) {
-        map.set(job.id, {
-          ...existing,
-          source: 'both',
-          assignedAt:
-            new Date(at).getTime() > new Date(existing.assignedAt).getTime()
-              ? at
-              : existing.assignedAt,
-        });
-      } else {
-        map.set(job.id, { job, source: 'invitation', assignedAt: at });
-      }
-    });
-
-    return Array.from(map.values()).sort(
-      (a, b) =>
-        new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime()
-    );
-  }, [me, applications, invitations, jobs]);
+    return getAssignmentsForWorker(me.id)
+      .map((assignment) => {
+        const job = getJobById(assignment.jobId);
+        return job ? { job, assignment } : null;
+      })
+      .filter((x): x is AssignmentRow => !!x)
+      .sort(
+        (a, b) =>
+          new Date(b.assignment.createdAt).getTime() -
+          new Date(a.assignment.createdAt).getTime()
+      );
+  }, [me, getAssignmentsForWorker, getJobById]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -103,7 +91,7 @@ const MyAssignmentsScreen: React.FC<Props> = ({ onBack, onOpenJobDetails }) => {
         <FlatList
           style={styles.results}
           data={assignments}
-          keyExtractor={(a) => a.job.id}
+          keyExtractor={(a) => a.assignment.id}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => {
@@ -111,63 +99,100 @@ const MyAssignmentsScreen: React.FC<Props> = ({ onBack, onOpenJobDetails }) => {
               | Contractor
               | undefined;
             const sourceLabel =
-              item.source === 'both'
-                ? 'בקשה + הזמנה'
-                : item.source === 'application'
+              item.assignment.source === 'application'
                 ? 'בקשה שאושרה'
                 : 'הזמנה שאישרת';
             return (
-              <TouchableOpacity
-                style={styles.row}
-                activeOpacity={0.85}
-                onPress={() => onOpenJobDetails(item.job.id)}
-              >
-                <View style={styles.iconCircle}>
-                  <Ionicons
-                    name="briefcase"
-                    size={22}
-                    color={Colors.primary}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.rowTop}>
-                    <StatusBadge label="פעיל" tone="success" small />
-                    <Text style={styles.title} numberOfLines={1}>
-                      {item.job.title}
-                    </Text>
+              <View style={styles.row}>
+                <TouchableOpacity
+                  style={styles.rowMain}
+                  activeOpacity={0.85}
+                  onPress={() => onOpenJobDetails(item.job.id)}
+                >
+                  <View style={styles.iconCircle}>
+                    <Ionicons
+                      name="briefcase"
+                      size={22}
+                      color={Colors.primary}
+                    />
                   </View>
-                  <Text style={styles.sub} numberOfLines={1}>
-                    {item.job.profession} · {item.job.city}
-                  </Text>
-                  <View style={styles.metaRow}>
-                    {contractor && (
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.rowTop}>
+                      <StatusBadge
+                        label={STATUS_LABEL[item.assignment.status]}
+                        tone={STATUS_TONE[item.assignment.status]}
+                        small
+                      />
+                      <Text style={styles.title} numberOfLines={1}>
+                        {item.job.title}
+                      </Text>
+                    </View>
+                    <Text style={styles.sub} numberOfLines={1}>
+                      {item.job.profession} · {item.job.city}
+                    </Text>
+                    <View style={styles.metaRow}>
+                      {contractor && (
+                        <View style={styles.metaItem}>
+                          <Ionicons
+                            name="business-outline"
+                            size={14}
+                            color={Colors.textMuted}
+                          />
+                          <Text style={styles.metaText} numberOfLines={1}>
+                            {contractor.companyName ?? contractor.fullName}
+                          </Text>
+                        </View>
+                      )}
                       <View style={styles.metaItem}>
                         <Ionicons
-                          name="business-outline"
+                          name="link-outline"
                           size={14}
                           color={Colors.textMuted}
                         />
-                        <Text style={styles.metaText} numberOfLines={1}>
-                          {contractor.companyName ?? contractor.fullName}
-                        </Text>
+                        <Text style={styles.metaText}>{sourceLabel}</Text>
                       </View>
-                    )}
-                    <View style={styles.metaItem}>
-                      <Ionicons
-                        name="link-outline"
-                        size={14}
-                        color={Colors.textMuted}
-                      />
-                      <Text style={styles.metaText}>{sourceLabel}</Text>
                     </View>
                   </View>
-                </View>
-                <Ionicons
-                  name="chevron-back"
-                  size={18}
-                  color={Colors.textMuted}
-                />
-              </TouchableOpacity>
+                  <Ionicons
+                    name="chevron-back"
+                    size={18}
+                    color={Colors.textMuted}
+                  />
+                </TouchableOpacity>
+
+                {contractor && (
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() =>
+                        onOpenChat(contractor.id)
+                      }
+                      activeOpacity={0.85}
+                      accessibilityLabel="שלח הודעה לקבלן"
+                    >
+                      <Ionicons
+                        name="chatbubble-outline"
+                        size={16}
+                        color={Colors.primary}
+                      />
+                      <Text style={styles.actionBtnText}>שלח הודעה</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() => callPhone(contractor.phone)}
+                      activeOpacity={0.85}
+                      accessibilityLabel="התקשר לקבלן"
+                    >
+                      <Ionicons
+                        name="call-outline"
+                        size={16}
+                        color={Colors.primary}
+                      />
+                      <Text style={styles.actionBtnText}>התקשר</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             );
           }}
         />
@@ -212,13 +237,37 @@ const styles = StyleSheet.create({
   },
 
   row: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
     backgroundColor: Colors.white,
     padding: Spacing.md,
     borderRadius: Radius.md,
     gap: Spacing.md,
     ...Shadow.medium,
+  },
+  rowMain: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  cardActions: {
+    flexDirection: 'row-reverse',
+    gap: 8,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  actionBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
   },
   iconCircle: {
     width: 44,
