@@ -13,7 +13,21 @@
       "package": "com.buildup.app"
     },
     "plugins": [
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "האפליקציה משתמשת במיקום שלך כדי לזהות אוטומטית את עיר המגורים שנבחרת בטופס. המיקום המדויק אינו נשמר — רק שם העיר."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "האפליקציה משתמשת במצלמה כדי לצלם את תעודת הזהות שלך לצורך ההרשמה.",
+          "photosPermission": "האפליקציה משתמשת בגלריה כדי לצרף תמונה של תעודת הזהות שלך לצורך ההרשמה."
+        }
+      ],
+      "expo-document-picker"
     ]
   }
 }

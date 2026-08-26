@@ -8,6 +8,7 @@ import {
   TouchableWithoutFeedback,
   TextInput,
   Modal,
+  Image,
   Alert,
   Linking,
 } from 'react-native';
@@ -17,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import { isImageDocument, formatFileSize } from '../components/DocumentUploadField';
 import {
   ContractorRegistrationData,
   WorkerRegistrationData,
@@ -42,6 +44,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   const reg = getRegistration(registrationId);
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [idImageViewerVisible, setIdImageViewerVisible] = useState(false);
 
   if (!reg) {
     return (
@@ -77,6 +80,16 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         },
       ]
     );
+  };
+
+  const openIdDocumentFile = async (uri: string) => {
+    try {
+      const canOpen = await Linking.canOpenURL(uri);
+      if (!canOpen) throw new Error('cannot open');
+      await Linking.openURL(uri);
+    } catch {
+      Alert.alert('לא ניתן לפתוח', 'לא ניתן לפתוח את הקובץ במכשיר זה.');
+    }
   };
 
   const handleReject = () => {
@@ -152,18 +165,16 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           </View>
         </View>
 
-        {/* External checks */}
-        <Section title="בדיקות אימות (קונספט)">
-          <CheckRow
-            label="תעודת זהות במערכת ממשלתית"
-            value={reg.externalChecks.idValid}
-          />
-          {!isWorker && (
-            <CheckRow
-              label="מספר רישום קבלנים"
-              value={reg.externalChecks.contractorRegistrationValid}
-            />
-          )}
+        {/* External checks — there is no access to an authorized government
+            API to call, so these are always shown as pending external
+            verification, never as a fabricated pass. The admin still
+            approves/rejects manually regardless of this section. */}
+        <Section title="בדיקות אימות חיצוני">
+          <CheckRow label="אימות תעודת זהות מול מערכת ממשלתית" />
+          {!isWorker && <CheckRow label="אימות מספר רישום קבלן" />}
+          <Text style={styles.notes}>
+            נדרש חיבור ל-API ממשלתי מורשה לצורך אימות אוטומטי.
+          </Text>
           {reg.externalChecks.eligibilityNotes && (
             <Text style={styles.notes}>
               הערות: {reg.externalChecks.eligibilityNotes}
@@ -171,21 +182,51 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           )}
         </Section>
 
-        {/* Verification feature not built yet — shown clearly as unavailable, not as real data */}
+        {/* Document the applicant attached during sign-up, if any */}
         <Section title="צילום תעודת זהות">
-          <View style={styles.idPhotoPlaceholder}>
-            <Ionicons
-              name="cloud-upload-outline"
-              size={40}
-              color={Colors.textMuted}
-            />
-            <Text style={styles.idPhotoLabel}>העלאת מסמכים תתאפשר בקרוב</Text>
-            <Text
-              style={[styles.idPhotoMeta, { writingDirection: 'ltr' }]}
+          {!data.idDocument ? (
+            <View style={styles.idPhotoPlaceholder}>
+              <Ionicons
+                name="alert-circle-outline"
+                size={36}
+                color={Colors.textMuted}
+              />
+              <Text style={styles.idPhotoLabel}>לא צורפה תעודת זהות</Text>
+            </View>
+          ) : isImageDocument(data.idDocument) ? (
+            <TouchableOpacity
+              onPress={() => setIdImageViewerVisible(true)}
+              activeOpacity={0.85}
             >
-              {data.idNumber}
-            </Text>
-          </View>
+              <Image
+                source={{ uri: data.idDocument.uri }}
+                style={styles.idPhotoImage}
+                resizeMode="cover"
+              />
+              <Text style={styles.idPhotoTapHint}>הקש להגדלה</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.idFileCard}
+              onPress={() => openIdDocumentFile(data.idDocument!.uri)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.idFileIconWrap}>
+                <Ionicons name="document-text" size={26} color={Colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.idFileName} numberOfLines={1}>
+                  {data.idDocument.fileName}
+                </Text>
+                {!!formatFileSize(data.idDocument.size) && (
+                  <Text style={styles.idFileMeta}>
+                    {formatFileSize(data.idDocument.size)}
+                  </Text>
+                )}
+              </View>
+              <Ionicons name="open-outline" size={20} color={Colors.primary} />
+            </TouchableOpacity>
+          )}
         </Section>
 
         {/* Identity */}
@@ -349,6 +390,32 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Full-screen ID photo viewer */}
+      {data.idDocument && isImageDocument(data.idDocument) && (
+        <Modal
+          visible={idImageViewerVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIdImageViewerVisible(false)}
+        >
+          <View style={styles.imageViewerBackdrop}>
+            <TouchableOpacity
+              style={styles.imageViewerCloseBtn}
+              onPress={() => setIdImageViewerVisible(false)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="סגור"
+            >
+              <Ionicons name="close" size={28} color={Colors.white} />
+            </TouchableOpacity>
+            <Image
+              source={{ uri: data.idDocument.uri }}
+              style={styles.imageViewerImage}
+              resizeMode="contain"
+            />
+          </View>
+        </Modal>
+      )}
     </View>
   );
 };
@@ -437,7 +504,7 @@ const FieldRow: React.FC<{
   </View>
 );
 
-const CheckRow: React.FC<{ label: string; value: boolean | undefined }> = ({
+const CheckRow: React.FC<{ label: string; value?: boolean }> = ({
   label,
   value,
 }) => {
@@ -445,17 +512,17 @@ const CheckRow: React.FC<{ label: string; value: boolean | undefined }> = ({
     value === undefined ? 'pending' : value ? 'ok' : 'fail';
   const meta =
     status === 'pending'
-      ? { color: Colors.warning, icon: 'time-outline', text: 'לא נבדק' }
+      ? { color: Colors.warning, icon: 'time-outline', text: 'ממתין לאימות חיצוני' }
       : status === 'ok'
       ? { color: Colors.success, icon: 'checkmark-circle', text: 'תקין' }
       : { color: Colors.danger, icon: 'close-circle', text: 'נכשל' };
   return (
-    <View style={styles.fRow}>
+    <View style={styles.checkRow}>
+      <Text style={styles.checkLabel}>{label}</Text>
       <View style={styles.checkRight}>
         <Text style={[styles.checkText, { color: meta.color }]}>{meta.text}</Text>
         <Ionicons name={meta.icon as any} size={18} color={meta.color} />
       </View>
-      <Text style={styles.fLabel}>{label}</Text>
     </View>
   );
 };
@@ -568,12 +635,38 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
+  // CheckRow ("בדיקות אימות חיצוני") gets its own layout, separate from
+  // fRow/fLabel above — its label can run long ("אימות תעודת זהות מול
+  // מערכת ממשלתית"), so it always stacks: the check name on its own line,
+  // the status (icon + text) on the line under it — both right-aligned via
+  // a plain column with alignItems: 'flex-end' (no row-reverse/justify
+  // tricks on the outer container, which flip which edge "end" means).
+  checkRow: {
+    width: '100%',
+    alignItems: 'flex-end',
+    gap: 4,
+    paddingVertical: 8,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  checkLabel: {
+    width: '100%',
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   checkRight: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 6,
   },
-  checkText: { fontSize: FontSize.sm, fontWeight: '700' },
+  checkText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   notes: {
     fontSize: FontSize.xs,
     color: Colors.textSecondary,
@@ -615,6 +708,67 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: 'monospace',
   },
+  idPhotoImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.gray100,
+  },
+  idPhotoTapHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginTop: 6,
+  },
+  idFileCard: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+  },
+  idFileIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.primaryFaint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  idFileName: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  idFileMeta: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'ltr',
+    marginTop: 2,
+  },
+
+  imageViewerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageViewerCloseBtn: {
+    position: 'absolute',
+    top: 50,
+    right: Spacing.lg,
+    zIndex: 1,
+    padding: 6,
+  },
+  imageViewerImage: { width: '100%', height: '80%' },
+
   idPhotoNote: {
     fontSize: 10,
     color: Colors.textMuted,

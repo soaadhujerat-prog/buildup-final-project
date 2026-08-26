@@ -16,7 +16,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import ChipInput from '../components/ChipInput';
-import { AREAS_ISRAEL, CITIES_ISRAEL } from '../data/mockData';
+import CityPickerField from '../components/CityPickerField';
+import HorizontalChipPicker from '../components/HorizontalChipPicker';
+import { AREAS_ISRAEL } from '../data/mockData';
 import { Contractor } from '../types';
 
 interface Props {
@@ -48,8 +50,6 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const [licenseDetails, setLicenseDetails] = useState(me?.licenseDetails ?? '');
   const [bio, setBio] = useState(me?.bio ?? '');
   const [submitting, setSubmitting] = useState(false);
-
-  const cityChoices = CITIES_ISRAEL.filter((c) => c !== 'כל הערים');
 
   if (!me || me.role !== 'contractor') {
     return (
@@ -143,12 +143,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
             keyboardType="email-address"
             ltr
           />
-          <Picker
-            label="עיר"
-            value={city}
-            options={cityChoices}
-            onChange={setCity}
-          />
+          <CityPickerField label="עיר" value={city} onChange={setCity} />
         </Section>
 
         <Section title="פרטי הקבלנות">
@@ -164,12 +159,20 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
             value={licenseDetails}
             onChange={setLicenseDetails}
           />
-          <Picker
-            label="אזור פעילות"
-            value={areaOfOperation}
-            options={AREAS_ISRAEL}
-            onChange={setAreaOfOperation}
-          />
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>אזור פעילות</Text>
+            </View>
+            <HorizontalChipPicker
+              options={AREAS_ISRAEL}
+              value={areaOfOperation}
+              onChange={setAreaOfOperation}
+              chipStyle={styles.chip}
+              chipActiveStyle={styles.chipActive}
+              textStyle={styles.chipText}
+              textActiveStyle={styles.chipTextActive}
+            />
+          </View>
           <ChipInput
             label="סוגי פרויקטים"
             values={projectTypes}
@@ -242,40 +245,6 @@ const Field: React.FC<{
       autoCapitalize="none"
       placeholderTextColor={Colors.textMuted}
     />
-  </View>
-);
-
-const Picker: React.FC<{
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}> = ({ label, value, options, onChange }) => (
-  <View style={styles.inputGroup}>
-    <View style={styles.labelRow}>
-      <Text style={styles.label}>{label}</Text>
-    </View>
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chipRow}
-    >
-      {options.map((o) => {
-        const active = o === value;
-        return (
-          <TouchableOpacity
-            key={o}
-            onPress={() => onChange(o)}
-            style={[styles.chip, active && styles.chipActive]}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>
-              {o}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
   </View>
 );
 

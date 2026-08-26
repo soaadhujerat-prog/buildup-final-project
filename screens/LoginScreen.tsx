@@ -21,6 +21,7 @@ interface Props {
   onLoginResult: (result: LoginResult) => void;
   onBack: () => void;
   onGoSignUp: () => void;
+  onForgotPassword: () => void;
 }
 
 const LoginScreen: React.FC<Props> = ({
@@ -28,6 +29,7 @@ const LoginScreen: React.FC<Props> = ({
   onLoginResult,
   onBack,
   onGoSignUp,
+  onForgotPassword,
 }) => {
   const insets = useSafeAreaInsets();
   const { loginAsCustomer } = useApp();
@@ -38,13 +40,10 @@ const LoginScreen: React.FC<Props> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const identifierLabel =
-    role === 'worker' ? 'תעודת זהות' : 'תעודת זהות או מספר רישום קבלנים';
-
-  const identifierHint =
-    role === 'worker'
-      ? 'למשל: 311223344'
-      : 'תעודת זהות של האחראי או מספר רישום הקבלן במערכת';
+  // Login is always by ID number for both roles — a contractor registration
+  // number is a professional/verification detail, not a login identifier.
+  const identifierLabel = 'תעודת זהות';
+  const identifierHint = 'למשל: 311223344';
 
   const handleLogin = () => {
     setError(null);
@@ -172,6 +171,15 @@ const LoginScreen: React.FC<Props> = ({
                 onSubmitEditing={handleLogin}
               />
             </View>
+
+            <TouchableOpacity
+              style={styles.forgotPasswordRow}
+              onPress={onForgotPassword}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.forgotPasswordText}>שכחתי סיסמה?</Text>
+            </TouchableOpacity>
           </View>
 
           {error && (
@@ -287,6 +295,15 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     color: Colors.text,
     paddingVertical: 14,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+
+  forgotPasswordRow: { alignSelf: 'flex-end', marginTop: 2 },
+  forgotPasswordText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
     textAlign: 'right',
     writingDirection: 'rtl',
   },

@@ -15,9 +15,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import CityPickerField from '../components/CityPickerField';
+import HorizontalChipPicker from '../components/HorizontalChipPicker';
+import DocumentUploadField from '../components/DocumentUploadField';
 import {
   AREAS_ISRAEL,
-  CITIES_ISRAEL,
   PROFESSIONS_BY_CATEGORY,
   PROFESSION_CATEGORIES,
   PROJECT_TYPES,
@@ -25,6 +27,7 @@ import {
 import {
   ContractorRegistrationData,
   ProfessionCategory,
+  UploadedDocument,
   WorkerRegistrationData,
 } from '../types';
 
@@ -49,6 +52,7 @@ const SignUpScreen: React.FC<Props> = ({
   // Shared identity fields
   const [fullName, setFullName] = useState('');
   const [idNumber, setIdNumber] = useState('');
+  const [idDocument, setIdDocument] = useState<UploadedDocument | null>(null);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [city, setCity] = useState('תל אביב');
@@ -82,10 +86,6 @@ const SignUpScreen: React.FC<Props> = ({
     () => PROFESSION_CATEGORIES.filter((c) => c !== 'כל המקצועות'),
     []
   );
-  const cityChoices = useMemo(
-    () => CITIES_ISRAEL.filter((c) => c !== 'כל הערים'),
-    []
-  );
   const professionChoices = PROFESSIONS_BY_CATEGORY[profCategory] ?? [];
 
   const togglePreferredArea = (a: string) => {
@@ -104,6 +104,7 @@ const SignUpScreen: React.FC<Props> = ({
     if (!fullName.trim()) errs.push('שם מלא חובה');
     if (!idNumber.trim() || idNumber.trim().length < 5)
       errs.push('תעודת זהות חובה (לפחות 5 ספרות)');
+    if (!idDocument) errs.push('יש לצרף צילום או קובץ של תעודת זהות');
     if (!phone.trim()) errs.push('מספר טלפון חובה');
     if (!email.trim() || !email.includes('@')) errs.push('כתובת אימייל לא תקינה');
     if (!city.trim()) errs.push('יש לבחור עיר');
@@ -137,6 +138,7 @@ const SignUpScreen: React.FC<Props> = ({
       setErrors(errs);
       return;
     }
+    if (!idDocument) return; // validate() already guarantees this — narrows the type below
     setErrors([]);
     setSubmitting(true);
 
@@ -146,6 +148,7 @@ const SignUpScreen: React.FC<Props> = ({
         const data: WorkerRegistrationData = {
           fullName: fullName.trim(),
           idNumber: idNumber.trim(),
+          idDocument,
           phone: phone.trim(),
           email: email.trim(),
           city,
@@ -173,6 +176,7 @@ const SignUpScreen: React.FC<Props> = ({
           fullName: fullName.trim(),
           companyName: companyName.trim(),
           idNumber: idNumber.trim(),
+          idDocument,
           contractorRegistrationNumber: contractorRegNumber.trim(),
           phone: phone.trim(),
           email: email.trim(),
@@ -237,6 +241,7 @@ const SignUpScreen: React.FC<Props> = ({
             keyboardType="numeric"
             icon="card-outline"
           />
+          <DocumentUploadField value={idDocument} onChange={setIdDocument} />
           <Field
             label="טלפון"
             value={phone}
@@ -253,34 +258,47 @@ const SignUpScreen: React.FC<Props> = ({
             keyboardType="email-address"
             icon="mail-outline"
           />
-          <Picker
-            label="עיר מגורים"
-            value={city}
-            options={cityChoices}
-            onChange={setCity}
-          />
+          <CityPickerField label="עיר מגורים" value={city} onChange={setCity} />
         </Section>
 
         {/* Role-specific */}
         {isWorker ? (
           <>
             <Section title="פרופיל מקצועי">
-              <Picker
-                label="תחום מקצועי"
-                value={profCategory}
-                options={profCategories}
-                onChange={(v) => {
-                  setProfCategory(v as ProfessionCategory);
-                  const list = PROFESSIONS_BY_CATEGORY[v] ?? [];
-                  if (list.length > 0) setProfession(list[0]);
-                }}
-              />
-              <Picker
-                label="מקצוע ספציפי"
-                value={profession}
-                options={professionChoices}
-                onChange={setProfession}
-              />
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>תחום מקצועי</Text>
+                </View>
+                <HorizontalChipPicker
+                  options={profCategories}
+                  value={profCategory}
+                  onChange={(v) => {
+                    setProfCategory(v as ProfessionCategory);
+                    const list = PROFESSIONS_BY_CATEGORY[v] ?? [];
+                    if (list.length > 0) setProfession(list[0]);
+                  }}
+                  chipStyle={styles.chip}
+                  chipActiveStyle={styles.chipActive}
+                  textStyle={styles.chipText}
+                  textActiveStyle={styles.chipTextActive}
+                  activeOpacity={0.8}
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>מקצוע ספציפי</Text>
+                </View>
+                <HorizontalChipPicker
+                  options={professionChoices}
+                  value={profession}
+                  onChange={setProfession}
+                  chipStyle={styles.chip}
+                  chipActiveStyle={styles.chipActive}
+                  textStyle={styles.chipText}
+                  textActiveStyle={styles.chipTextActive}
+                  activeOpacity={0.8}
+                />
+              </View>
               <Field
                 label="שנות ניסיון"
                 value={experienceYears}
@@ -384,12 +402,21 @@ const SignUpScreen: React.FC<Props> = ({
               placeholder="ק100 – בניה 2 – עד 5 קומות"
               icon="shield-checkmark-outline"
             />
-            <Picker
-              label="אזור פעילות"
-              value={areaOfOperation}
-              options={AREAS_ISRAEL}
-              onChange={setAreaOfOperation}
-            />
+            <View style={styles.inputGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.label}>אזור פעילות</Text>
+              </View>
+              <HorizontalChipPicker
+                options={AREAS_ISRAEL}
+                value={areaOfOperation}
+                onChange={setAreaOfOperation}
+                chipStyle={styles.chip}
+                chipActiveStyle={styles.chipActive}
+                textStyle={styles.chipText}
+                textActiveStyle={styles.chipTextActive}
+                activeOpacity={0.8}
+              />
+            </View>
 
             <Text style={styles.label}>סוגי פרויקטים</Text>
             <View style={styles.chipRow}>
@@ -538,44 +565,6 @@ const Field: React.FC<FieldProps> = ({
         autoCapitalize="none"
       />
     </View>
-  </View>
-);
-
-interface PickerProps {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}
-
-const Picker: React.FC<PickerProps> = ({ label, value, options, onChange }) => (
-  <View style={styles.inputGroup}>
-    <View style={styles.labelRow}>
-      <Text style={styles.label}>{label}</Text>
-    </View>
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chipRow}
-    >
-      {options.map((o) => {
-        const active = o === value;
-        return (
-          <TouchableOpacity
-            key={o}
-            onPress={() => onChange(o)}
-            style={[styles.chip, active && styles.chipActive]}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[styles.chipText, active && styles.chipTextActive]}
-            >
-              {o}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
   </View>
 );
 

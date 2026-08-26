@@ -305,6 +305,11 @@ const styles = StyleSheet.create({
 
   chipRow: {
     flexDirection: 'row-reverse',
+    // Lets the row fill the ScrollView's width when the chips don't need
+    // to scroll, so the (already flex-start / right-anchored) row-reverse
+    // order sits flush against the right edge instead of the default
+    // ScrollView left-anchoring of short content.
+    flexGrow: 1,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.sm,

@@ -23,9 +23,10 @@ import {
 } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import ChipInput from '../components/ChipInput';
+import CityPickerField from '../components/CityPickerField';
+import HorizontalChipPicker from '../components/HorizontalChipPicker';
 import {
   AREAS_ISRAEL,
-  CITIES_ISRAEL,
   PROFESSIONS_BY_CATEGORY,
   PROFESSION_CATEGORIES,
 } from '../data/mockData';
@@ -63,10 +64,6 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
 
   const profCategories = useMemo(
     () => PROFESSION_CATEGORIES.filter((c) => c !== 'כל המקצועות'),
-    []
-  );
-  const cityChoices = useMemo(
-    () => CITIES_ISRAEL.filter((c) => c !== 'כל הערים'),
     []
   );
   const professionChoices = PROFESSIONS_BY_CATEGORY[profCategory] ?? [];
@@ -155,32 +152,43 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
             onChange={setEmail}
             keyboardType="email-address"
           />
-          <Picker
-            label="עיר"
-            value={city}
-            options={cityChoices}
-            onChange={setCity}
-          />
+          <CityPickerField label="עיר" value={city} onChange={setCity} />
         </Section>
 
         <Section title="פרטים מקצועיים">
-          <Picker
-            label="תחום מקצועי"
-            value={profCategory}
-            options={profCategories}
-            onChange={(v) => {
-              setProfCategory(v as ProfessionCategory);
-              const list = PROFESSIONS_BY_CATEGORY[v] ?? [];
-              if (list.length > 0 && !list.includes(profession))
-                setProfession(list[0]);
-            }}
-          />
-          <Picker
-            label="מקצוע ספציפי"
-            value={profession}
-            options={professionChoices}
-            onChange={setProfession}
-          />
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>תחום מקצועי</Text>
+            </View>
+            <HorizontalChipPicker
+              options={profCategories}
+              value={profCategory}
+              onChange={(v) => {
+                setProfCategory(v as ProfessionCategory);
+                const list = PROFESSIONS_BY_CATEGORY[v] ?? [];
+                if (list.length > 0 && !list.includes(profession))
+                  setProfession(list[0]);
+              }}
+              chipStyle={styles.chip}
+              chipActiveStyle={styles.chipActive}
+              textStyle={styles.chipText}
+              textActiveStyle={styles.chipTextActive}
+            />
+          </View>
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>מקצוע ספציפי</Text>
+            </View>
+            <HorizontalChipPicker
+              options={professionChoices}
+              value={profession}
+              onChange={setProfession}
+              chipStyle={styles.chip}
+              chipActiveStyle={styles.chipActive}
+              textStyle={styles.chipText}
+              textActiveStyle={styles.chipTextActive}
+            />
+          </View>
           <Field
             label="שנות ניסיון"
             value={experienceYears}
@@ -304,40 +312,6 @@ const Field: React.FC<{
       autoCapitalize="none"
       placeholderTextColor={Colors.textMuted}
     />
-  </View>
-);
-
-const Picker: React.FC<{
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}> = ({ label, value, options, onChange }) => (
-  <View style={styles.inputGroup}>
-    <View style={styles.labelRow}>
-      <Text style={styles.label}>{label}</Text>
-    </View>
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chipRow}
-    >
-      {options.map((o) => {
-        const active = o === value;
-        return (
-          <TouchableOpacity
-            key={o}
-            onPress={() => onChange(o)}
-            style={[styles.chip, active && styles.chipActive]}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>
-              {o}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
   </View>
 );
 

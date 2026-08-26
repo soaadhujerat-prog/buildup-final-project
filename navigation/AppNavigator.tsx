@@ -36,6 +36,8 @@ import WelcomeScreen from '../screens/WelcomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import SignUpScreen from '../screens/SignUpScreen';
 import AdminLoginScreen from '../screens/AdminLoginScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 import RegistrationPendingScreen from '../screens/RegistrationPendingScreen';
 import RegistrationRejectedScreen from '../screens/RegistrationRejectedScreen';
 import BlockedAccountScreen from '../screens/BlockedAccountScreen';
@@ -91,6 +93,10 @@ type Route =
   | { name: 'Login'; role: CustomerRole }
   | { name: 'SignUp'; role: CustomerRole }
   | { name: 'AdminLogin' }
+  | { name: 'ForgotPassword' }
+  // Reached from the emailed password-recovery deep link once a real
+  // backend exists — no in-app screen navigates here yet.
+  | { name: 'ResetPassword' }
   | { name: 'RegistrationPending'; registrationId: string }
   | { name: 'RegistrationRejected'; registrationId: string }
   | { name: 'BlockedAccount'; userOrRegistrationId: string }
@@ -381,8 +387,15 @@ const AppNavigator: React.FC = () => {
         onLoginResult={handleLoginResult}
         onBack={goWelcome}
         onGoSignUp={() => resetTo({ name: 'SignUp', role: route.role })}
+        onForgotPassword={() => push({ name: 'ForgotPassword' })}
       />
     );
+  }
+  if (route?.name === 'ForgotPassword') {
+    return <ForgotPasswordScreen onBack={goBack} />;
+  }
+  if (route?.name === 'ResetPassword') {
+    return <ResetPasswordScreen onBack={goWelcome} />;
   }
   if (route?.name === 'SignUp') {
     return (

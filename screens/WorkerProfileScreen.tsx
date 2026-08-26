@@ -476,21 +476,6 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
   },
-  ratingChip: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: '#FEF3C7',
-    borderRadius: Radius.full,
-  },
-  ratingText: {
-    fontSize: FontSize.xs,
-    color: Colors.text,
-    fontWeight: '700',
-  },
-
   ratesCard: {
     flexDirection: 'row-reverse',
     backgroundColor: Colors.white,

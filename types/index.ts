@@ -66,8 +66,9 @@ export interface Worker extends BaseUser {
   dailyRate: number;
   bio: string;
   // Derived value — computed from the Assignment collection in context.
-  // No `rating`/`reviewCount`: the app has no real review mechanism for
-  // workers yet, so it must never show a fabricated number.
+  // No `rating`/`reviewCount` on either Worker or Contractor: the app has
+  // no real review mechanism for users, so it must never show a
+  // fabricated number.
   completedJobsCount?: number;
 }
 
@@ -80,11 +81,27 @@ export interface Contractor extends BaseUser {
   projectTypes: string[];
   licenseDetails: string;
   bio?: string;
-  rating?: number;
-  reviewCount?: number;
 }
 
 export type Customer = Worker | Contractor;
+
+// ---------------------------------------------------------------------------
+// Uploaded documents (frontend-only local file references)
+// ---------------------------------------------------------------------------
+
+/** A single locally-picked file (camera, gallery or document picker).
+ *  Referenced by URI only — the app never inlines file content (no base64)
+ *  into state, mock data, or source code. `uri` is a stand-in for a future
+ *  Supabase Storage `storagePath` / signed URL once a real backend exists;
+ *  every consumer should treat it as an opaque reference, not assume it's
+ *  a permanent or shareable link. */
+export interface UploadedDocument {
+  uri: string;
+  fileName: string;
+  mimeType?: string;
+  size?: number;
+  type: 'id_card';
+}
 
 // ---------------------------------------------------------------------------
 // Registration (pre-approval pipeline)
@@ -93,6 +110,7 @@ export type Customer = Worker | Contractor;
 export interface WorkerRegistrationData {
   fullName: string;
   idNumber: string;
+  idDocument?: UploadedDocument;
   phone: string;
   email: string;
   city: string;
@@ -113,6 +131,7 @@ export interface ContractorRegistrationData {
   fullName: string;
   companyName: string;
   idNumber: string;
+  idDocument?: UploadedDocument;
   contractorRegistrationNumber: string;
   phone: string;
   email: string;

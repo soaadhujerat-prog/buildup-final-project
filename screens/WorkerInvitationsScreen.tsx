@@ -180,7 +180,6 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
                 contractorName={
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }
-                contractorRating={contractor?.rating}
                 onPressJob={() => job && onOpenJobDetails(job.id)}
                 onAccept={() => handleAccept(item)}
                 onDecline={() => handleDecline(item)}
@@ -229,7 +228,6 @@ const InvitationCard: React.FC<{
   jobCity: string;
   jobDailyRate: number;
   contractorName: string;
-  contractorRating?: number;
   onPressJob: () => void;
   onAccept: () => void;
   onDecline: () => void;
@@ -239,7 +237,6 @@ const InvitationCard: React.FC<{
   jobCity,
   jobDailyRate,
   contractorName,
-  contractorRating,
   onPressJob,
   onAccept,
   onDecline,
@@ -276,14 +273,6 @@ const InvitationCard: React.FC<{
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.contractorName}>{contractorName}</Text>
-          {contractorRating !== undefined && (
-            <View style={styles.ratingRow}>
-              <Ionicons name="star" size={12} color={Colors.warning} />
-              <Text style={styles.ratingText}>
-                {contractorRating.toFixed(1)}
-              </Text>
-            </View>
-          )}
         </View>
       </TouchableOpacity>
 
@@ -469,17 +458,6 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     textAlign: 'right',
   },
-  ratingRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 4,
-  },
-  ratingText: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    fontWeight: '700',
-  },
-
   metaRow: {
     flexDirection: 'row-reverse',
     gap: Spacing.md,

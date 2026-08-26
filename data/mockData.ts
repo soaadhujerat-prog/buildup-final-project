@@ -251,8 +251,6 @@ export const MOCK_CONTRACTORS: Contractor[] = [
     projectTypes: ['מגורים', 'מסחר', 'ציבורי'],
     licenseDetails: 'ק100 – בניה 2 – עד 5 קומות',
     bio: 'קבלן בנייה ותיק עם ניסיון של מעל 20 שנה בפרויקטים למגורים ומסחר.',
-    rating: 4.7,
-    reviewCount: 38,
   },
   {
     id: 'c2',
@@ -270,8 +268,6 @@ export const MOCK_CONTRACTORS: Contractor[] = [
     projectTypes: ['מגורים', 'יוקרה'],
     licenseDetails: 'ק100 – בניה 3 – עד 8 קומות',
     bio: 'מתמחה בפרויקטים של וילות יוקרה ושיפוצים רחבי היקף.',
-    rating: 4.8,
-    reviewCount: 21,
   },
 ];
 

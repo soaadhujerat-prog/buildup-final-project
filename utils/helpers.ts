@@ -55,13 +55,6 @@ export const getInitials = (name: string): string => {
   return name[0] || '?';
 };
 
-export const getRatingStars = (rating: number): string => {
-  const full = Math.floor(rating);
-  const half = rating % 1 >= 0.5 ? 1 : 0;
-  const empty = 5 - full - half;
-  return '★'.repeat(full) + (half ? '½' : '') + '☆'.repeat(empty);
-};
-
 export const getMatchColor = (score: number): string => {
   if (score >= 85) return '#22C55E';
   if (score >= 65) return '#F97316';

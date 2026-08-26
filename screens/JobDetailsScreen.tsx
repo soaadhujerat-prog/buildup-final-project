@@ -206,15 +206,6 @@ const JobDetailsScreen: React.FC<Props> = ({
                   {contractor.city} · {contractor.areaOfOperation}
                 </Text>
               </View>
-              {contractor.rating !== undefined &&
-                (contractor.reviewCount ?? 0) > 0 && (
-                  <View style={styles.ratingChip}>
-                    <Ionicons name="star" size={12} color={Colors.warning} />
-                    <Text style={styles.ratingChipText}>
-                      {contractor.rating.toFixed(1)}
-                    </Text>
-                  </View>
-                )}
             </View>
             {currentUser?.role === 'worker' && (
               <View style={styles.contactRow}>
@@ -870,21 +861,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  ratingChip: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: '#FEF3C7',
-    borderRadius: Radius.full,
-  },
-  ratingChipText: {
-    fontSize: FontSize.xs,
-    color: Colors.text,
-    fontWeight: '700',
-  },
-
   emptyHint: {
     fontSize: FontSize.sm,
     color: Colors.textMuted,

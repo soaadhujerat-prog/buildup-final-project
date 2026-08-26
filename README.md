@@ -26,7 +26,7 @@ The app starts with seeded data. To log in:
 
 | Role        | ID number     | Password              | How                                  |
 |-------------|---------------|-----------------------|--------------------------------------|
-| **Admin**   | `000000001`   | any non-empty string  | Welcome → "כניסת מנהל"               |
+| **Admin**   | use the seeded admin ID in `data/mockData.ts` (`MOCK_ADMINS`) | any non-empty string | Welcome → "כניסת מנהל"               |
 | Worker      | use one of the seeded worker IDs in `data/mockData.ts` | any non-empty string | Welcome → choose Worker → Login |
 | Contractor  | use one of the seeded contractor IDs in `data/mockData.ts` | any non-empty string | Welcome → choose Contractor → Login |
 
@@ -39,7 +39,7 @@ You can also register a new worker/contractor via SignUp; the registration goes 
 - **State** lives in `context/AppContext.tsx` — a single source of truth for users, jobs, applications, invitations, conversations, notifications, support tickets, and registrations. Every screen reads via `useApp()` and never imports raw mock data.
 - **Navigation** lives in `navigation/AppNavigator.tsx` — a state-machine navigator (no react-navigation runtime). Three role shells, each with bottom tabs and a full drilldown stack.
 - **Types** in `types/index.ts` — strict, with discriminated unions for status fields and a clean separation between `RegistrationRecord` (pending) and approved `Worker`/`Contractor`.
-- **Matching** in `utils/matching.ts` — Smart Match scoring: profession 40 + location 25 + rating 20 + availability 15, with certifications gating.
+- **Matching** in `utils/matching.ts` — Smart Match scoring: profession 50 + location 30 + availability 20 (no rating factor — the app has no real review mechanism), with certifications gating.
 
 ### Locked behavior (per user requirements)
 

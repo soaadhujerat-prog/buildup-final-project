@@ -164,14 +164,6 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
                 tone={user.status === 'approved' ? 'success' : 'danger'}
                 small
               />
-              {!isWorker && user.rating !== undefined && (user.reviewCount ?? 0) > 0 && (
-                <View style={styles.ratingRow}>
-                  <Ionicons name="star" size={14} color={Colors.warning} />
-                  <Text style={styles.ratingText}>
-                    {user.rating.toFixed(1)} ({user.reviewCount ?? 0})
-                  </Text>
-                </View>
-              )}
             </View>
           </View>
         </View>
@@ -529,17 +521,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginTop: 6,
-  },
-  ratingRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 4,
-  },
-  ratingText: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    fontWeight: '700',
-    writingDirection: 'ltr',
   },
 
   statsRow: {

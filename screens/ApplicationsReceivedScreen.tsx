@@ -430,17 +430,6 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     marginTop: 2,
   },
-  ratingRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  ratingText: {
-    fontSize: FontSize.xs,
-    color: Colors.text,
-    fontWeight: '700',
-  },
 
   jobLink: {
     flexDirection: 'row-reverse',

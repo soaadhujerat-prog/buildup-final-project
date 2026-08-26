@@ -307,10 +307,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return { ok: true, user: worker, status: 'approved' };
       }
 
-      // 2) Try to match an approved contractor by ID OR registration number.
-      const contractor = contractors.find(
-        (c) => c.idNumber === id || c.contractorRegistrationNumber === id
-      );
+      // 2) Try to match an approved contractor by ID number. A contractor
+      // registration number is a professional/verification detail, not a
+      // login credential, so it must never match here.
+      const contractor = contractors.find((c) => c.idNumber === id);
       if (contractor) {
         if (contractor.status === 'blocked') {
           return { ok: false, status: 'blocked', reason: 'blocked' };
@@ -326,7 +326,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           return d.idNumber === id;
         }
         const d = r.data as ContractorRegistrationData;
-        return d.idNumber === id || d.contractorRegistrationNumber === id;
+        return d.idNumber === id;
       });
 
       if (reg) {
@@ -503,8 +503,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           projectTypes: d.projectTypes,
           licenseDetails: d.licenseDetails,
           bio: d.bio,
-          rating: undefined,
-          reviewCount: 0,
         };
         setContractors((prev) => [...prev, contractor]);
         pushNotification({

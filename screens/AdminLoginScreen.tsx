@@ -36,11 +36,9 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
     setTimeout(() => {
       const r = loginAsAdmin(identifier, password);
       setLoading(false);
-      if (!r.ok) {
-        if (r.reason === 'not_found')
-          setError('לא נמצא מנהל מערכת עם הזהות הזו');
-        else setError('פרטי כניסה שגויים');
-      }
+      // Deliberately generic regardless of the failure reason — never
+      // reveal whether the ID or the password was the wrong part.
+      if (!r.ok) setError('פרטי ההתחברות אינם נכונים');
       // success: AppNavigator will route via the currentUser effect.
     }, 500);
   };
@@ -50,34 +48,41 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <LinearGradient
-        colors={[Colors.secondary, Colors.secondaryDark ?? '#1E3A8A']}
-        style={styles.topBar}
-      />
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24 }]}
+        contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="chevron-forward" size={26} color={Colors.white} />
-          </TouchableOpacity>
-        </View>
+        {/* The hero (back button, logo, title, subtitle) is rendered
+            *inside* the gradient itself now, instead of behind a
+            fixed-height absolute strip — so the blue background always
+            grows to fully contain its white text, on every device/insets/
+            font-scale, instead of the text potentially spilling onto the
+            white page background below where it'd be unreadable. */}
+        <LinearGradient
+          colors={[Colors.secondary, Colors.secondaryDark ?? '#1E3A8A']}
+          style={[styles.topBar, { paddingTop: insets.top + 12 }]}
+        >
+          <View style={styles.headerRow}>
+            <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="chevron-forward" size={26} color={Colors.white} />
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.logoCircle}>
-          <Ionicons
-            name="shield-checkmark"
-            size={48}
-            color={Colors.white}
-          />
-        </View>
+          <View style={styles.logoCircle}>
+            <Ionicons
+              name="shield-checkmark"
+              size={48}
+              color={Colors.white}
+            />
+          </View>
 
-        <Text style={styles.title}>כניסת מנהל מערכת</Text>
-        <Text style={styles.subtitle}>
-          איזור מאובטח לצוות ADMIN בלבד.{'\n'}
-          חשבונות מוגדרים מראש – אין הרשמה.
-        </Text>
+          <Text style={styles.title}>כניסת מנהל מערכת</Text>
+          <Text style={styles.subtitle}>
+            איזור מאובטח לצוות ADMIN בלבד.{'\n'}
+            חשבונות מוגדרים מראש – אין הרשמה.
+          </Text>
+        </LinearGradient>
 
         <View style={styles.card}>
           <View style={styles.inputGroup}>
@@ -94,7 +99,7 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
                 style={styles.input}
                 value={identifier}
                 onChangeText={setIdentifier}
-                placeholder="000000001"
+                placeholder="הזן תעודת זהות או אימייל"
                 placeholderTextColor={Colors.textMuted}
                 autoCapitalize="none"
                 keyboardType="default"
@@ -147,19 +152,6 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
             </Text>
           </TouchableOpacity>
         </View>
-
-        {__DEV__ && (
-          <View style={styles.demoBox}>
-            <Ionicons
-              name="information-circle"
-              size={16}
-              color={Colors.textSecondary}
-            />
-            <Text style={styles.demoText}>
-              אב טיפוס (dev בלבד): ניתן להתחבר עם ID 000000001 וסיסמה כלשהי.
-            </Text>
-          </View>
-        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -167,8 +159,14 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.gray50 },
-  topBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 220 },
-  scroll: { paddingHorizontal: Spacing.xxl, paddingBottom: 60 },
+  // Wraps its own content (back button, logo, title, subtitle) instead of
+  // being a fixed-height absolute strip behind the scroll content — so the
+  // blue background always extends exactly as far as the white text does.
+  topBar: {
+    paddingHorizontal: Spacing.xxl,
+    paddingBottom: Spacing.xl,
+  },
+  scroll: { paddingBottom: 60 },
 
   headerRow: { minHeight: 32, marginBottom: Spacing.md },
   backBtn: { position: 'absolute', right: 0, padding: 4 },
@@ -205,6 +203,8 @@ const styles = StyleSheet.create({
   },
 
   card: {
+    marginHorizontal: Spacing.xxl,
+    marginTop: Spacing.lg,
     backgroundColor: Colors.white,
     borderRadius: Radius.xl,
     padding: Spacing.lg,
@@ -269,20 +269,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.lg,
     fontWeight: '700',
     writingDirection: 'rtl',
-  },
-
-  demoBox: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: Spacing.lg,
-    paddingHorizontal: Spacing.sm,
-  },
-  demoText: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    writingDirection: 'rtl',
-    textAlign: 'right',
   },
 });
 
