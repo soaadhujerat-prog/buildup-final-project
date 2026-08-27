@@ -40,6 +40,11 @@ export const Colors = {
   // Surface / typography (new cream-toned palette)
   background: '#FFFDF9',
   surface: '#FDF8F2',
+  // Warm off-white used behind list screens (e.g. worker search results) so
+  // white cards read as distinct, elevated surfaces instead of blending
+  // into the page background. Purely additive — `background`/`surface`
+  // above are unchanged and still used everywhere else.
+  screenTint: '#F4ECE0',
   border: '#E7D9C9',
   text: '#2F241C',
   textSecondary: '#6B5A4C',

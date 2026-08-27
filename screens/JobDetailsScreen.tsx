@@ -14,6 +14,7 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
+import WorkerAvatar from '../components/WorkerAvatar';
 import { getRegistrationStatus } from '../services/jobStatusService';
 import { callPhone } from '../utils/contact';
 import { Application, Contractor, Worker } from '../types';
@@ -347,13 +348,7 @@ const JobDetailsScreen: React.FC<Props> = ({
                         onPress={() => onOpenWorkerProfile(w.id)}
                         activeOpacity={0.85}
                       >
-                        <View style={styles.candidateAvatar}>
-                          <Ionicons
-                            name="hammer"
-                            size={18}
-                            color={Colors.primary}
-                          />
-                        </View>
+                        <WorkerAvatar worker={w} size={36} />
                         <View style={{ flex: 1 }}>
                           <View style={styles.candidateTopline}>
                             <StatusBadge
@@ -883,14 +878,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: Spacing.sm,
-  },
-  candidateAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: Colors.primaryFaint,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   candidateTopline: {
     flexDirection: 'row-reverse',

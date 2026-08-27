@@ -1,39 +1,63 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import { Worker } from '../types';
+import WorkerCard from '../components/WorkerCard';
+import InlineToast from '../components/InlineToast';
 import FilterBottomSheet, {
   WorkerFilters,
   DEFAULT_WORKER_FILTERS,
   filterWorkers,
   isFiltersActive,
 } from '../components/FilterBottomSheet';
-import SortBottomSheet, { SortOption, sortWorkers } from '../components/SortBottomSheet';
+import SortBottomSheet, {
+  SortOption,
+  sortWorkers,
+  getSortLabel,
+} from '../components/SortBottomSheet';
 
 interface Props {
   onBack: () => void;
   onOpenWorkerProfile: (workerId: string) => void;
+  onOpenFavoriteWorkers?: () => void;
 }
 
 interface Chip {
   key: string;
   label: string;
   onRemove: () => void;
+  variant?: 'sort';
 }
 
-const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) => {
+const SearchWorkersScreen: React.FC<Props> = ({
+  onBack,
+  onOpenWorkerProfile,
+  onOpenFavoriteWorkers,
+}) => {
   const insets = useSafeAreaInsets();
-  const { workers } = useApp();
+  const { workers, currentUser, getFavoriteWorkerIds, toggleFavoriteWorker } = useApp();
+  const contractorId = currentUser?.role === 'contractor' ? currentUser.id : null;
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<WorkerFilters>(DEFAULT_WORKER_FILTERS);
-  const [sort, setSort] = useState<SortOption>('recommended');
+  const [sort, setSort] = useState<SortOption>('default');
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [sortSheetVisible, setSortSheetVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const t = setTimeout(() => setToastMessage(null), 1600);
+    return () => clearTimeout(t);
+  }, [toastMessage]);
+
+  const favoriteWorkerIds = useMemo(
+    () => (contractorId ? getFavoriteWorkerIds(contractorId) : []),
+    [contractorId, getFavoriteWorkerIds]
+  );
 
   const approvedWorkers = useMemo(
     () => workers.filter((w) => w.status === 'approved'),
@@ -46,11 +70,24 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'he'));
   }, [approvedWorkers]);
 
+  // filterWorkers/sortWorkers stay exactly as before — favoritesOnly is
+  // viewer-relative, so it's applied here as a separate step, never inside
+  // that shared predicate.
   const filtered = useMemo(
     () => filterWorkers(approvedWorkers, search, filters),
     [approvedWorkers, search, filters]
   );
-  const results = useMemo(() => sortWorkers(filtered, sort), [filtered, sort]);
+  const filteredWithFavorites = useMemo(
+    () =>
+      filters.favoritesOnly
+        ? filtered.filter((w) => favoriteWorkerIds.includes(w.id))
+        : filtered,
+    [filtered, filters.favoritesOnly, favoriteWorkerIds]
+  );
+  const results = useMemo(
+    () => sortWorkers(filteredWithFavorites, sort),
+    [filteredWithFavorites, sort]
+  );
 
   const filtersActive = isFiltersActive(filters);
 
@@ -59,8 +96,23 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
     setSearch('');
   };
 
+  const handleToggleFavorite = (workerId: string) => {
+    if (!contractorId) return;
+    const wasFavorite = favoriteWorkerIds.includes(workerId);
+    toggleFavoriteWorker(contractorId, workerId);
+    setToastMessage(wasFavorite ? 'הוסר מהמועדפים' : 'נוסף לעובדים המועדפים');
+  };
+
   const chips: Chip[] = useMemo(() => {
     const list: Chip[] = [];
+
+    if (filters.favoritesOnly) {
+      list.push({
+        key: 'favorites',
+        label: 'מועדפים',
+        onRemove: () => setFilters((f) => ({ ...f, favoritesOnly: false })),
+      });
+    }
 
     if (filters.profession) {
       list.push({
@@ -128,9 +180,25 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
     return list;
   }, [filters]);
 
+  // Sort gets its own chip, kept out of `chips` above so the "סינון" button's
+  // badge count still reflects filters only.
+  const sortLabel = getSortLabel(sort);
+  const activeChips: Chip[] = useMemo(() => {
+    if (!sortLabel) return chips;
+    return [
+      ...chips,
+      {
+        key: 'sort',
+        label: `מיון: ${sortLabel}`,
+        onRemove: () => setSort('default'),
+        variant: 'sort' as const,
+      },
+    ];
+  }, [chips, sortLabel]);
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.headerBar}>
+      <View style={styles.headerArea}>
         <TouchableOpacity
           onPress={onBack}
           style={styles.backBtn}
@@ -139,6 +207,7 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>חיפוש עובדים</Text>
+        <Text style={styles.headerSubtitle}>מצא את העובדים המתאימים לפרויקט שלך</Text>
       </View>
 
       <View style={styles.searchBox}>
@@ -191,29 +260,49 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
           <Ionicons name="swap-vertical-outline" size={18} color={Colors.text} />
           <Text style={styles.actionBtnText}>מיון</Text>
         </TouchableOpacity>
+
+        {onOpenFavoriteWorkers && (
+          <TouchableOpacity
+            style={styles.favoritesShortcut}
+            onPress={onOpenFavoriteWorkers}
+            activeOpacity={0.85}
+            accessibilityLabel="עובדים מועדפים"
+          >
+            <Ionicons name="heart-outline" size={20} color={Colors.text} />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {chips.length > 0 && (
+      {activeChips.length > 0 && (
         <View style={styles.chipsWrap}>
-          {chips.map((chip) => (
+          {activeChips.map((chip) => (
             <TouchableOpacity
               key={chip.key}
-              style={styles.activeChip}
+              style={[styles.activeChip, chip.variant === 'sort' && styles.sortChip]}
               onPress={chip.onRemove}
               activeOpacity={0.8}
             >
-              <Ionicons name="close" size={14} color={Colors.primaryDark} />
-              <Text style={styles.activeChipText}>{chip.label}</Text>
+              <Ionicons
+                name="close"
+                size={14}
+                color={chip.variant === 'sort' ? Colors.secondary : Colors.primaryDark}
+              />
+              <Text
+                style={[styles.activeChipText, chip.variant === 'sort' && styles.sortChipText]}
+              >
+                {chip.label}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
       )}
 
       <View style={styles.resultsHeader}>
-        <View style={styles.resultsHeaderTextRow}>
-          <Text style={styles.resultsCount}>{results.length} עובדים</Text>
-          {filtersActive && <Text style={styles.filteredLabel}>מסוננים</Text>}
-        </View>
+        <Text style={styles.resultsSentence}>
+          {'מצאנו עבורך '}
+          <Text style={styles.resultsSentenceStrong}>{`${results.length} עובדים`}</Text>
+          {' שמתאימים לחיפוש שלך'}
+        </Text>
       </View>
 
       {results.length === 0 ? (
@@ -239,7 +328,12 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => (
-            <WorkerCard worker={item} onPress={() => onOpenWorkerProfile(item.id)} />
+            <WorkerCard
+              worker={item}
+              onPress={() => onOpenWorkerProfile(item.id)}
+              isFavorite={favoriteWorkerIds.includes(item.id)}
+              onToggleFavorite={() => handleToggleFavorite(item.id)}
+            />
           )}
         />
       )}
@@ -252,6 +346,7 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
         filters={filters}
         onApply={setFilters}
         allSkills={allSkills}
+        favoriteWorkerIds={favoriteWorkerIds}
       />
 
       <SortBottomSheet
@@ -260,71 +355,23 @@ const SearchWorkersScreen: React.FC<Props> = ({ onBack, onOpenWorkerProfile }) =
         value={sort}
         onChange={setSort}
       />
+
+      <InlineToast message={toastMessage} />
     </View>
   );
 };
 
-const WorkerCard: React.FC<{
-  worker: Worker;
-  onPress: () => void;
-}> = ({ worker, onPress }) => (
-  <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
-    <View style={styles.cardHead}>
-      <View style={styles.avatar}>
-        <Ionicons name="hammer" size={22} color={Colors.primary} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <View style={styles.nameRow}>
-          {worker.isAvailable && (
-            <View style={styles.availDot}>
-              <View style={styles.availDotInner} />
-            </View>
-          )}
-          <Text style={styles.name}>{worker.fullName}</Text>
-        </View>
-        <Text style={styles.profession}>
-          {worker.profession} · {worker.experienceYears} שנים
-        </Text>
-        <View style={styles.metaRow}>
-          <View style={styles.metaItem}>
-            <Ionicons name="location-outline" size={14} color={Colors.textMuted} />
-            <Text style={styles.metaText}>{worker.city}</Text>
-          </View>
-        </View>
-      </View>
-      <View style={styles.rateBox}>
-        <Text style={styles.rateValue}>{worker.dailyRate}₪</Text>
-        <Text style={styles.rateLabel}>ליום</Text>
-      </View>
-    </View>
-
-    {worker.skills.length > 0 && (
-      <View style={styles.skillsRow}>
-        {worker.skills.slice(0, 3).map((s) => (
-          <View key={s} style={styles.skill}>
-            <Text style={styles.skillText}>{s}</Text>
-          </View>
-        ))}
-        {worker.skills.length > 3 && (
-          <View style={styles.skill}>
-            <Text style={styles.skillText}>+{worker.skills.length - 3}</Text>
-          </View>
-        )}
-      </View>
-    )}
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.screenTint },
 
-  headerBar: {
+  // No white box / border here on purpose — the header should read as part
+  // of the same flowing background as the rest of the screen, not a
+  // separate block sitting on top of it.
+  headerArea: {
     position: 'relative',
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
   backBtn: {
     position: 'absolute',
@@ -339,13 +386,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     writingDirection: 'rtl',
   },
+  headerSubtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginTop: 3,
+  },
 
   searchBox: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     backgroundColor: Colors.white,
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
+    marginTop: Spacing.sm,
     borderRadius: Radius.md,
     paddingHorizontal: 12,
     gap: 8,
@@ -404,6 +458,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.primary,
   },
+  favoritesShortcut: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.white,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+  },
 
   chipsWrap: {
     flexDirection: 'row-reverse',
@@ -429,28 +492,30 @@ const styles = StyleSheet.create({
     color: Colors.primaryDark,
     writingDirection: 'rtl',
   },
+  // Sort's chip is visually distinct from filter chips (light blue vs the
+  // brand's warm/primary tint) so it reads as "how it's ordered" rather
+  // than "what it's narrowed by".
+  sortChip: {
+    backgroundColor: '#DBEAFE',
+    borderColor: '#BFDBFE',
+  },
+  sortChipText: { color: Colors.secondary },
 
   resultsHeader: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
-  resultsHeaderTextRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 8,
-  },
-  resultsCount: {
+  resultsSentence: {
     fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.md + 6,
+  },
+  resultsSentenceStrong: {
     fontWeight: '800',
     color: Colors.text,
-    writingDirection: 'rtl',
-  },
-  filteredLabel: {
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-    color: Colors.textMuted,
-    writingDirection: 'rtl',
   },
 
   results: {
@@ -461,105 +526,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: 0,
     paddingBottom: 40,
-  },
-
-  card: {
-    backgroundColor: Colors.white,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    gap: 8,
-    ...Shadow.medium,
-  },
-  cardHead: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: Colors.primaryFaint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  nameRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-  },
-  availDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#DCFCE7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  availDotInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.success,
-  },
-  name: {
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    color: Colors.text,
-    writingDirection: 'rtl',
-  },
-  profession: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    marginTop: 2,
-  },
-  metaRow: {
-    flexDirection: 'row-reverse',
-    gap: Spacing.sm,
-    marginTop: 4,
-  },
-  metaItem: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 4,
-  },
-  metaText: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-  },
-
-  rateBox: {
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: Colors.primaryFaint,
-    borderRadius: Radius.sm,
-  },
-  rateValue: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: Colors.primary,
-  },
-  rateLabel: { fontSize: 10, color: Colors.textMuted, fontWeight: '600' },
-
-  skillsRow: {
-    flexDirection: 'row-reverse',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  skill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: Colors.gray100,
-    borderRadius: Radius.sm,
-  },
-  skillText: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-    writingDirection: 'rtl',
   },
 
   emptyWrap: {

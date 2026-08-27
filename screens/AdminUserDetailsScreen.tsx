@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
 import { Contractor, Worker } from '../types';
 
 interface Props {
@@ -137,20 +138,13 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
       >
         {/* Hero */}
         <View style={styles.heroCard}>
-          <View
-            style={[
-              styles.heroIcon,
-              {
-                backgroundColor: isWorker ? Colors.primaryFaint : '#DBEAFE',
-              },
-            ]}
-          >
-            <Ionicons
-              name={isWorker ? 'hammer' : 'business'}
-              size={28}
-              color={isWorker ? Colors.primary : Colors.secondary}
-            />
-          </View>
+          {isWorker && w ? (
+            <WorkerAvatar worker={w} size={64} />
+          ) : (
+            <View style={[styles.heroIcon, { backgroundColor: '#DBEAFE' }]}>
+              <Ionicons name="business" size={28} color={Colors.secondary} />
+            </View>
+          )}
           <View style={{ flex: 1 }}>
             <Text style={styles.heroName}>{user.fullName}</Text>
             <Text style={styles.heroRole}>

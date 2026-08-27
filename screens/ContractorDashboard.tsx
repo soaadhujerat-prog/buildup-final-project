@@ -24,6 +24,7 @@ interface Props {
   onOpenContractorProfile: () => void;
   onOpenPostJob: () => void;
   onOpenSearchWorkers: () => void;
+  onOpenFavoriteWorkers: () => void;
   onOpenSmartMatch: () => void;
   onOpenMessages: () => void;
   onOpenNotifications: () => void;
@@ -38,6 +39,7 @@ const ContractorDashboard: React.FC<Props> = ({
   onOpenContractorProfile,
   onOpenPostJob,
   onOpenSearchWorkers,
+  onOpenFavoriteWorkers,
   onOpenSmartMatch,
   onOpenMessages,
   onOpenNotifications,
@@ -212,6 +214,11 @@ const ContractorDashboard: React.FC<Props> = ({
             icon="search-outline"
             label="חפש עובדים"
             onPress={onOpenSearchWorkers}
+          />
+          <QuickAction
+            icon="heart-outline"
+            label="עובדים מועדפים"
+            onPress={onOpenFavoriteWorkers}
           />
           <QuickAction
             icon="sparkles-outline"

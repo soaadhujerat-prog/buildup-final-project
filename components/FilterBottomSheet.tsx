@@ -34,6 +34,11 @@ export interface WorkerFilters {
   skills: string[];
   minRate: string; // kept as raw text for the numeric inputs
   maxRate: string;
+  // Viewer-relative (depends on which contractor is logged in), so it is
+  // intentionally NOT part of filterWorkers below — that predicate only
+  // ever looks at intrinsic Worker fields. The screen applies this one
+  // itself, after filterWorkers, against its own favoriteWorkerIds.
+  favoritesOnly: boolean;
 }
 
 export const DEFAULT_WORKER_FILTERS: WorkerFilters = {
@@ -45,6 +50,7 @@ export const DEFAULT_WORKER_FILTERS: WorkerFilters = {
   skills: [],
   minRate: '',
   maxRate: '',
+  favoritesOnly: false,
 };
 
 export const EXPERIENCE_OPTIONS: { label: string; value: number }[] = [
@@ -97,7 +103,8 @@ export const isFiltersActive = (f: WorkerFilters): boolean =>
   f.minExperience > 0 ||
   f.skills.length > 0 ||
   !!f.minRate.trim() ||
-  !!f.maxRate.trim();
+  !!f.maxRate.trim() ||
+  f.favoritesOnly;
 
 interface Props {
   visible: boolean;
@@ -107,6 +114,7 @@ interface Props {
   filters: WorkerFilters;
   onApply: (filters: WorkerFilters) => void;
   allSkills: string[];
+  favoriteWorkerIds: string[]; // for the "רק עובדים מועדפים" preview count
 }
 
 /** "סינון עובדים" — the main filter bottom sheet. Edits a local draft copy
@@ -120,6 +128,7 @@ const FilterBottomSheet: React.FC<Props> = ({
   filters,
   onApply,
   allSkills,
+  favoriteWorkerIds,
 }) => {
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<WorkerFilters>(filters);
@@ -130,7 +139,12 @@ const FilterBottomSheet: React.FC<Props> = ({
     if (visible) setDraft(filters);
   }, [visible, filters]);
 
-  const previewCount = filterWorkers(workers, searchQuery, draft).length;
+  const previewCount = (() => {
+    const base = filterWorkers(workers, searchQuery, draft);
+    return draft.favoritesOnly
+      ? base.filter((w) => favoriteWorkerIds.includes(w.id)).length
+      : base.length;
+  })();
 
   const handleApply = () => {
     onApply(draft);
@@ -171,6 +185,21 @@ const FilterBottomSheet: React.FC<Props> = ({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
+              {/* מועדפים */}
+              <TouchableOpacity
+                style={[styles.row, styles.favoritesRow]}
+                onPress={() => setDraft((d) => ({ ...d, favoritesOnly: !d.favoritesOnly }))}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={draft.favoritesOnly ? 'checkbox' : 'square-outline'}
+                  size={20}
+                  color={draft.favoritesOnly ? Colors.primary : Colors.textMuted}
+                />
+                <Text style={styles.rowValue}>רק עובדים מועדפים</Text>
+                <Ionicons name="heart" size={16} color={Colors.textMuted} />
+              </TouchableOpacity>
+
               {/* מקצוע */}
               <Text style={styles.sectionLabel}>מקצוע</Text>
               <TouchableOpacity
@@ -426,6 +455,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
+  favoritesRow: { marginTop: Spacing.sm },
 
   cityWrap: { marginTop: -6 },
 

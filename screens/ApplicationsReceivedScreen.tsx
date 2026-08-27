@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
 import { Application, ApplicationStatus, Worker, Contractor } from '../types';
 
 interface Props {
@@ -166,6 +167,7 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
             return (
               <ApplicationRow
                 app={item}
+                worker={worker}
                 workerName={worker?.fullName ?? 'עובד לא ידוע'}
                 workerProfession={worker?.profession ?? ''}
                 workerExperience={worker?.experienceYears ?? 0}
@@ -218,6 +220,7 @@ const Chip: React.FC<{
 
 const ApplicationRow: React.FC<{
   app: Application;
+  worker: Worker | undefined;
   workerName: string;
   workerProfession: string;
   workerExperience: number;
@@ -229,6 +232,7 @@ const ApplicationRow: React.FC<{
   onReject: () => void;
 }> = ({
   app,
+  worker,
   workerName,
   workerProfession,
   workerExperience,
@@ -259,9 +263,13 @@ const ApplicationRow: React.FC<{
         onPress={onPressWorker}
         activeOpacity={0.85}
       >
-        <View style={styles.avatarCircle}>
-          <Ionicons name="hammer" size={20} color={Colors.primary} />
-        </View>
+        {worker ? (
+          <WorkerAvatar worker={worker} size={44} />
+        ) : (
+          <View style={styles.avatarCircle}>
+            <Ionicons name="person" size={18} color={Colors.textMuted} />
+          </View>
+        )}
         <View style={{ flex: 1 }}>
           <View style={styles.headlineRow}>
             <StatusBadge label={label} tone={tone} small />

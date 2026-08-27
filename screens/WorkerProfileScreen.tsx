@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
 import { callPhone } from '../utils/contact';
 import { Contractor, Worker } from '../types';
 
@@ -32,12 +33,24 @@ const WorkerProfileScreen: React.FC<Props> = ({
   onOpenChat,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, getUserById, jobs, sendInvitation, invitations } =
-    useApp();
+  const {
+    currentUser,
+    getUserById,
+    jobs,
+    sendInvitation,
+    invitations,
+    isFavoriteWorker,
+    toggleFavoriteWorker,
+  } = useApp();
 
   const worker = getUserById(workerId) as Worker | undefined;
   const me = currentUser;
   const isContractor = me?.role === 'contractor';
+  const isFavorite = isContractor && me ? isFavoriteWorker(me.id, workerId) : false;
+  const handleToggleFavorite = () => {
+    if (!isContractor || !me) return;
+    toggleFavoriteWorker(me.id, workerId);
+  };
 
   const [pickerVisible, setPickerVisible] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -85,6 +98,20 @@ const WorkerProfileScreen: React.FC<Props> = ({
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>פרופיל עובד</Text>
+        {isContractor && (
+          <TouchableOpacity
+            onPress={handleToggleFavorite}
+            style={styles.favoriteBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel={isFavorite ? 'הסר מהמועדפים' : 'הוסף למועדפים'}
+          >
+            <Ionicons
+              name={isFavorite ? 'heart' : 'heart-outline'}
+              size={24}
+              color={isFavorite ? '#E0245E' : Colors.text}
+            />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -93,9 +120,7 @@ const WorkerProfileScreen: React.FC<Props> = ({
       >
         {/* Hero */}
         <View style={styles.heroCard}>
-          <View style={styles.heroAvatar}>
-            <Ionicons name="hammer" size={32} color={Colors.primary} />
-          </View>
+          <WorkerAvatar worker={worker} size={72} />
           <View style={styles.heroBody}>
             <View style={styles.heroNameRow}>
               {worker.isAvailable && (
@@ -402,6 +427,12 @@ const styles = StyleSheet.create({
     top: Spacing.md,
     padding: 4,
   },
+  favoriteBtn: {
+    position: 'absolute',
+    left: Spacing.lg,
+    top: Spacing.md,
+    padding: 4,
+  },
   headerTitle: {
     fontSize: FontSize.lg,
     fontWeight: '800',
@@ -428,14 +459,6 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     marginBottom: Spacing.md,
     ...Shadow.medium,
-  },
-  heroAvatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
-    backgroundColor: Colors.primaryFaint,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   heroBody: { flex: 1 },
   heroNameRow: {

@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StaffingProgress from '../components/StaffingProgress';
+import WorkerAvatar from '../components/WorkerAvatar';
 import { callPhone } from '../utils/contact';
 import { Worker, Assignment } from '../types';
 
@@ -152,9 +153,7 @@ const WorkerAssignmentCard: React.FC<{
       onPress={onPressProfile}
       activeOpacity={0.85}
     >
-      <View style={styles.avatar}>
-        <Ionicons name="hammer" size={20} color={Colors.primary} />
-      </View>
+      <WorkerAvatar worker={worker} size={44} />
       <View style={{ flex: 1 }}>
         <View style={styles.cardTopline}>
           <View style={styles.statusDot} />
@@ -265,14 +264,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: Spacing.md,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: Colors.primaryFaint,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   cardTopline: {
     flexDirection: 'row-reverse',

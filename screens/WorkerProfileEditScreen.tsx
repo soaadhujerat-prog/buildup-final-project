@@ -9,9 +9,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 
 import {
   Colors,
@@ -25,6 +28,7 @@ import { useApp } from '../context/AppContext';
 import ChipInput from '../components/ChipInput';
 import CityPickerField from '../components/CityPickerField';
 import HorizontalChipPicker from '../components/HorizontalChipPicker';
+import WorkerAvatar from '../components/WorkerAvatar';
 import {
   AREAS_ISRAEL,
   PROFESSIONS_BY_CATEGORY,
@@ -62,6 +66,16 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     me?.preferredAreas ?? []
   );
 
+  // Profile image — a public identity photo, entirely separate from the
+  // private ID-card document captured at sign-up (DocumentUploadField).
+  // Kept as a local URI for now; only swapped for a Supabase Storage URL
+  // once there's a real backend, but the field itself (Worker.avatarUrl)
+  // stays the same either way.
+  const [avatarUri, setAvatarUri] = useState<string | undefined>(me?.avatarUrl);
+  const [avatarSheetOpen, setAvatarSheetOpen] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState<'camera' | 'gallery' | null>(null);
+  const [avatarNotice, setAvatarNotice] = useState<string | null>(null);
+
   const profCategories = useMemo(
     () => PROFESSION_CATEGORIES.filter((c) => c !== 'כל המקצועות'),
     []
@@ -84,6 +98,70 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
 
   const [submitting, setSubmitting] = useState(false);
 
+  const openAvatarSheet = () => {
+    setAvatarNotice(null);
+    setAvatarSheetOpen(true);
+  };
+  const closeAvatarSheet = () => {
+    if (avatarBusy) return;
+    setAvatarSheetOpen(false);
+  };
+
+  const runAvatarCamera = async () => {
+    setAvatarNotice(null);
+    setAvatarBusy('camera');
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (perm.status !== 'granted') {
+        setAvatarNotice('לא ניתנה הרשאת מצלמה. אפשר לבחור תמונה מהגלריה במקום.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+        allowsEditing: true,
+        aspect: [1, 1],
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      setAvatarUri(result.assets[0].uri);
+      setAvatarSheetOpen(false);
+    } catch {
+      setAvatarNotice('לא ניתן היה לפתוח את המצלמה. נסה שוב.');
+    } finally {
+      setAvatarBusy(null);
+    }
+  };
+
+  const runAvatarGallery = async () => {
+    setAvatarNotice(null);
+    setAvatarBusy('gallery');
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') {
+        setAvatarNotice('לא ניתנה הרשאת גישה לגלריה. אפשר לצלם עכשיו במקום.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+        allowsEditing: true,
+        aspect: [1, 1],
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      setAvatarUri(result.assets[0].uri);
+      setAvatarSheetOpen(false);
+    } catch {
+      setAvatarNotice('לא ניתן היה לפתוח את הגלריה. נסה שוב.');
+    } finally {
+      setAvatarBusy(null);
+    }
+  };
+
+  const removeAvatar = () => {
+    setAvatarUri(undefined);
+    setAvatarSheetOpen(false);
+  };
+
   const handleSave = () => {
     if (submitting) return;
     if (!phone.trim()) return Alert.alert('שגיאה', 'טלפון חובה');
@@ -104,6 +182,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
 
     setSubmitting(true);
     updateWorkerProfile(me.id, {
+      avatarUrl: avatarUri,
       phone: phone.trim(),
       email: email.trim(),
       city,
@@ -144,6 +223,29 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <Section title="תמונת פרופיל">
+          <View style={styles.avatarEditWrap}>
+            <TouchableOpacity
+              onPress={openAvatarSheet}
+              activeOpacity={0.8}
+              style={styles.avatarTouchable}
+            >
+              <WorkerAvatar
+                worker={{ id: me.id, fullName: me.fullName, avatarUrl: avatarUri }}
+                size={92}
+              />
+              <View style={styles.avatarEditBadge}>
+                <Ionicons name="camera" size={16} color={Colors.white} />
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={openAvatarSheet} activeOpacity={0.7}>
+              <Text style={styles.avatarEditLink}>
+                {avatarUri ? 'החלף תמונה' : 'הוסף תמונת פרופיל'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </Section>
+
         <Section title="פרטי קשר">
           <Field label="טלפון" value={phone} onChange={setPhone} keyboardType="phone-pad" />
           <Field
@@ -276,11 +378,88 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Profile image action sheet */}
+      <Modal
+        visible={avatarSheetOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={closeAvatarSheet}
+      >
+        <View style={styles.avatarSheetBackdrop}>
+          <View style={styles.avatarSheet}>
+            <View style={styles.avatarSheetHandle} />
+            <View style={styles.avatarSheetHeader}>
+              <TouchableOpacity
+                onPress={closeAvatarSheet}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="סגור"
+                disabled={!!avatarBusy}
+              >
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+              <Text style={styles.avatarSheetTitle}>תמונת פרופיל</Text>
+              <View style={{ width: 24 }} />
+            </View>
+
+            <AvatarSheetOption
+              icon="camera"
+              label="צלם תמונה"
+              onPress={runAvatarCamera}
+              busy={avatarBusy === 'camera'}
+              disabled={!!avatarBusy}
+            />
+            <AvatarSheetOption
+              icon="images"
+              label="בחר מהגלריה"
+              onPress={runAvatarGallery}
+              busy={avatarBusy === 'gallery'}
+              disabled={!!avatarBusy}
+            />
+            {!!avatarUri && (
+              <AvatarSheetOption
+                icon="trash-outline"
+                label="הסר תמונה"
+                onPress={removeAvatar}
+                disabled={!!avatarBusy}
+                destructive
+              />
+            )}
+
+            {!!avatarNotice && <Text style={styles.avatarNoticeText}>{avatarNotice}</Text>}
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
 
 // ---------- subcomponents ----------
+
+const AvatarSheetOption: React.FC<{
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+  destructive?: boolean;
+}> = ({ icon, label, onPress, busy, disabled, destructive }) => (
+  <TouchableOpacity
+    style={[styles.avatarSheetRow, disabled && !busy && styles.avatarSheetRowDisabled]}
+    onPress={onPress}
+    activeOpacity={0.75}
+    disabled={disabled}
+  >
+    {busy ? (
+      <ActivityIndicator size="small" color={Colors.primary} />
+    ) : (
+      <Ionicons name={icon} size={22} color={destructive ? Colors.danger : Colors.primary} />
+    )}
+    <Text style={[styles.avatarSheetRowText, destructive && { color: Colors.danger }]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   title,
@@ -348,6 +527,93 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     writingDirection: 'rtl',
     marginTop: 60,
+  },
+
+  avatarEditWrap: { alignItems: 'center', gap: Spacing.sm },
+  avatarTouchable: { position: 'relative' },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: Colors.primary,
+    borderWidth: 2,
+    borderColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarEditLink: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+
+  avatarSheetBackdrop: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  avatarSheet: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Spacing.xl,
+  },
+  avatarSheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.border,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  avatarSheetHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  avatarSheetTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.text,
+    writingDirection: 'rtl',
+  },
+  avatarSheetRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 16,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.gray50,
+  },
+  avatarSheetRowDisabled: { opacity: 0.5 },
+  avatarSheetRowText: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.text,
+    writingDirection: 'rtl',
+  },
+  avatarNoticeText: {
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 18,
   },
 
   section: {

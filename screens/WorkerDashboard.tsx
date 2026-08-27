@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
 import { Worker, ApplicationStatus } from '../types';
 
 interface Props {
@@ -165,9 +166,7 @@ const WorkerDashboard: React.FC<Props> = ({
           </View>
 
           <View style={styles.headerBody}>
-            <View style={styles.avatarCircle}>
-              <Ionicons name="hammer" size={26} color={Colors.white} />
-            </View>
+            <WorkerAvatar worker={me} size={56} />
             <View style={{ flex: 1 }}>
               <Text style={styles.hello}>שלום, {me.fullName}</Text>
               <Text style={styles.role}>
@@ -507,16 +506,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
     marginBottom: Spacing.md,
-  },
-  avatarCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   hello: {
     fontSize: FontSize.lg,

@@ -59,6 +59,7 @@ import PostJobScreen from '../screens/PostJobScreen';
 import ApplicationsReceivedScreen from '../screens/ApplicationsReceivedScreen';
 import SentInvitationsScreen from '../screens/SentInvitationsScreen';
 import SearchWorkersScreen from '../screens/SearchWorkersScreen';
+import FavoriteWorkersScreen from '../screens/FavoriteWorkersScreen';
 import WorkerProfileScreen from '../screens/WorkerProfileScreen';
 import SmartMatchScreen from '../screens/SmartMatchScreen';
 import ContractorProfileScreen from '../screens/ContractorProfileScreen';
@@ -110,6 +111,7 @@ type Route =
   | { name: 'ContractorPostJob' }
   | { name: 'ContractorJobDetails'; jobId: string }
   | { name: 'ContractorSearchWorkers' }
+  | { name: 'ContractorFavoriteWorkers' }
   | { name: 'ContractorWorkerProfile'; workerId: string }
   | { name: 'ContractorSmartMatch'; initialJobId?: string }
   | { name: 'ContractorSentInvitations' }
@@ -543,6 +545,17 @@ const AppNavigator: React.FC = () => {
             onOpenWorkerProfile={(workerId) =>
               push({ name: 'ContractorWorkerProfile', workerId })
             }
+            onOpenFavoriteWorkers={() => push({ name: 'ContractorFavoriteWorkers' })}
+          />
+        );
+      case 'ContractorFavoriteWorkers':
+        return (
+          <FavoriteWorkersScreen
+            onBack={goBack}
+            onOpenWorkerProfile={(workerId) =>
+              push({ name: 'ContractorWorkerProfile', workerId })
+            }
+            onOpenSearchWorkers={() => push({ name: 'ContractorSearchWorkers' })}
           />
         );
       case 'ContractorWorkerProfile':
@@ -831,6 +844,9 @@ const ContractorHome: React.FC<{
             onOpenPostJob={() => navigate({ name: 'ContractorPostJob' })}
             onOpenSearchWorkers={() =>
               navigate({ name: 'ContractorSearchWorkers' })
+            }
+            onOpenFavoriteWorkers={() =>
+              navigate({ name: 'ContractorFavoriteWorkers' })
             }
             onOpenSmartMatch={() => navigate({ name: 'ContractorSmartMatch' })}
             onOpenMessages={() => navigate({ name: 'Messages' })}

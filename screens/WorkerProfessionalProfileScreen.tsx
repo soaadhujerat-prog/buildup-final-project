@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
 import { Worker } from '../types';
 
 interface Props {
@@ -60,9 +61,7 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
       >
         {/* Hero */}
         <View style={styles.heroCard}>
-          <View style={styles.heroAvatar}>
-            <Ionicons name="hammer" size={32} color={Colors.white} />
-          </View>
+          <WorkerAvatar worker={me} size={80} style={{ marginBottom: Spacing.sm }} />
           <Text style={styles.heroName}>{me.fullName}</Text>
           <Text style={styles.heroProfession}>
             {me.profession} · {me.experienceYears} שנות ניסיון
@@ -259,15 +258,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     ...Shadow.medium,
-  },
-  heroAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.sm,
   },
   heroName: {
     fontSize: FontSize.xl,

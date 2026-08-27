@@ -5,19 +5,27 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { Worker } from '../types';
 
-export type SortOption = 'recommended' | 'expDesc' | 'expAsc' | 'rateAsc' | 'rateDesc';
+// 'default' = no sort applied, just the existing order of the data. It's
+// intentionally NOT labeled "מומלץ" / "recommended" — that phrasing implies
+// a real recommendation, and there's no Smart Match scoring behind this yet
+// (that lands later, backed by real AI matching). 'default' also never
+// appears in SORT_OPTIONS, so the sheet never shows a "default" row.
+export type SortOption = 'default' | 'expDesc' | 'expAsc' | 'rateAsc' | 'rateDesc';
 
 export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'recommended', label: 'מומלץ' },
   { value: 'expDesc', label: 'ניסיון: מהגבוה לנמוך' },
   { value: 'expAsc', label: 'ניסיון: מהנמוך לגבוה' },
   { value: 'rateAsc', label: 'תעריף: מהנמוך לגבוה' },
   { value: 'rateDesc', label: 'תעריף: מהגבוה לנמוך' },
 ];
 
+/** Label for the active-sort chip; null for 'default' (no chip shown). */
+export const getSortLabel = (sort: SortOption): string | null =>
+  SORT_OPTIONS.find((o) => o.value === sort)?.label ?? null;
+
 /** Pure sort — applied after filtering, never mutates its input. */
 export const sortWorkers = (workers: Worker[], sort: SortOption): Worker[] => {
-  if (sort === 'recommended') return workers;
+  if (sort === 'default') return workers;
   const sorted = [...workers];
   switch (sort) {
     case 'expDesc':

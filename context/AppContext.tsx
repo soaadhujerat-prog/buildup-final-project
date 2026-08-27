@@ -36,6 +36,7 @@ import {
   SupportTicket,
   SupportTicketType,
   ProfessionCategory,
+  ContractorFavoriteWorker,
 } from '../types';
 
 import {
@@ -95,6 +96,7 @@ interface AppState {
   applications: Application[];
   invitations: Invitation[];
   assignments: Assignment[];
+  favoriteWorkers: ContractorFavoriteWorker[];
 
   conversations: Conversation[];
   notifications: AppNotification[];
@@ -149,6 +151,12 @@ interface AppState {
     invitationId: string,
     accepted: boolean
   ) => void;
+
+  // Favorite workers — personal to each contractor, never a global Worker
+  // property. See ContractorFavoriteWorker in types/index.ts.
+  toggleFavoriteWorker: (contractorId: string, workerId: string) => void;
+  isFavoriteWorker: (contractorId: string, workerId: string) => boolean;
+  getFavoriteWorkerIds: (contractorId: string) => string[];
 
   // Worker profile edits
   setWorkerAvailability: (workerId: string, isAvailable: boolean) => void;
@@ -269,6 +277,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     useState<AppNotification[]>(MOCK_NOTIFICATIONS);
   const [supportTickets, setSupportTickets] =
     useState<SupportTicket[]>(MOCK_SUPPORT_TICKETS);
+
+  // Frontend-only for now — no mock seed data, contractors build this list
+  // themselves at runtime. Shaped 1:1 with the future
+  // contractor_favorite_workers Supabase table (see types/index.ts).
+  const [favoriteWorkers, setFavoriteWorkers] = useState<ContractorFavoriteWorker[]>([]);
 
   // ---------------------------------------------------------------------
   // Notification helpers
@@ -794,6 +807,46 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   // ---------------------------------------------------------------------
+  // Favorite workers
+  // ---------------------------------------------------------------------
+
+  const isFavoriteWorker = useCallback<AppState['isFavoriteWorker']>(
+    (contractorId, workerId) =>
+      favoriteWorkers.some(
+        (f) => f.contractorId === contractorId && f.workerId === workerId
+      ),
+    [favoriteWorkers]
+  );
+
+  const getFavoriteWorkerIds = useCallback<AppState['getFavoriteWorkerIds']>(
+    (contractorId) =>
+      favoriteWorkers
+        .filter((f) => f.contractorId === contractorId)
+        .map((f) => f.workerId),
+    [favoriteWorkers]
+  );
+
+  const toggleFavoriteWorker = useCallback<AppState['toggleFavoriteWorker']>(
+    (contractorId, workerId) => {
+      setFavoriteWorkers((prev) => {
+        const exists = prev.some(
+          (f) => f.contractorId === contractorId && f.workerId === workerId
+        );
+        if (exists) {
+          return prev.filter(
+            (f) => !(f.contractorId === contractorId && f.workerId === workerId)
+          );
+        }
+        return [
+          ...prev,
+          { id: newId('fav'), contractorId, workerId, createdAt: nowIso() },
+        ];
+      });
+    },
+    []
+  );
+
+  // ---------------------------------------------------------------------
   // Worker / Contractor profile mutations
   // ---------------------------------------------------------------------
 
@@ -1063,6 +1116,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       applications,
       invitations,
       assignments,
+      favoriteWorkers,
       conversations,
       notifications,
       supportTickets,
@@ -1086,6 +1140,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       respondToApplication,
       sendInvitation,
       respondToInvitation,
+
+      toggleFavoriteWorker,
+      isFavoriteWorker,
+      getFavoriteWorkerIds,
 
       setWorkerAvailability,
       updateWorkerProfile,
@@ -1123,6 +1181,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       applications,
       invitations,
       assignments,
+      favoriteWorkers,
       conversations,
       notifications,
       supportTickets,
@@ -1142,6 +1201,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       respondToApplication,
       sendInvitation,
       respondToInvitation,
+      toggleFavoriteWorker,
+      isFavoriteWorker,
+      getFavoriteWorkerIds,
       setWorkerAvailability,
       updateWorkerProfile,
       updateContractorProfile,

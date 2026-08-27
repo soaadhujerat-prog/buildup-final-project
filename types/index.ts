@@ -227,6 +227,22 @@ export interface Invitation {
 }
 
 // ---------------------------------------------------------------------------
+// Favorite workers (contractor -> worker, personal to each contractor)
+// ---------------------------------------------------------------------------
+
+/** A contractor bookmarking a worker for quick recall later. This is NOT a
+ *  property of Worker (no `worker.isFavorite`) — favoriting is per-contractor,
+ *  so the same worker can be a favorite for Contractor A and not for
+ *  Contractor B. Shaped to drop straight into a future Supabase table:
+ *  contractor_favorite_workers(contractor_id, worker_id, created_at). */
+export interface ContractorFavoriteWorker {
+  id: string;
+  contractorId: string;
+  workerId: string;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Assignments (real staffing — a worker actually confirmed onto a job)
 // ---------------------------------------------------------------------------
 
