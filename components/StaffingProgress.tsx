@@ -79,6 +79,9 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   track: {
+    // RTL: the fill grows from the RIGHT edge (row-reverse), so 1/3 fills
+    // the right third, 3/3 fills the whole bar — matching how Hebrew reads.
+    flexDirection: 'row-reverse',
     height: 8,
     borderRadius: Radius.full,
     backgroundColor: Colors.gray200,
@@ -91,6 +94,7 @@ const styles = StyleSheet.create({
 
   compactWrap: { width: '100%', gap: 4 },
   compactTrack: {
+    flexDirection: 'row-reverse',
     height: 5,
     borderRadius: Radius.full,
     backgroundColor: Colors.gray200,

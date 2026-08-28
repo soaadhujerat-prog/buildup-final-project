@@ -14,15 +14,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow, FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import { getWorkerJobAssignment } from '../services/assignmentService';
 import {
   formatJobRateCompact,
   applicationTimeline,
+  assignmentCancelLine,
+  currentStaffedState,
   APPLICATION_STATUS_LABEL,
   APPLICATION_STATUS_TONE,
 } from '../utils/helpers';
 import {
   Application,
   ApplicationStatus,
+  Assignment,
   Contractor,
   Worker,
 } from '../types';
@@ -41,8 +45,14 @@ const MyApplicationsScreen: React.FC<Props> = ({
   initialFilter = 'all',
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, applications, jobs, getUserById, withdrawApplication } =
-    useApp();
+  const {
+    currentUser,
+    applications,
+    jobs,
+    assignments,
+    getUserById,
+    withdrawApplication,
+  } = useApp();
   const me = currentUser as Worker | undefined;
 
   const handleWithdraw = (app: Application) => {
@@ -173,6 +183,11 @@ const MyApplicationsScreen: React.FC<Props> = ({
                 contractorName={
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }
+                assignment={getWorkerJobAssignment(
+                  assignments,
+                  item.jobId,
+                  item.workerId
+                )}
                 onPress={() => job && onOpenJobDetails(job.id)}
                 onWithdraw={() => handleWithdraw(item)}
               />
@@ -222,6 +237,7 @@ const ApplicationRow: React.FC<{
   jobCity: string;
   jobRateLabel: string;
   contractorName: string;
+  assignment: Assignment | undefined;
   onPress: () => void;
   onWithdraw: () => void;
 }> = ({
@@ -230,9 +246,22 @@ const ApplicationRow: React.FC<{
   jobCity,
   jobRateLabel,
   contractorName,
+  assignment,
   onPress,
   onWithdraw,
 }) => {
+  const { label, tone } = currentStaffedState(
+    {
+      label: APPLICATION_STATUS_LABEL[app.status],
+      tone: APPLICATION_STATUS_TONE[app.status],
+    },
+    app.status,
+    assignment
+  );
+  const cancelLine =
+    app.status === 'accepted' && assignment?.status === 'cancelled'
+      ? assignmentCancelLine(assignment)
+      : null;
   return (
     <TouchableOpacity
       style={styles.card}
@@ -240,11 +269,7 @@ const ApplicationRow: React.FC<{
       activeOpacity={0.85}
     >
       <View style={styles.cardHead}>
-        <StatusBadge
-          label={APPLICATION_STATUS_LABEL[app.status]}
-          tone={APPLICATION_STATUS_TONE[app.status]}
-          small
-        />
+        <StatusBadge label={label} tone={tone} small />
         <Text style={styles.title} numberOfLines={1}>
           {jobTitle}
         </Text>
@@ -286,6 +311,7 @@ const ApplicationRow: React.FC<{
             {line}
           </Text>
         ))}
+        {cancelLine && <Text style={styles.appliedAt}>{cancelLine}</Text>}
       </View>
 
       {app.contractorResponse && (
@@ -294,6 +320,21 @@ const ApplicationRow: React.FC<{
           <Text style={styles.responseText}>{app.contractorResponse}</Text>
         </View>
       )}
+
+      {app.status === 'accepted' &&
+      assignment?.status === 'cancelled' &&
+      assignment.cancellationMessage ? (
+        <View style={styles.response}>
+          <Text style={styles.responseLabel}>
+            {assignment.cancelledBy === 'worker'
+              ? 'ההודעה ששלחת'
+              : 'הודעת הקבלן על הביטול'}
+          </Text>
+          <Text style={styles.responseText}>
+            {assignment.cancellationMessage}
+          </Text>
+        </View>
+      ) : null}
 
       {app.status === 'pending' && (
         <TouchableOpacity

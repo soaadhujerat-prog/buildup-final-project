@@ -17,13 +17,17 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
+import ContractorAvatar from '../components/ContractorAvatar';
 import ResponseDialog from '../components/ResponseDialog';
 import { getRegistrationStatus, isOpenForApplications } from '../services/jobStatusService';
+import { getWorkerJobAssignment } from '../services/assignmentService';
 import { callPhone } from '../utils/contact';
 import {
   formatDateTime,
   applicationTimeline,
   invitationTimeline,
+  currentStaffedState,
+  assignmentCancelLine,
   APPLICATION_STATUS_LABEL,
   APPLICATION_STATUS_TONE,
   INVITATION_STATUS_LABEL,
@@ -67,6 +71,7 @@ const JobDetailsScreen: React.FC<Props> = ({
     getStaffingProgress,
     isJobFullyStaffed,
     invitations,
+    assignments,
     applyToJob,
     respondToApplication,
     withdrawApplication,
@@ -134,6 +139,16 @@ const JobDetailsScreen: React.FC<Props> = ({
     [myApplications]
   );
   const myLatestApplication = myApplications[0] ?? null;
+
+  // The worker's CURRENT assignment for this job (active if any, else latest
+  // historical). Drives "is this worker actually staffed right now".
+  const myAssignment =
+    isWorker && currentUser
+      ? getWorkerJobAssignment(assignments, job.id, currentUser.id)
+      : undefined;
+  const myAssignmentCancelled =
+    myActiveApplication?.status === 'accepted' &&
+    myAssignment?.status === 'cancelled';
 
   const jobOpen = isOpenForApplications(job);
   const staffing = getStaffingProgress(job.id);
@@ -294,6 +309,47 @@ const JobDetailsScreen: React.FC<Props> = ({
       );
     }
 
+    // Accepted application whose assignment was later cancelled — CURRENT
+    // state is "בוטל", not a stale "הבקשה אושרה".
+    if (myAssignmentCancelled) {
+      const cancelLine = myAssignment
+        ? assignmentCancelLine(myAssignment)
+        : null;
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, styles.appliedBox]}>
+            <Ionicons
+              name="close-circle-outline"
+              size={20}
+              color={Colors.textSecondary}
+            />
+            <Text style={styles.appliedText}>השיבוץ בוטל</Text>
+          </View>
+          {myActiveApplication?.respondedAt && (
+            <Text style={styles.workerStatusTime}>
+              הבקשה אושרה ב־{formatDateTime(myActiveApplication.respondedAt)}
+            </Text>
+          )}
+          {cancelLine && (
+            <Text style={styles.workerStatusTime}>{cancelLine}</Text>
+          )}
+          {myAssignment?.cancellationMessage ? (
+            <View style={styles.responseNote}>
+              <Text style={styles.responseNoteLabel}>
+                {myAssignment.cancelledBy === 'worker'
+                  ? 'ההודעה ששלחת'
+                  : 'הודעת הקבלן'}
+              </Text>
+              <Text style={styles.responseNoteText}>
+                {myAssignment.cancellationMessage}
+              </Text>
+            </View>
+          ) : null}
+          {jobOpen && renderApplyButton('הגש מועמדות מחדש')}
+        </View>
+      );
+    }
+
     if (myActiveApplication?.status === 'accepted') {
       return (
         <View style={styles.workerStatusWrap}>
@@ -435,13 +491,11 @@ const JobDetailsScreen: React.FC<Props> = ({
               <Text style={styles.sectionTitle}>פורסם על ידי</Text>
             </View>
             <View style={styles.contractorRow}>
-              <View style={styles.contractorIcon}>
-                <Ionicons
-                  name="business"
-                  size={20}
-                  color={Colors.secondary}
-                />
-              </View>
+              <ContractorAvatar
+                contractor={contractor}
+                size={40}
+                style={styles.contractorIcon}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={styles.contractorName}>
                   {contractor.companyName ?? contractor.fullName}
@@ -652,8 +706,29 @@ const JobDetailsScreen: React.FC<Props> = ({
                   {orderedCandidates.map((app) => {
                     const w = getUserById(app.workerId) as Worker | undefined;
                     if (!w) return null;
+                    const asg = getWorkerJobAssignment(
+                      assignments,
+                      job.id,
+                      app.workerId
+                    );
+                    const cancelledStaffing =
+                      app.status === 'accepted' &&
+                      asg?.status === 'cancelled';
                     const isHistory =
-                      app.status === 'withdrawn' || app.status === 'rejected';
+                      app.status === 'withdrawn' ||
+                      app.status === 'rejected' ||
+                      cancelledStaffing;
+                    const badge = currentStaffedState(
+                      {
+                        label: APPLICATION_STATUS_LABEL[app.status],
+                        tone: APPLICATION_STATUS_TONE[app.status],
+                      },
+                      app.status,
+                      asg
+                    );
+                    const cancelLine = cancelledStaffing
+                      ? assignmentCancelLine(asg!)
+                      : null;
                     return (
                       <View
                         key={app.id}
@@ -672,8 +747,8 @@ const JobDetailsScreen: React.FC<Props> = ({
                             <View style={{ flex: 1 }}>
                               <View style={styles.candidateTopline}>
                                 <StatusBadge
-                                  label={APPLICATION_STATUS_LABEL[app.status]}
-                                  tone={APPLICATION_STATUS_TONE[app.status]}
+                                  label={badge.label}
+                                  tone={badge.tone}
                                   small
                                 />
                                 <Text
@@ -729,6 +804,17 @@ const JobDetailsScreen: React.FC<Props> = ({
                               {line}
                             </Text>
                           ))}
+                          {cancelLine && (
+                            <Text style={styles.timelineText}>{cancelLine}</Text>
+                          )}
+                          {cancelledStaffing && asg?.cancellationMessage ? (
+                            <Text style={styles.timelineText}>
+                              {asg.cancelledBy === 'worker'
+                                ? 'הודעת העובד'
+                                : 'הודעתך'}
+                              : “{asg.cancellationMessage}”
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
                     );
@@ -759,6 +845,24 @@ const JobDetailsScreen: React.FC<Props> = ({
               ) : (
                 invitationsForJob.slice(0, 5).map((inv) => {
                   const w = getUserById(inv.workerId) as Worker | undefined;
+                  const asg = getWorkerJobAssignment(
+                    assignments,
+                    job.id,
+                    inv.workerId
+                  );
+                  const cancelledStaffing =
+                    inv.status === 'accepted' && asg?.status === 'cancelled';
+                  const badge = currentStaffedState(
+                    {
+                      label: INVITATION_STATUS_LABEL[inv.status],
+                      tone: INVITATION_STATUS_TONE[inv.status],
+                    },
+                    inv.status,
+                    asg
+                  );
+                  const cancelLine = cancelledStaffing
+                    ? assignmentCancelLine(asg!)
+                    : null;
                   return (
                     <View key={inv.id} style={styles.invRow}>
                       <View style={styles.invHeader}>
@@ -771,8 +875,8 @@ const JobDetailsScreen: React.FC<Props> = ({
                         >
                           <View style={styles.invTopline}>
                             <StatusBadge
-                              label={INVITATION_STATUS_LABEL[inv.status]}
-                              tone={INVITATION_STATUS_TONE[inv.status]}
+                              label={badge.label}
+                              tone={badge.tone}
                               small
                             />
                             <Text style={styles.invName} numberOfLines={1}>
@@ -800,6 +904,9 @@ const JobDetailsScreen: React.FC<Props> = ({
                             {line}
                           </Text>
                         ))}
+                        {cancelLine && (
+                          <Text style={styles.timelineText}>{cancelLine}</Text>
+                        )}
                       </View>
                     </View>
                   );

@@ -16,12 +16,21 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ResponseDialog from '../components/ResponseDialog';
+import { getWorkerJobAssignment } from '../services/assignmentService';
 import {
   applicationTimeline,
+  assignmentCancelLine,
+  currentStaffedState,
   APPLICATION_STATUS_LABEL,
   APPLICATION_STATUS_TONE,
 } from '../utils/helpers';
-import { Application, ApplicationStatus, Worker, Contractor } from '../types';
+import {
+  Application,
+  ApplicationStatus,
+  Assignment,
+  Worker,
+  Contractor,
+} from '../types';
 
 interface Props {
   onBack: () => void;
@@ -43,6 +52,7 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
     currentUser,
     applications,
     jobs,
+    assignments,
     getUserById,
     respondToApplication,
     isJobFullyStaffed,
@@ -188,6 +198,11 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
                 workerCity={worker?.city ?? ''}
                 jobTitle={job?.title ?? '—'}
                 jobFull={isJobFullyStaffed(item.jobId)}
+                assignment={getWorkerJobAssignment(
+                  assignments,
+                  item.jobId,
+                  item.workerId
+                )}
                 onPressWorker={() =>
                   worker && onOpenWorkerProfile(worker.id)
                 }
@@ -262,6 +277,7 @@ const ApplicationRow: React.FC<{
   workerCity: string;
   jobTitle: string;
   jobFull: boolean;
+  assignment: Assignment | undefined;
   onPressWorker: () => void;
   onPressJob: () => void;
   onAccept: () => void;
@@ -275,13 +291,25 @@ const ApplicationRow: React.FC<{
   workerCity,
   jobTitle,
   jobFull,
+  assignment,
   onPressWorker,
   onPressJob,
   onAccept,
   onReject,
 }) => {
-  const tone = APPLICATION_STATUS_TONE[app.status];
-  const label = APPLICATION_STATUS_LABEL[app.status];
+  const { label, tone } = currentStaffedState(
+    {
+      label: APPLICATION_STATUS_LABEL[app.status],
+      tone: APPLICATION_STATUS_TONE[app.status],
+    },
+    app.status,
+    assignment
+  );
+  const cancelledStaffing =
+    app.status === 'accepted' && assignment?.status === 'cancelled';
+  const cancelLine = cancelledStaffing
+    ? assignmentCancelLine(assignment!)
+    : null;
 
   return (
     <View style={styles.card}>
@@ -336,6 +364,15 @@ const ApplicationRow: React.FC<{
             {line}
           </Text>
         ))}
+        {cancelLine && (
+          <Text style={styles.appliedAt}>{cancelLine}</Text>
+        )}
+        {cancelledStaffing && assignment?.cancellationMessage ? (
+          <Text style={styles.appliedAt}>
+            {assignment.cancelledBy === 'worker' ? 'הודעת העובד' : 'הודעתך'}:
+            {' '}“{assignment.cancellationMessage}”
+          </Text>
+        ) : null}
       </View>
 
       {app.status === 'pending' && (

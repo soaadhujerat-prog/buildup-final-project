@@ -15,12 +15,21 @@ import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '..
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
+import { getWorkerJobAssignment } from '../services/assignmentService';
 import {
   invitationTimeline,
+  assignmentCancelLine,
+  currentStaffedState,
   INVITATION_STATUS_LABEL,
   INVITATION_STATUS_TONE,
 } from '../utils/helpers';
-import { Contractor, InvitationStatus, Invitation, Worker } from '../types';
+import {
+  Assignment,
+  Contractor,
+  InvitationStatus,
+  Invitation,
+  Worker,
+} from '../types';
 
 interface Props {
   onBack: () => void;
@@ -36,8 +45,14 @@ const SentInvitationsScreen: React.FC<Props> = ({
   onOpenJobDetails,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, invitations, jobs, getUserById, cancelInvitation } =
-    useApp();
+  const {
+    currentUser,
+    invitations,
+    jobs,
+    assignments,
+    getUserById,
+    cancelInvitation,
+  } = useApp();
   const me = currentUser as Contractor | undefined;
 
   const handleCancel = (inv: Invitation) => {
@@ -159,6 +174,11 @@ const SentInvitationsScreen: React.FC<Props> = ({
                     : ''
                 }
                 jobTitle={job?.title ?? '—'}
+                assignment={getWorkerJobAssignment(
+                  assignments,
+                  item.jobId,
+                  item.workerId
+                )}
                 onPressWorker={() => worker && onOpenWorkerProfile(worker.id)}
                 onPressJob={() => job && onOpenJobDetails(job.id)}
                 onCancel={() => handleCancel(item)}
@@ -207,6 +227,7 @@ const InvitationRow: React.FC<{
   workerName: string;
   workerMeta: string;
   jobTitle: string;
+  assignment: Assignment | undefined;
   onPressWorker: () => void;
   onPressJob: () => void;
   onCancel: () => void;
@@ -216,12 +237,23 @@ const InvitationRow: React.FC<{
   workerName,
   workerMeta,
   jobTitle,
+  assignment,
   onPressWorker,
   onPressJob,
   onCancel,
 }) => {
-  const tone = INVITATION_STATUS_TONE[inv.status];
-  const label = INVITATION_STATUS_LABEL[inv.status];
+  const { label, tone } = currentStaffedState(
+    {
+      label: INVITATION_STATUS_LABEL[inv.status],
+      tone: INVITATION_STATUS_TONE[inv.status],
+    },
+    inv.status,
+    assignment
+  );
+  const cancelLine =
+    inv.status === 'accepted' && assignment?.status === 'cancelled'
+      ? assignmentCancelLine(assignment)
+      : null;
   return (
     <View style={styles.card}>
       <TouchableOpacity
@@ -273,6 +305,7 @@ const InvitationRow: React.FC<{
             {line}
           </Text>
         ))}
+        {cancelLine && <Text style={styles.sentAt}>{cancelLine}</Text>}
       </View>
 
       {inv.responseMessage ? (

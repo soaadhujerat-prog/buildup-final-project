@@ -14,8 +14,12 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
+import WorkerAvatar from '../components/WorkerAvatar';
+import ContractorAvatar from '../components/ContractorAvatar';
 import { getRegistrationStatus, isOpenForApplications } from '../services/jobStatusService';
+import { getWorkerJobAssignment } from '../services/assignmentService';
 import {
+  currentStaffedState,
   APPLICATION_STATUS_LABEL,
   APPLICATION_STATUS_TONE,
 } from '../utils/helpers';
@@ -56,6 +60,7 @@ const ContractorDashboard: React.FC<Props> = ({
     jobs,
     applications,
     invitations,
+    assignments,
     notifications,
     getUserById,
     getStaffingProgress,
@@ -167,9 +172,13 @@ const ContractorDashboard: React.FC<Props> = ({
           </View>
 
           <View style={styles.headerBody}>
-            <View style={styles.avatarCircle}>
-              <Ionicons name="business" size={26} color={Colors.white} />
-            </View>
+            <ContractorAvatar
+              contractor={me}
+              size={56}
+              iconColor={Colors.white}
+              fallbackBg="rgba(255,255,255,0.2)"
+              style={styles.avatarCircle}
+            />
             <View style={{ flex: 1 }}>
               <Text style={styles.hello}>שלום, {me?.fullName}</Text>
               <Text style={styles.role}>
@@ -258,6 +267,14 @@ const ContractorDashboard: React.FC<Props> = ({
           recentApplications.map((app) => {
             const job = jobs.find((j) => j.id === app.jobId);
             const worker = getUserById(app.workerId) as Worker | undefined;
+            const badge = currentStaffedState(
+              {
+                label: APPLICATION_STATUS_LABEL[app.status],
+                tone: APPLICATION_STATUS_TONE[app.status],
+              },
+              app.status,
+              getWorkerJobAssignment(assignments, app.jobId, app.workerId)
+            );
             return (
               <TouchableOpacity
                 key={app.id}
@@ -267,14 +284,22 @@ const ContractorDashboard: React.FC<Props> = ({
                   job ? onOpenJobDetails(job.id) : onOpenApplicationsReceived()
                 }
               >
-                <View
-                  style={[
-                    styles.rowIcon,
-                    { backgroundColor: Colors.primaryFaint },
-                  ]}
-                >
-                  <Ionicons name="hammer" size={20} color={Colors.primary} />
-                </View>
+                {worker ? (
+                  <WorkerAvatar worker={worker} size={40} />
+                ) : (
+                  <View
+                    style={[
+                      styles.rowIcon,
+                      { backgroundColor: Colors.primaryFaint },
+                    ]}
+                  >
+                    <Ionicons
+                      name="person-outline"
+                      size={20}
+                      color={Colors.primary}
+                    />
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowTitle}>
                     {worker?.fullName ?? 'עובד לא ידוע'}
@@ -284,11 +309,7 @@ const ContractorDashboard: React.FC<Props> = ({
                     {job?.title ?? ''}
                   </Text>
                 </View>
-                <StatusBadge
-                  label={APPLICATION_STATUS_LABEL[app.status]}
-                  tone={APPLICATION_STATUS_TONE[app.status]}
-                  small
-                />
+                <StatusBadge label={badge.label} tone={badge.tone} small />
               </TouchableOpacity>
             );
           })

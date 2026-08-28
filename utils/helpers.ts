@@ -1,4 +1,4 @@
-import type { ApplicationStatus, InvitationStatus } from '../types';
+import type { ApplicationStatus, Assignment, InvitationStatus } from '../types';
 
 export const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -167,14 +167,17 @@ export const applicationTimeline = (app: {
   return lines;
 };
 
-/** Human timeline sentences for an invitation. `perspective` only changes
- *  the wording of the "cancelled" line — "בוטלה על ידך" for the contractor
- *  who cancelled it, "בוטלה על ידי הקבלן" for the worker who received it. */
+/** Human timeline sentences for an invitation. `perspective` changes the
+ *  wording of the "cancelled" line — "בוטלה על ידך" for the contractor who
+ *  cancelled it, "בוטלה על ידי הקבלן" for the worker who received it — unless
+ *  the cancellation was automatic (`cancellationReason === 'capacity_full'`),
+ *  in which case neither side "cancelled" it and the line explains why. */
 export const invitationTimeline = (
   inv: {
     sentAt: string;
     respondedAt?: string;
     cancelledAt?: string;
+    cancellationReason?: 'manual' | 'capacity_full';
     status: InvitationStatus;
   },
   perspective: 'worker' | 'contractor'
@@ -185,13 +188,49 @@ export const invitationTimeline = (
   } else if (inv.status === 'declined' && inv.respondedAt) {
     lines.push(`נדחתה ב־${formatDateTime(inv.respondedAt)}`);
   } else if (inv.status === 'cancelled' && inv.cancelledAt) {
-    lines.push(
-      perspective === 'contractor'
-        ? `בוטלה על ידך ב־${formatDateTime(inv.cancelledAt)}`
-        : `בוטלה על ידי הקבלן ב־${formatDateTime(inv.cancelledAt)}`
-    );
+    if (inv.cancellationReason === 'capacity_full') {
+      lines.push(`בוטלה ב־${formatDateTime(inv.cancelledAt)}`);
+      lines.push('המשרה אוישה במלואה');
+    } else {
+      lines.push(
+        perspective === 'contractor'
+          ? `בוטלה על ידך ב־${formatDateTime(inv.cancelledAt)}`
+          : `בוטלה על ידי הקבלן ב־${formatDateTime(inv.cancelledAt)}`
+      );
+    }
   }
   return lines;
+};
+
+/** Current-state badge for a worker's relationship to a job, honouring the
+ *  rule "Assignment describes the present, Application/Invitation describe
+ *  history": an accepted application/invitation whose Assignment is no
+ *  longer active shows the Assignment's real state, not a stale "התקבל".
+ *  Pass the base label/tone (from the *_STATUS_* maps) plus the historical
+ *  decision status and the worker's current assignment for this job. */
+export const currentStaffedState = (
+  base: { label: string; tone: BadgeTone },
+  decisionStatus: ApplicationStatus | InvitationStatus,
+  assignment?: Pick<Assignment, 'status'>
+): { label: string; tone: BadgeTone } => {
+  if (decisionStatus === 'accepted' && assignment) {
+    if (assignment.status === 'cancelled') {
+      return { label: 'בוטל', tone: 'neutral' };
+    }
+    if (assignment.status === 'completed') {
+      return { label: 'הושלם', tone: 'info' };
+    }
+  }
+  return base;
+};
+
+/** "בוטל על ידי הקבלן ב־DD.MM.YYYY בשעה HH:mm" (or "העובד"). */
+export const assignmentCancelLine = (
+  assignment: Pick<Assignment, 'cancelledBy' | 'cancelledAt'>
+): string | null => {
+  if (!assignment.cancelledAt) return null;
+  const who = assignment.cancelledBy === 'worker' ? 'העובד' : 'הקבלן';
+  return `בוטל על ידי ${who} ב־${formatDateTime(assignment.cancelledAt)}`;
 };
 
 export const getRequestStatusLabel = (status: string): string => {

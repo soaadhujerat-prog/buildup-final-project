@@ -56,6 +56,7 @@ const WorkerDashboard: React.FC<Props> = ({
     jobs,
     applications,
     invitations,
+    assignments,
     notifications,
     setWorkerAvailability,
   } = useApp();
@@ -64,21 +65,17 @@ const WorkerDashboard: React.FC<Props> = ({
 
   // ---- Real-source derivations per audit table ----
 
-  // Active assignments: jobs the worker is actually assigned to via either
-  //   - an application they sent that was accepted by the contractor, OR
-  //   - an invitation from a contractor that they accepted.
-  // De-duplicated by jobId so a worker assigned via both routes is counted once.
+  // Active assignments — the ONLY source of truth for "how many jobs is this
+  // worker actually staffed on right now". Never derived from accepted
+  // applications/invitations (those are history and stay `accepted` even
+  // after the assignment is cancelled). Only `status === 'active'` counts;
+  // cancelled / completed do not.
   const activeAssignmentsCount = useMemo(() => {
     if (!me) return 0;
-    const jobIds = new Set<string>();
-    applications.forEach((a) => {
-      if (a.workerId === me.id && a.status === 'accepted') jobIds.add(a.jobId);
-    });
-    invitations.forEach((i) => {
-      if (i.workerId === me.id && i.status === 'accepted') jobIds.add(i.jobId);
-    });
-    return jobIds.size;
-  }, [me, applications, invitations]);
+    return assignments.filter(
+      (a) => a.workerId === me.id && a.status === 'active'
+    ).length;
+  }, [me, assignments]);
 
   // Active applications I sent that are still pending
   const activeApplications = useMemo(() => {

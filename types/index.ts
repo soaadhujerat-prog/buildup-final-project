@@ -278,6 +278,12 @@ export interface Invitation {
   sentAt: string;
   respondedAt?: string;
   cancelledAt?: string;
+  /** Why a still-`pending` invitation was moved to `cancelled`:
+   *  - 'manual'        — the contractor withdrew it themselves.
+   *  - 'capacity_full' — the job reached workersNeeded, so the system
+   *                      auto-closed every outstanding invitation for it.
+   *  Only meaningful when status === 'cancelled'. */
+  cancellationReason?: 'manual' | 'capacity_full';
   /** The worker's optional free-text note attached when they accept or
    *  decline the invitation (mirror of Application.contractorResponse — one
    *  field for both decisions). Shown to the contractor as "הודעת העובד". */
@@ -423,6 +429,7 @@ export type NotificationType =
   | 'invitation_received'
   | 'invitation_accepted'
   | 'invitation_declined'
+  | 'invitation_cancelled'
   | 'assignment_cancelled'
   | 'new_message'
   | 'review'

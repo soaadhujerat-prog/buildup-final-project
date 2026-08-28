@@ -18,6 +18,7 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
+import ContractorAvatar from '../components/ContractorAvatar';
 import { Contractor, Worker } from '../types';
 
 interface Props {
@@ -141,9 +142,11 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
           {isWorker && w ? (
             <WorkerAvatar worker={w} size={64} />
           ) : (
-            <View style={[styles.heroIcon, { backgroundColor: '#DBEAFE' }]}>
-              <Ionicons name="business" size={28} color={Colors.secondary} />
-            </View>
+            <ContractorAvatar
+              contractor={c}
+              size={64}
+              style={[styles.heroIcon, { backgroundColor: '#DBEAFE' }]}
+            />
           )}
           <View style={{ flex: 1 }}>
             <Text style={styles.heroName}>{user.fullName}</Text>

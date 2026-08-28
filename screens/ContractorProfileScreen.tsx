@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import ContractorAvatar from '../components/ContractorAvatar';
 import { Contractor } from '../types';
 
 interface Props {
@@ -59,9 +60,13 @@ const ContractorProfileScreen: React.FC<Props> = ({
       >
         {/* Hero */}
         <View style={styles.heroCard}>
-          <View style={styles.heroAvatar}>
-            <Ionicons name="business" size={32} color={Colors.white} />
-          </View>
+          <ContractorAvatar
+            contractor={me}
+            size={80}
+            iconColor={Colors.white}
+            fallbackBg={Colors.secondary}
+            style={styles.heroAvatar}
+          />
           <Text style={styles.heroName}>{me.fullName}</Text>
           <Text style={styles.heroCompany}>{me.companyName}</Text>
         </View>

@@ -450,6 +450,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   // ---------------------------------------------------------------------
+  // Capacity -> pending invitations reconciliation
+  // ---------------------------------------------------------------------
+  // A job that has reached workersNeeded takes no more workers, so leaving
+  // invitations "pending" against it is dishonest. Whenever staffing changes
+  // we auto-cancel every still-pending invitation for any now-full job
+  // (reason 'capacity_full') and notify each worker that the seat is gone —
+  // NOT phrased as if the contractor cancelled them personally. Guarded by
+  // `status === 'pending'` so it only fires once per invitation.
+  useEffect(() => {
+    const toClose = invitations.filter((inv) => {
+      if (inv.status !== 'pending') return false;
+      const job = jobs.find((j) => j.id === inv.jobId);
+      return (
+        !!job &&
+        computeIsJobFullyStaffed(assignments, inv.jobId, job.workersNeeded)
+      );
+    });
+    if (toClose.length === 0) return;
+
+    const ts = nowIso();
+    const ids = new Set(toClose.map((i) => i.id));
+    setInvitations((prev) =>
+      prev.map((i) =>
+        ids.has(i.id) && i.status === 'pending'
+          ? {
+              ...i,
+              status: 'cancelled',
+              cancelledAt: ts,
+              cancellationReason: 'capacity_full' as const,
+            }
+          : i
+      )
+    );
+    toClose.forEach((inv) => {
+      const job = jobs.find((j) => j.id === inv.jobId);
+      pushNotification({
+        userId: inv.workerId,
+        type: 'invitation_cancelled',
+        title: 'ההזמנה למשרה נסגרה',
+        body: `המשרה "${
+          job?.title ?? ''
+        }" אוישה במלואה ולכן ההזמנה אינה פעילה עוד.`,
+        relatedId: inv.id,
+      });
+    });
+  }, [assignments, invitations, jobs, pushNotification]);
+
+  // ---------------------------------------------------------------------
   // Auth
   // ---------------------------------------------------------------------
 
@@ -858,15 +906,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const applyToJob = useCallback<AppState['applyToJob']>(
     (jobId, workerId, message) => {
-      // Duplicate prevention looks only at *active* applications
-      // (pending / accepted). A historical withdrawn/rejected record for
-      // the same worker+job must never block a fresh application.
-      const activeDupe = applications.find(
-        (a) =>
-          a.jobId === jobId &&
-          a.workerId === workerId &&
-          (a.status === 'pending' || a.status === 'accepted')
-      );
+      // Duplicate prevention looks only at applications that still "count":
+      // a pending one, or an accepted one whose Assignment is still active.
+      // An accepted application whose assignment was later cancelled is
+      // history — it must not block the worker from applying again.
+      const activeDupe = applications.find((a) => {
+        if (a.jobId !== jobId || a.workerId !== workerId) return false;
+        if (a.status === 'pending') return true;
+        if (a.status === 'accepted') {
+          return hasActiveAssignment(assignments, jobId, workerId);
+        }
+        return false;
+      });
       if (activeDupe) return activeDupe;
 
       const app: Application = {
@@ -892,7 +943,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       return app;
     },
-    [applications, jobs, workers, pushNotification]
+    [applications, assignments, jobs, workers, pushNotification]
   );
 
   const withdrawApplication = useCallback<AppState['withdrawApplication']>(
@@ -1023,7 +1074,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setInvitations((prev) =>
         prev.map((i) =>
           i.id === invitationId && i.status === 'pending'
-            ? { ...i, status: 'cancelled', cancelledAt: nowIso() }
+            ? {
+                ...i,
+                status: 'cancelled',
+                cancelledAt: nowIso(),
+                cancellationReason: 'manual' as const,
+              }
             : i
         )
       );

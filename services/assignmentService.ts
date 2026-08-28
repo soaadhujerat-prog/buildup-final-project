@@ -72,6 +72,28 @@ export const isJobFullyStaffed = (
   getActiveAssignedWorkersCount(assignments, jobId) >=
   Math.max(workersNeeded, 0);
 
+/** The one Assignment that describes a given worker's CURRENT relationship
+ *  to a job: the active one if it exists, otherwise the most recently
+ *  updated historical record (cancelled / completed). Used wherever the UI
+ *  must show "is this worker on the job right now" rather than "was their
+ *  application/invitation ever accepted". */
+export const getWorkerJobAssignment = (
+  assignments: Assignment[],
+  jobId: string,
+  workerId: string
+): Assignment | undefined => {
+  const pair = assignments.filter(
+    (a) => a.jobId === jobId && a.workerId === workerId
+  );
+  return (
+    pair.find((a) => a.status === 'active') ??
+    [...pair].sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    )[0]
+  );
+};
+
 export const getAssignmentsByJob = (
   assignments: Assignment[],
   jobId: string

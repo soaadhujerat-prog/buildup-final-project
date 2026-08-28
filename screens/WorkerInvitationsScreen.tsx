@@ -15,12 +15,17 @@ import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '..
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import ResponseDialog from '../components/ResponseDialog';
+import ContractorAvatar from '../components/ContractorAvatar';
+import { getWorkerJobAssignment } from '../services/assignmentService';
 import {
   formatJobRateCompact,
   invitationTimeline,
+  assignmentCancelLine,
+  currentStaffedState,
   INVITATION_STATUS_TONE,
 } from '../utils/helpers';
 import {
+  Assignment,
   Contractor,
   Invitation,
   InvitationStatus,
@@ -43,6 +48,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
     currentUser,
     invitations,
     jobs,
+    assignments,
     getUserById,
     respondToInvitation,
     isJobFullyStaffed,
@@ -192,6 +198,12 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
                 contractorName={
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }
+                contractorAvatarUrl={contractor?.avatarUrl}
+                assignment={
+                  me
+                    ? getWorkerJobAssignment(assignments, item.jobId, me.id)
+                    : undefined
+                }
                 onPressJob={() => job && onOpenJobDetails(job.id)}
                 onAccept={() => handleAccept(item)}
                 onDecline={() => handleDecline(item)}
@@ -267,6 +279,8 @@ const InvitationCard: React.FC<{
   jobRateLabel: string;
   jobFull: boolean;
   contractorName: string;
+  contractorAvatarUrl?: string;
+  assignment: Assignment | undefined;
   onPressJob: () => void;
   onAccept: () => void;
   onDecline: () => void;
@@ -277,12 +291,16 @@ const InvitationCard: React.FC<{
   jobRateLabel,
   jobFull,
   contractorName,
+  contractorAvatarUrl,
+  assignment,
   onPressJob,
   onAccept,
   onDecline,
 }) => {
-  const tone = INVITATION_STATUS_TONE[inv.status];
-  const label =
+  // Worker-facing wording for the historical decision, then let the current
+  // assignment state override it (accepted invitation whose assignment was
+  // cancelled reads "בוטל", not "אישרת").
+  const baseLabel =
     inv.status === 'pending'
       ? 'חדש'
       : inv.status === 'accepted'
@@ -292,6 +310,15 @@ const InvitationCard: React.FC<{
       : inv.status === 'cancelled'
       ? 'בוטלה'
       : 'פג תוקף';
+  const { label, tone } = currentStaffedState(
+    { label: baseLabel, tone: INVITATION_STATUS_TONE[inv.status] },
+    inv.status,
+    assignment
+  );
+  const cancelLine =
+    inv.status === 'accepted' && assignment?.status === 'cancelled'
+      ? assignmentCancelLine(assignment)
+      : null;
 
   return (
     <View style={styles.card}>
@@ -307,9 +334,11 @@ const InvitationCard: React.FC<{
         onPress={onPressJob}
         activeOpacity={0.85}
       >
-        <View style={styles.contractorIcon}>
-          <Ionicons name="business" size={16} color={Colors.secondary} />
-        </View>
+        <ContractorAvatar
+          contractor={{ avatarUrl: contractorAvatarUrl }}
+          size={32}
+          style={styles.contractorIcon}
+        />
         <View style={{ flex: 1 }}>
           <Text style={styles.contractorName}>{contractorName}</Text>
         </View>
@@ -344,6 +373,7 @@ const InvitationCard: React.FC<{
             {line}
           </Text>
         ))}
+        {cancelLine && <Text style={styles.sentAt}>{cancelLine}</Text>}
       </View>
 
       {inv.responseMessage ? (

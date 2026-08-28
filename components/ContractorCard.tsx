@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Contractor } from '../types';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import ContractorAvatar from './ContractorAvatar';
 
 interface ContractorCardProps {
   contractor: Contractor;
@@ -27,9 +28,13 @@ const ContractorCard: React.FC<ContractorCardProps> = ({
     <View style={styles.card}>
       <View style={styles.topRow}>
         <View style={styles.identityRow}>
-          <View style={styles.icon}>
-            <Ionicons name="business" size={24} color={Colors.white} />
-          </View>
+          <ContractorAvatar
+            contractor={contractor}
+            size={52}
+            iconColor={Colors.white}
+            fallbackBg={Colors.secondary}
+            style={styles.icon}
+          />
           <View style={styles.identity}>
             <Text style={styles.name} numberOfLines={1}>
               {contractor.companyName || contractor.fullName}

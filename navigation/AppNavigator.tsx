@@ -319,6 +319,7 @@ const AppNavigator: React.FC = () => {
           resetTo(null);
           break;
         case 'invitation_received':
+        case 'invitation_cancelled':
           // Worker: open invitations list
           if (role === 'worker') push({ name: 'WorkerInvitations' });
           break;
