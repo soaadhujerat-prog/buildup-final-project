@@ -13,7 +13,6 @@ Requirements: Node 18+, Expo CLI (`npx expo`).
 ```bash
 npm install
 npx expo start
-node ".\node_modules\expo\bin\cli" start -c
 ```
 
 Then open the app in Expo Go (iOS/Android) or in a simulator.

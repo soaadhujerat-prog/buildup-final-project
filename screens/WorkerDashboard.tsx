@@ -23,6 +23,7 @@ import {
 } from '../utils/helpers';
 import { Worker, ApplicationStatus } from '../types';
 import { workerHasProfession, workerPrimaryProfession } from '../utils/normalize';
+import { isOpenForApplications } from '../services/jobStatusService';
 
 interface Props {
   onOpenProProfile: () => void;
@@ -106,11 +107,14 @@ const WorkerDashboard: React.FC<Props> = ({
       .slice(0, 3);
   }, [me, invitations]);
 
-  // Recommended jobs: status=open, profession or area match
+  // Recommended jobs: only jobs actually open to registration right now
+  // (same canonical source of truth as the job-search screen —
+  // isOpenForApplications, which already reflects manual close + full-capacity
+  // auto-close/reopen), then a profession / area match.
   const recommendedJobs = useMemo(() => {
     if (!me) return [];
     return jobs
-      .filter((j) => j.status === 'open')
+      .filter(isOpenForApplications)
       .filter((j) => {
         const sameCategory = j.professionCategory === me.professionCategory;
         const sameProfession = workerHasProfession(me, j.profession);

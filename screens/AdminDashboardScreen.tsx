@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import { isSupportTicketOpen, supportTicketDisplay } from '../utils/helpers';
 
 interface Props {
   onOpenPendingRegistrations: () => void;
@@ -62,11 +63,11 @@ const AdminDashboardScreen: React.FC<Props> = ({
       contractors.filter((c) => c.status === 'blocked').length,
     [workers, contractors]
   );
+  // "פניות פתוחות" = every ticket still needing attention — i.e. NOT in the
+  // final "טופל" bucket. Covers 'open' + 'in_progress' (and never counts
+  // 'resolved' / 'closed'). Derived live from the tickets source of truth.
   const openTickets = useMemo(
-    () =>
-      supportTickets.filter(
-        (t) => t.status === 'open' || t.status === 'in_progress'
-      ),
+    () => supportTickets.filter((t) => isSupportTicketOpen(t.status)),
     [supportTickets]
   );
   const myUnreadNotifications = useMemo(
@@ -255,8 +256,8 @@ const AdminDashboardScreen: React.FC<Props> = ({
                 </Text>
               </View>
               <StatusBadge
-                label={t.status === 'open' ? 'פתוח' : 'בטיפול'}
-                tone={t.status === 'open' ? 'danger' : 'warning'}
+                label={supportTicketDisplay(t.status).label}
+                tone={supportTicketDisplay(t.status).tone}
                 small
               />
             </TouchableOpacity>

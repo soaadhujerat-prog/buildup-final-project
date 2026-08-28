@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   TextInput,
   KeyboardAvoidingView,
+  Keyboard,
+  TouchableWithoutFeedback,
   Platform,
   Alert,
   Modal,
@@ -34,16 +36,20 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, updateContractorProfile } = useApp();
+  const { currentUser, updateContractorProfile, openSupportTicket } = useApp();
   const me = currentUser as Contractor | undefined;
 
   const [fullName, setFullName] = useState(me?.fullName ?? '');
   const [companyName, setCompanyName] = useState(me?.companyName ?? '');
   const [phone, setPhone] = useState(me?.phone ?? '');
   const [email, setEmail] = useState(me?.email ?? '');
-  const [regNumber, setRegNumber] = useState(
-    me?.contractorRegistrationNumber ?? ''
-  );
+  // Official identifier — like an ID number, NOT self-editable after the
+  // account exists. Shown read-only; changes go through a support request.
+  const regNumber = me?.contractorRegistrationNumber ?? '';
+  const [regChangeOpen, setRegChangeOpen] = useState(false);
+  const [regChangeNewNumber, setRegChangeNewNumber] = useState('');
+  const [regChangeReason, setRegChangeReason] = useState('');
+  const [regChangeSubmitting, setRegChangeSubmitting] = useState(false);
   const [city, setCity] = useState(me?.city ?? 'תל אביב');
   const [areasOfOperation, setAreasOfOperation] = useState<string[]>(
     me ? contractorAreas(me) : []
@@ -132,6 +138,52 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const removeAvatar = () => {
     setAvatarUri(undefined);
     setAvatarSheetOpen(false);
+  };
+
+  const openRegChange = () => {
+    setRegChangeNewNumber('');
+    setRegChangeReason('');
+    setRegChangeOpen(true);
+  };
+
+  const submitRegChange = () => {
+    if (!me || regChangeSubmitting) return;
+    const requested = regChangeNewNumber.trim();
+    if (!requested) {
+      Alert.alert('שגיאה', 'יש להזין את מספר הרישום החדש המבוקש.');
+      return;
+    }
+    if (requested === regNumber) {
+      Alert.alert('שגיאה', 'המספר המבוקש זהה למספר הנוכחי.');
+      return;
+    }
+    setRegChangeSubmitting(true);
+    try {
+      const reason = regChangeReason.trim();
+      const description =
+        `בקשה לשינוי מספר רישום קבלנים.\n` +
+        `מספר נוכחי: ${regNumber || '—'}\n` +
+        `מספר מבוקש: ${requested}\n` +
+        (reason ? `הסבר: ${reason}\n` : '') +
+        `הבקשה ממתינה לאימות חיצוני על ידי מנהל המערכת. ` +
+        `המספר הנוכחי נשאר ללא שינוי עד לאישור.`;
+      openSupportTicket(
+        me.id,
+        'contractor',
+        'question',
+        'בקשה לשינוי מספר רישום קבלנים',
+        description
+      );
+      setRegChangeOpen(false);
+      Alert.alert(
+        'הבקשה נשלחה',
+        'הבקשה לשינוי מספר הרישום נשלחה למנהל המערכת ותטופל לאחר אימות חיצוני. המספר הנוכחי נשאר ללא שינוי בינתיים.'
+      );
+    } catch {
+      Alert.alert('שגיאה', 'שליחת הבקשה נכשלה. נסה שוב.');
+    } finally {
+      setRegChangeSubmitting(false);
+    }
   };
 
   if (!me || me.role !== 'contractor') {
@@ -255,13 +307,36 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
         </Section>
 
         <Section title="פרטי הקבלנות">
-          <Field
-            label="מספר רישום קבלנים"
-            value={regNumber}
-            onChange={setRegNumber}
-            keyboardType="numeric"
-            ltr
-          />
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>מספר רישום קבלנים</Text>
+            </View>
+            <View style={styles.readonlyField}>
+              <Ionicons
+                name="lock-closed"
+                size={14}
+                color={Colors.textMuted}
+              />
+              <Text style={styles.readonlyValue}>{regNumber || '—'}</Text>
+            </View>
+            <Text style={styles.readonlyHint}>
+              לשינוי מספר הרישום יש לפנות למנהל המערכת לצורך אימות.
+            </Text>
+            <TouchableOpacity
+              style={styles.regChangeBtn}
+              onPress={openRegChange}
+              activeOpacity={0.85}
+            >
+              <Ionicons
+                name="create-outline"
+                size={16}
+                color={Colors.primary}
+              />
+              <Text style={styles.regChangeBtnText}>
+                בקשה לשינוי מספר רישום
+              </Text>
+            </TouchableOpacity>
+          </View>
           <Field
             label="פרטי רישיון / סיווג"
             value={licenseDetails}
@@ -329,6 +404,94 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <Modal
+        visible={regChangeOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => !regChangeSubmitting && setRegChangeOpen(false)}
+      >
+        {/* Tap any empty area (backdrop OR inside the sheet, outside an input)
+            → dismiss the keyboard only. The sheet stays open and typed text
+            is kept. Nested TouchableOpacity buttons still receive their taps. */}
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.regModalBackdrop}>
+            <KeyboardAvoidingView
+              style={styles.regModalKav}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <TouchableWithoutFeedback
+                onPress={Keyboard.dismiss}
+                accessible={false}
+              >
+                <View style={styles.regModalCard}>
+                  <View style={styles.avatarSheetHandle} />
+                  <Text style={styles.regModalTitle}>
+                    בקשה לשינוי מספר רישום
+                  </Text>
+                  <Text style={styles.regModalSub}>
+                    הבקשה נשלחת למנהל המערכת. המספר הנוכחי נשאר ללא שינוי עד
+                    לאימות חיצוני ואישור.
+                  </Text>
+
+                  <Text style={styles.label}>מספר רישום נוכחי</Text>
+                  <View style={styles.readonlyField}>
+                    <Text style={styles.readonlyValue}>{regNumber || '—'}</Text>
+                  </View>
+
+                  <Text style={styles.label}>מספר רישום חדש מבוקש</Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      { textAlign: 'left', writingDirection: 'ltr' },
+                    ]}
+                    value={regChangeNewNumber}
+                    onChangeText={setRegChangeNewNumber}
+                    keyboardType="numeric"
+                    placeholder="לדוגמה: 105678"
+                    placeholderTextColor={Colors.textMuted}
+                  />
+
+                  <Text style={styles.label}>הסבר (אופציונלי)</Text>
+                  <TextInput
+                    style={[styles.input, styles.regModalTextarea]}
+                    value={regChangeReason}
+                    onChangeText={setRegChangeReason}
+                    placeholder="פרט/י מדוע יש לעדכן את מספר הרישום"
+                    placeholderTextColor={Colors.textMuted}
+                    multiline
+                  />
+
+                  <View style={styles.regModalActions}>
+                    <TouchableOpacity
+                      style={[styles.regModalBtn, styles.regModalCancel]}
+                      onPress={() => setRegChangeOpen(false)}
+                      disabled={regChangeSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.regModalCancelText}>חזור</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.regModalBtn,
+                        styles.regModalConfirm,
+                        regChangeSubmitting && { opacity: 0.7 },
+                      ]}
+                      onPress={submitRegChange}
+                      disabled={regChangeSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.regModalConfirmText}>
+                        {regChangeSubmitting ? 'שולח...' : 'שליחת בקשה'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       <Modal
         visible={avatarSheetOpen}
@@ -627,6 +790,110 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   chipTextActive: { color: Colors.white },
+
+  readonlyField: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.gray100,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  readonlyValue: {
+    flex: 1,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    textAlign: 'left',
+    writingDirection: 'ltr',
+  },
+  readonlyHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 6,
+  },
+  regChangeBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.white,
+  },
+  regChangeBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+
+  regModalBackdrop: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  regModalKav: { width: '100%' },
+  regModalCard: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.xxl,
+    gap: 8,
+  },
+  regModalTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: '800',
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  regModalSub: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 6,
+    marginBottom: 4,
+  },
+  regModalTextarea: { minHeight: 80, textAlignVertical: 'top' },
+  regModalActions: {
+    flexDirection: 'row-reverse',
+    gap: 12,
+    marginTop: 8,
+  },
+  regModalBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+  },
+  regModalCancel: {
+    backgroundColor: Colors.white,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+  },
+  regModalCancelText: {
+    color: Colors.text,
+    fontWeight: '700',
+    fontSize: FontSize.md,
+    writingDirection: 'rtl',
+  },
+  regModalConfirm: { backgroundColor: Colors.primary },
+  regModalConfirmText: {
+    color: Colors.white,
+    fontWeight: '700',
+    fontSize: FontSize.md,
+    writingDirection: 'rtl',
+  },
 
   saveBtn: {
     backgroundColor: Colors.primary,

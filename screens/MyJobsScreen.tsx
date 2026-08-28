@@ -15,7 +15,7 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import { StaffingProgress as StaffingProgressData } from '../services/assignmentService';
-import { getRegistrationStatus } from '../services/jobStatusService';
+import { getJobHeaderBadge } from '../services/jobStatusService';
 import { Contractor, JobPost } from '../types';
 import { useRememberedScroll } from '../utils/scrollMemory';
 
@@ -211,8 +211,7 @@ const JobRow: React.FC<{
   staffing: StaffingProgressData;
   onPress: () => void;
 }> = ({ job, applicationsCount, staffing, onPress }) => {
-  const registrationStatus = getRegistrationStatus(job);
-  const staffingComplete = staffing.status === 'completed';
+  const headerBadge = getJobHeaderBadge(job, staffing.status === 'completed');
 
   return (
     <TouchableOpacity
@@ -224,19 +223,15 @@ const JobRow: React.FC<{
         <Ionicons name="briefcase" size={22} color={Colors.secondary} />
       </View>
       <View style={{ flex: 1 }}>
-        <View style={styles.rowTop}>
-          {/* Once staffing is complete the "registration" pill is
-              redundant/confusing — the job is done being filled, so say
-              exactly that. */}
-          <StatusBadge
-            label={staffingComplete ? 'השיבוץ הושלם' : registrationStatus.label}
-            tone={staffingComplete ? 'success' : registrationStatus.tone}
-            small
-          />
-          <Text style={styles.title} numberOfLines={1}>
-            {job.title}
-          </Text>
+        {/* Row 1: status badge only, in its usual RTL (right) position.
+            Row 2: the job title on its own line with the full card width,
+            so a long title is no longer squeezed by the badge. */}
+        <View style={styles.rowStatusLine}>
+          <StatusBadge label={headerBadge.label} tone={headerBadge.tone} small />
         </View>
+        <Text style={styles.title} numberOfLines={2}>
+          {job.title}
+        </Text>
         <Text style={styles.sub} numberOfLines={1}>
           {job.profession} · {job.city}
         </Text>
@@ -352,17 +347,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowTop: {
+  rowStatusLine: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 4,
   },
   title: {
     fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.text,
+    textAlign: 'right',
     writingDirection: 'rtl',
-    flexShrink: 1,
   },
   sub: {
     fontSize: FontSize.sm,

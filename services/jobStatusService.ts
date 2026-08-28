@@ -26,9 +26,11 @@ export {
   isJobFullyStaffed,
 } from './assignmentService';
 
+export type JobStatusTone = 'success' | 'info' | 'neutral';
+
 export interface RegistrationStatusInfo {
   label: string;
-  tone: 'success' | 'info';
+  tone: JobStatusTone;
 }
 
 /** The business-logic source of truth for "is this job still open to new
@@ -50,5 +52,23 @@ export const getRegistrationStatus = (
   job: Pick<JobPost, 'acceptingApplications'>
 ): RegistrationStatusInfo =>
   isOpenForApplications(job)
-    ? { label: 'פתוחה להרשמה', tone: 'success' }
-    : { label: 'סגורה להרשמה', tone: 'info' };
+    ? { label: 'פתוחה להרשמה', tone: 'success' }   // green — still accepting
+    : { label: 'סגורה להרשמה', tone: 'neutral' };  // gray — inactive
+
+/** THE single job-header badge for every contractor-facing job card/row
+ *  (MyJobsScreen, JobDetailsScreen hero, ContractorDashboard). Collapses the
+ *  two independent concepts into one user-facing status with a DISTINCT color
+ *  per state — never render a hand-combined label/tone per screen:
+ *   - staffing complete     → "השיבוץ הושלם"  (info / navy)   — job is filled
+ *   - open to registration  → "פתוחה להרשמה"  (success / green) — can still apply
+ *   - closed to registration→ "סגורה להרשמה"  (neutral / gray)  — not accepting
+ *  `staffingComplete` comes from getStaffingProgress(...).status === 'completed'
+ *  (real Assignment records) — the caller passes it in, this never re-derives
+ *  staffing. */
+export const getJobHeaderBadge = (
+  job: Pick<JobPost, 'acceptingApplications'>,
+  staffingComplete: boolean
+): RegistrationStatusInfo =>
+  staffingComplete
+    ? { label: 'השיבוץ הושלם', tone: 'info' }
+    : getRegistrationStatus(job);

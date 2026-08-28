@@ -14,12 +14,15 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 interface Props {
   /** May be either a customer id (approved-then-blocked) or a registration id. */
   userOrRegistrationId: string;
+  /** Reason the admin recorded when blocking, if any. */
+  blockedReason?: string;
   onBackToWelcome: () => void;
   onContactSupport?: () => void;
 }
 
 const BlockedAccountScreen: React.FC<Props> = ({
   userOrRegistrationId,
+  blockedReason,
   onBackToWelcome,
   onContactSupport,
 }) => {
@@ -40,6 +43,13 @@ const BlockedAccountScreen: React.FC<Props> = ({
           הגישה לחשבון נחסמה על ידי מנהל המערכת.{'\n'}
           לא ניתן להתחבר עד לבירור מול תמיכה.
         </Text>
+
+        {!!blockedReason?.trim() && (
+          <View style={styles.reasonBox}>
+            <Text style={styles.reasonLabel}>סיבת החסימה</Text>
+            <Text style={styles.reasonText}>{blockedReason.trim()}</Text>
+          </View>
+        )}
 
         <View style={styles.refBox}>
           <Text style={styles.refLabel}>מזהה</Text>
@@ -112,6 +122,31 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     lineHeight: 22,
     marginBottom: Spacing.lg,
+  },
+
+  reasonBox: {
+    width: '100%',
+    backgroundColor: '#FEF2F2',
+    borderColor: Colors.danger,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    gap: 4,
+  },
+  reasonLabel: {
+    fontSize: FontSize.sm,
+    fontWeight: '800',
+    color: Colors.danger,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  reasonText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
   },
 
   refBox: {

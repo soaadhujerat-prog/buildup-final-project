@@ -19,14 +19,15 @@ interface Props {
   onBack: () => void;
   onOpenSettings: () => void;
   onOpenEdit: () => void;
-  onLogout: () => void;
+  /** Still passed by the navigator, but logout now lives ONLY in Settings —
+   *  this screen no longer renders its own logout button (was a duplicate). */
+  onLogout?: () => void;
 }
 
 const ContractorProfileScreen: React.FC<Props> = ({
   onBack,
   onOpenSettings,
   onOpenEdit,
-  onLogout,
 }) => {
   const insets = useSafeAreaInsets();
   const { currentUser } = useApp();
@@ -127,15 +128,6 @@ const ContractorProfileScreen: React.FC<Props> = ({
             color={Colors.primary}
           />
           <Text style={styles.editBtnText}>ערוך פרופיל</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={onLogout}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="log-out-outline" size={18} color={Colors.danger} />
-          <Text style={styles.logoutBtnText}>התנתק</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -330,24 +322,6 @@ const styles = StyleSheet.create({
   },
   editBtnText: {
     color: Colors.primary,
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    writingDirection: 'rtl',
-  },
-  logoutBtn: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: Spacing.md,
-    paddingVertical: 14,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-    borderColor: Colors.danger,
-    backgroundColor: Colors.white,
-  },
-  logoutBtnText: {
-    color: Colors.danger,
     fontSize: FontSize.md,
     fontWeight: '700',
     writingDirection: 'rtl',

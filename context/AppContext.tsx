@@ -516,7 +516,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const worker = workers.find((w) => w.idNumber === id);
       if (worker) {
         if (worker.status === 'blocked') {
-          return { ok: false, status: 'blocked', reason: 'blocked' };
+          // Return the user so the navigator can route to BlockedAccount and
+          // show the block reason. NOT set as currentUser — a blocked user
+          // never gets a live session in the normal app shells.
+          return { ok: false, user: worker, status: 'blocked', reason: 'blocked' };
         }
         setCurrentUser(worker);
         return { ok: true, user: worker, status: 'approved' };
@@ -528,7 +531,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const contractor = contractors.find((c) => c.idNumber === id);
       if (contractor) {
         if (contractor.status === 'blocked') {
-          return { ok: false, status: 'blocked', reason: 'blocked' };
+          return {
+            ok: false,
+            user: contractor,
+            status: 'blocked',
+            reason: 'blocked',
+          };
         }
         setCurrentUser(contractor);
         return { ok: true, user: contractor, status: 'approved' };
@@ -800,6 +808,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             : c
         )
       );
+      // Keep the live session in sync — if the blocked user IS the current
+      // user, the navigator's blocked guard then takes over immediately.
+      setCurrentUser((cu) =>
+        cu && cu.role !== 'admin' && cu.id === userId
+          ? { ...cu, status: 'blocked', blockedReason: reason, blockedAt }
+          : cu
+      );
       pushNotification({
         userId,
         type: 'account_blocked',
@@ -836,6 +851,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               }
             : c
         )
+      );
+      setCurrentUser((cu) =>
+        cu && cu.role !== 'admin' && cu.id === userId
+          ? {
+              ...cu,
+              status: 'approved',
+              blockedReason: undefined,
+              blockedAt: undefined,
+            }
+          : cu
       );
       pushNotification({
         userId,

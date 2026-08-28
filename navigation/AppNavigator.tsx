@@ -10,7 +10,7 @@
 // - Notification deep-linking by NotificationType + relatedId
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -159,7 +159,7 @@ type AdminTab =
 // =============================================================================
 
 const AppNavigator: React.FC = () => {
-  const { currentUser, logout, getOrCreateConversation } = useApp();
+  const { currentUser, logout, getOrCreateConversation, getUserById } = useApp();
 
   // History stack for the post-login drilldown area — the last entry is the
   // active screen; popping it (goBack) reveals whatever the user actually
@@ -199,8 +199,19 @@ const AppNavigator: React.FC = () => {
     setRouteStack(r ? [r] : []);
   }, []);
 
-  // Auth fallback: when currentUser changes, route into the correct shell
+  // Auth fallback: route into the correct shell ONLY when the session user
+  // actually changes (login / logout / a different person). `currentUser` is a
+  // fresh object on every profile mutation (updateWorkerProfile /
+  // updateContractorProfile call setCurrentUser); reacting to those would
+  // reset the drilldown stack and drop the user on the dashboard after a
+  // simple profile save. Keying on role:id makes same-user updates a no-op,
+  // so "Profile → Edit → Save" returns to Profile via the screen's own goBack.
+  const sessionKeyRef = useRef<string | null>(null);
   useEffect(() => {
+    const key = currentUser ? `${currentUser.role}:${currentUser.id}` : null;
+    if (key === sessionKeyRef.current) return;
+    sessionKeyRef.current = key;
+
     if (!currentUser) {
       // logged out — only push to Welcome if we're already past Splash/auth
       if (home !== null) {
@@ -445,9 +456,15 @@ const AppNavigator: React.FC = () => {
     );
   }
   if (route?.name === 'BlockedAccount') {
+    const blocked = getUserById(route.userOrRegistrationId);
     return (
       <BlockedAccountScreen
         userOrRegistrationId={route.userOrRegistrationId}
+        blockedReason={
+          blocked && 'blockedReason' in blocked
+            ? blocked.blockedReason
+            : undefined
+        }
         onBackToWelcome={goWelcome}
       />
     );
@@ -457,6 +474,20 @@ const AppNavigator: React.FC = () => {
   if (!currentUser || home === null) {
     // Should be impossible after auth flow, but guard
     return null;
+  }
+
+  // Blocked guard (frontend/UX only — real enforcement comes with the
+  // backend). If the session user's status is 'blocked' — whether they got
+  // here somehow at login, or an admin blocked them mid-session and the
+  // currentUser state updated — they never see the normal app shells.
+  if (currentUser.role !== 'admin' && currentUser.status === 'blocked') {
+    return (
+      <BlockedAccountScreen
+        userOrRegistrationId={currentUser.id}
+        blockedReason={currentUser.blockedReason}
+        onBackToWelcome={handleLogout}
+      />
+    );
   }
 
   // ---- Drilldown routes (overlay on top of current home) --------------------

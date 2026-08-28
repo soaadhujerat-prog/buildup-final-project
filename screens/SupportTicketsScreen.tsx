@@ -13,7 +13,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
-import { SupportTicket, SupportTicketStatus } from '../types';
+import {
+  supportTicketDisplay,
+  SUPPORT_DISPLAY_FILTERS,
+  SupportDisplayState,
+} from '../utils/helpers';
+import { SupportTicket } from '../types';
 
 interface Props {
   onBack: () => void;
@@ -21,7 +26,7 @@ interface Props {
   onOpenNewTicket?: () => void; // only used for customer roles
 }
 
-type StatusFilter = 'all' | SupportTicketStatus;
+type StatusFilter = 'all' | SupportDisplayState;
 
 const SupportTicketsScreen: React.FC<Props> = ({
   onBack,
@@ -43,22 +48,29 @@ const SupportTicketsScreen: React.FC<Props> = ({
 
   const filtered = useMemo(() => {
     const base =
-      filter === 'all' ? myScope : myScope.filter((t) => t.status === filter);
+      filter === 'all'
+        ? myScope
+        : myScope.filter((t) => supportTicketDisplay(t.status).state === filter);
     return [...base].sort(
       (a, b) =>
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
   }, [myScope, filter]);
 
-  const counts = useMemo(
-    () => ({
+  // Every count derived live from the real tickets — 'resolved' and 'closed'
+  // both fall under the single "טופל" (done) bucket.
+  const counts = useMemo(() => {
+    const c: Record<'all' | SupportDisplayState, number> = {
       all: myScope.length,
-      open: myScope.filter((t) => t.status === 'open').length,
-      in_progress: myScope.filter((t) => t.status === 'in_progress').length,
-      resolved: myScope.filter((t) => t.status === 'resolved').length,
-    }),
-    [myScope]
-  );
+      waiting: 0,
+      in_progress: 0,
+      done: 0,
+    };
+    myScope.forEach((t) => {
+      c[supportTicketDisplay(t.status).state] += 1;
+    });
+    return c;
+  }, [myScope]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -77,29 +89,23 @@ const SupportTicketsScreen: React.FC<Props> = ({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chipRow}
       >
-        <Chip
-          label={`הכל (${counts.all})`}
-          active={filter === 'all'}
-          onPress={() => setFilter('all')}
-        />
-        <Chip
-          label={`פתוח (${counts.open})`}
-          active={filter === 'open'}
-          tone="danger"
-          onPress={() => setFilter('open')}
-        />
-        <Chip
-          label={`בטיפול (${counts.in_progress})`}
-          active={filter === 'in_progress'}
-          tone="warning"
-          onPress={() => setFilter('in_progress')}
-        />
-        <Chip
-          label={`טופל (${counts.resolved})`}
-          active={filter === 'resolved'}
-          tone="success"
-          onPress={() => setFilter('resolved')}
-        />
+        {SUPPORT_DISPLAY_FILTERS.map((f) => (
+          <Chip
+            key={f.key}
+            label={`${f.label} (${counts[f.key]})`}
+            active={filter === f.key}
+            tone={
+              f.key === 'waiting'
+                ? 'danger'
+                : f.key === 'in_progress'
+                ? 'warning'
+                : f.key === 'done'
+                ? 'success'
+                : undefined
+            }
+            onPress={() => setFilter(f.key)}
+          />
+        ))}
       </ScrollView>
 
       {filtered.length === 0 ? (
@@ -188,22 +194,7 @@ const TicketRow: React.FC<{
   userName: string;
   onPress: () => void;
 }> = ({ ticket, isAdmin, userName, onPress }) => {
-  const statusTone =
-    ticket.status === 'open'
-      ? 'danger'
-      : ticket.status === 'in_progress'
-      ? 'warning'
-      : ticket.status === 'resolved'
-      ? 'success'
-      : 'neutral';
-  const statusLabel =
-    ticket.status === 'open'
-      ? 'פתוח'
-      : ticket.status === 'in_progress'
-      ? 'בטיפול'
-      : ticket.status === 'resolved'
-      ? 'טופל'
-      : 'נסגר';
+  const display = supportTicketDisplay(ticket.status);
   return (
     <TouchableOpacity
       style={styles.row}
@@ -214,10 +205,14 @@ const TicketRow: React.FC<{
         <Ionicons name={typeIcon(ticket.type)} size={20} color={Colors.info} />
       </View>
       <View style={{ flex: 1 }}>
-        <View style={styles.rowTop}>
-          <StatusBadge label={statusLabel} tone={statusTone} small />
-          <Text style={styles.subject}>{ticket.subject}</Text>
+        {/* Row 1: status badge only (stays right-anchored, RTL).
+            Row 2: the subject on its own line, full width. */}
+        <View style={styles.rowStatusLine}>
+          <StatusBadge label={display.label} tone={display.tone} small />
         </View>
+        <Text style={styles.subject} numberOfLines={2}>
+          {ticket.subject}
+        </Text>
         <Text style={styles.desc} numberOfLines={1}>
           {ticket.description}
         </Text>
@@ -342,17 +337,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowTop: {
+  rowStatusLine: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 4,
   },
   subject: {
     fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.text,
+    textAlign: 'right',
     writingDirection: 'rtl',
-    flexShrink: 1,
   },
   desc: {
     fontSize: FontSize.sm,

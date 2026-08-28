@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import { supportTicketDisplay } from '../utils/helpers';
 import { Customer, Worker, Contractor, SupportTicketStatus } from '../types';
 
 interface Props {
@@ -51,22 +52,14 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
   const isAdmin = currentUser?.role === 'admin';
   const filer = getUserById(ticket.userId) as Customer | undefined;
 
-  const statusTone = (s: SupportTicketStatus) =>
-    s === 'open'
-      ? 'danger'
-      : s === 'in_progress'
-      ? 'warning'
-      : s === 'resolved'
-      ? 'success'
-      : 'neutral';
-  const statusLabel = (s: SupportTicketStatus) =>
-    s === 'open'
-      ? 'פתוח'
-      : s === 'in_progress'
-      ? 'בטיפול'
-      : s === 'resolved'
-      ? 'טופל'
-      : 'נסגר';
+  // Admin's status-setter offers the 3 user-visible states; each maps to a
+  // canonical raw status to persist. 'closed' stays valid in the model (old
+  // records keep it) but is folded into "טופל" and never newly set here.
+  const STATUS_OPTIONS: { raw: SupportTicketStatus; label: string }[] = [
+    { raw: 'open', label: supportTicketDisplay('open').label },
+    { raw: 'in_progress', label: supportTicketDisplay('in_progress').label },
+    { raw: 'resolved', label: supportTicketDisplay('resolved').label },
+  ];
   const typeLabel =
     ticket.type === 'complaint'
       ? 'תלונה'
@@ -119,8 +112,8 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
             <StatusBadge
-              label={statusLabel(ticket.status)}
-              tone={statusTone(ticket.status)}
+              label={supportTicketDisplay(ticket.status).label}
+              tone={supportTicketDisplay(ticket.status).tone}
               small
             />
             <Text style={styles.heroSubject}>{ticket.subject}</Text>
@@ -241,28 +234,31 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
                 <Text style={styles.sectionTitle}>שינוי סטטוס</Text>
               </View>
               <View style={styles.statusRow}>
-                {(
-                  ['open', 'in_progress', 'resolved', 'closed'] as SupportTicketStatus[]
-                ).map((s) => (
-                  <TouchableOpacity
-                    key={s}
-                    onPress={() => setNewStatus(s)}
-                    style={[
-                      styles.statusOpt,
-                      newStatus === s && styles.statusOptActive,
-                    ]}
-                    activeOpacity={0.85}
-                  >
-                    <Text
+                {STATUS_OPTIONS.map((opt) => {
+                  const active =
+                    supportTicketDisplay(newStatus).state ===
+                    supportTicketDisplay(opt.raw).state;
+                  return (
+                    <TouchableOpacity
+                      key={opt.raw}
+                      onPress={() => setNewStatus(opt.raw)}
                       style={[
-                        styles.statusOptText,
-                        newStatus === s && styles.statusOptTextActive,
+                        styles.statusOpt,
+                        active && styles.statusOptActive,
                       ]}
+                      activeOpacity={0.85}
                     >
-                      {statusLabel(s)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.statusOptText,
+                          active && styles.statusOptTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
 

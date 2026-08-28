@@ -1,4 +1,9 @@
-import type { ApplicationStatus, Assignment, InvitationStatus } from '../types';
+import type {
+  ApplicationStatus,
+  Assignment,
+  InvitationStatus,
+  SupportTicketStatus,
+} from '../types';
 
 export const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -166,6 +171,54 @@ export const INVITATION_STATUS_TONE: Record<InvitationStatus, BadgeTone> = {
   expired: 'neutral',
   cancelled: 'neutral',
 };
+
+// ---------------------------------------------------------------------------
+// Support tickets — the raw model keeps 4 statuses
+// ('open' | 'in_progress' | 'resolved' | 'closed'), but the UI only ever
+// shows THREE states. 'resolved' and 'closed' both mean "finished" to a user,
+// so they collapse into one "טופל" category for every badge, filter and
+// count. This is the ONE place that maps status → display; never re-derive a
+// support label/tone/filter per screen. Raw statuses on old records are left
+// untouched — only their presentation is unified.
+// ---------------------------------------------------------------------------
+
+export type SupportDisplayState = 'waiting' | 'in_progress' | 'done';
+
+export interface SupportDisplayInfo {
+  state: SupportDisplayState;
+  label: string;
+  tone: BadgeTone;
+}
+
+export const SUPPORT_DISPLAY_FILTERS: {
+  key: 'all' | SupportDisplayState;
+  label: string;
+}[] = [
+  { key: 'all', label: 'הכל' },
+  { key: 'waiting', label: 'ממתין לטיפול' },
+  { key: 'in_progress', label: 'בטיפול' },
+  { key: 'done', label: 'טופל' },
+];
+
+export const supportTicketDisplay = (
+  status: SupportTicketStatus
+): SupportDisplayInfo => {
+  switch (status) {
+    case 'open':
+      return { state: 'waiting', label: 'ממתין לטיפול', tone: 'danger' };
+    case 'in_progress':
+      return { state: 'in_progress', label: 'בטיפול', tone: 'warning' };
+    case 'resolved':
+    case 'closed':
+    default:
+      return { state: 'done', label: 'טופל', tone: 'success' };
+  }
+};
+
+/** True while the ticket still needs admin attention — i.e. NOT in the final
+ *  "טופל" category. This is what "פניות פתוחות" counts. */
+export const isSupportTicketOpen = (status: SupportTicketStatus): boolean =>
+  supportTicketDisplay(status).state !== 'done';
 
 /** Human timeline sentences for an application, every one a full
  *  "<what happened> ב־DD.MM.YYYY בשעה HH:mm" line. Line 1 is always the

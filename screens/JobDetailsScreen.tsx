@@ -19,8 +19,11 @@ import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
 import ResponseDialog from '../components/ResponseDialog';
-import { getRegistrationStatus, isOpenForApplications } from '../services/jobStatusService';
-import { getWorkerJobAssignment } from '../services/assignmentService';
+import { getJobHeaderBadge, isOpenForApplications } from '../services/jobStatusService';
+import {
+  getWorkerJobAssignment,
+  hasActiveAssignment,
+} from '../services/assignmentService';
 import { callPhone } from '../utils/contact';
 import {
   formatDateTime,
@@ -77,6 +80,7 @@ const JobDetailsScreen: React.FC<Props> = ({
     respondToApplication,
     withdrawApplication,
     cancelInvitation,
+    sendInvitation,
     setJobAcceptingApplications,
     isFavoriteContractor,
     toggleFavoriteContractor,
@@ -260,7 +264,36 @@ const JobDetailsScreen: React.FC<Props> = ({
     );
   };
 
-  const registrationStatus = getRegistrationStatus(job);
+  // A pending invitation auto-cancelled ONLY because the job filled up can be
+  // re-sent once a seat frees up and registration reopens. Mirrors
+  // sendInvitation's own guards so it never offers a no-op. The old record is
+  // left as-is; sendInvitation creates a fresh pending Invitation.
+  const canReinviteInvitation = (inv: Invitation): boolean => {
+    if (inv.status !== 'cancelled' || inv.cancellationReason !== 'capacity_full') {
+      return false;
+    }
+    if (!isOpenForApplications(job)) return false;
+    if (isJobFullyStaffed(job.id)) return false;
+    const hasLiveInvitation = invitations.some(
+      (i) =>
+        i.jobId === job.id &&
+        i.workerId === inv.workerId &&
+        (i.status === 'pending' || i.status === 'accepted')
+    );
+    if (hasLiveInvitation) return false;
+    return !hasActiveAssignment(assignments, job.id, inv.workerId);
+  };
+
+  const handleReinviteInvitation = (inv: Invitation) => {
+    const created = sendInvitation(job.id, job.contractorId, inv.workerId);
+    if (!created) {
+      Alert.alert('לא ניתן להזמין', 'כל המקומות במשרה כבר אוישו.');
+      return;
+    }
+    Alert.alert('הזמנה נשלחה', 'נשלחה הזמנה חדשה לעובד.');
+  };
+
+  const headerBadge = getJobHeaderBadge(job, fullyStaffed);
 
   const renderContractorResponse = (app: Application) =>
     app.contractorResponse ? (
@@ -456,8 +489,8 @@ const JobDetailsScreen: React.FC<Props> = ({
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
             <StatusBadge
-              label={registrationStatus.label}
-              tone={registrationStatus.tone}
+              label={headerBadge.label}
+              tone={headerBadge.tone}
               small
             />
             {job.urgent && <StatusBadge label="דחוף" tone="danger" small />}
@@ -909,6 +942,17 @@ const JobDetailsScreen: React.FC<Props> = ({
                           >
                             <Text style={styles.invCancelText}>
                               ביטול הזמנה
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                        {canReinviteInvitation(inv) && (
+                          <TouchableOpacity
+                            style={styles.invReinviteBtn}
+                            onPress={() => handleReinviteInvitation(inv)}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={styles.invReinviteText}>
+                              הזמן מחדש
                             </Text>
                           </TouchableOpacity>
                         )}
@@ -1531,6 +1575,18 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     fontWeight: '700',
     color: Colors.danger,
+    writingDirection: 'rtl',
+  },
+  invReinviteBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primary,
+  },
+  invReinviteText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.white,
     writingDirection: 'rtl',
   },
 

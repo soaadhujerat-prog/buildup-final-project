@@ -15,7 +15,11 @@ import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '..
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
-import { getWorkerJobAssignment } from '../services/assignmentService';
+import {
+  getWorkerJobAssignment,
+  hasActiveAssignment,
+} from '../services/assignmentService';
+import { isOpenForApplications } from '../services/jobStatusService';
 import {
   invitationTimeline,
   assignmentCancelLine,
@@ -52,6 +56,8 @@ const SentInvitationsScreen: React.FC<Props> = ({
     assignments,
     getUserById,
     cancelInvitation,
+    sendInvitation,
+    isJobFullyStaffed,
   } = useApp();
   const me = currentUser as Contractor | undefined;
 
@@ -64,6 +70,42 @@ const SentInvitationsScreen: React.FC<Props> = ({
         onPress: () => cancelInvitation(inv.id),
       },
     ]);
+  };
+
+  // A historical invitation that was auto-cancelled ONLY because the job
+  // filled up can be re-sent once a seat frees up again. The old record is
+  // never touched — sendInvitation creates a brand-new pending Invitation.
+  // All the "would this be a duplicate" checks below mirror sendInvitation's
+  // own guards, so the button never appears when the action would be a no-op.
+  const canReinvite = (inv: Invitation): boolean => {
+    if (inv.status !== 'cancelled' || inv.cancellationReason !== 'capacity_full') {
+      return false;
+    }
+    const job = jobs.find((j) => j.id === inv.jobId);
+    if (!job) return false;
+    // Job must be open to registration (not manually closed) AND have room.
+    if (!isOpenForApplications(job)) return false;
+    if (isJobFullyStaffed(inv.jobId)) return false;
+    // No live invitation and no active assignment already for this worker+job.
+    const hasLiveInvitation = invitations.some(
+      (i) =>
+        i.jobId === inv.jobId &&
+        i.workerId === inv.workerId &&
+        (i.status === 'pending' || i.status === 'accepted')
+    );
+    if (hasLiveInvitation) return false;
+    if (hasActiveAssignment(assignments, inv.jobId, inv.workerId)) return false;
+    return true;
+  };
+
+  const handleReinvite = (inv: Invitation) => {
+    if (!me) return;
+    const created = sendInvitation(inv.jobId, me.id, inv.workerId);
+    if (!created) {
+      Alert.alert('לא ניתן להזמין', 'כל המקומות במשרה כבר אוישו.');
+      return;
+    }
+    Alert.alert('הזמנה נשלחה', 'נשלחה הזמנה חדשה לעובד.');
   };
 
   const [filter, setFilter] = useState<Filter>('all');
@@ -182,6 +224,8 @@ const SentInvitationsScreen: React.FC<Props> = ({
                 onPressWorker={() => worker && onOpenWorkerProfile(worker.id)}
                 onPressJob={() => job && onOpenJobDetails(job.id)}
                 onCancel={() => handleCancel(item)}
+                canReinvite={canReinvite(item)}
+                onReinvite={() => handleReinvite(item)}
               />
             );
           }}
@@ -231,6 +275,8 @@ const InvitationRow: React.FC<{
   onPressWorker: () => void;
   onPressJob: () => void;
   onCancel: () => void;
+  canReinvite: boolean;
+  onReinvite: () => void;
 }> = ({
   inv,
   worker,
@@ -241,6 +287,8 @@ const InvitationRow: React.FC<{
   onPressWorker,
   onPressJob,
   onCancel,
+  canReinvite,
+  onReinvite,
 }) => {
   const { label, tone } = currentStaffedState(
     {
@@ -327,6 +375,17 @@ const InvitationRow: React.FC<{
             color={Colors.danger}
           />
           <Text style={styles.cancelText}>ביטול הזמנה</Text>
+        </TouchableOpacity>
+      )}
+
+      {canReinvite && (
+        <TouchableOpacity
+          style={styles.reinviteBtn}
+          onPress={onReinvite}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="paper-plane-outline" size={16} color={Colors.white} />
+          <Text style={styles.reinviteText}>הזמן מחדש</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -518,6 +577,22 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.danger,
+    writingDirection: 'rtl',
+  },
+  reinviteBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primary,
+  },
+  reinviteText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.white,
     writingDirection: 'rtl',
   },
 

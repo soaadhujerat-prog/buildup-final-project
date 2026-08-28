@@ -14,6 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
+import ContractorAvatar from '../components/ContractorAvatar';
 import { Customer, CustomerStatus, Worker, Contractor } from '../types';
 
 interface Props {
@@ -211,20 +213,15 @@ const UserRow: React.FC<{ user: Customer; onPress: () => void }> = ({
       activeOpacity={0.85}
       onPress={onPress}
     >
-      <View
-        style={[
-          styles.iconCircle,
-          {
-            backgroundColor: isWorker ? Colors.primaryFaint : '#DBEAFE',
-          },
-        ]}
-      >
-        <Ionicons
-          name={isWorker ? 'hammer' : 'business'}
-          size={20}
-          color={isWorker ? Colors.primary : Colors.secondary}
-        />
-      </View>
+      {/* Same avatar components as AdminUserDetailsScreen — worker: photo or
+          initials via WorkerAvatar; contractor: company logo or the fixed
+          building icon via ContractorAvatar (never initials). Reads avatarUrl
+          straight off the AppContext user, so a saved image shows here too. */}
+      {isWorker ? (
+        <WorkerAvatar worker={user as Worker} size={42} />
+      ) : (
+        <ContractorAvatar contractor={user as Contractor} size={42} />
+      )}
       <View style={{ flex: 1 }}>
         <View style={styles.topline}>
           <StatusBadge
@@ -359,13 +356,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     gap: Spacing.md,
     ...Shadow.medium,
-  },
-  iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   topline: {
     flexDirection: 'row-reverse',

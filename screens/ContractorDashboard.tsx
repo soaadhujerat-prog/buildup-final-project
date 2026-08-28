@@ -16,7 +16,7 @@ import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
-import { getRegistrationStatus, isOpenForApplications } from '../services/jobStatusService';
+import { getJobHeaderBadge, isOpenForApplications } from '../services/jobStatusService';
 import { getWorkerJobAssignment } from '../services/assignmentService';
 import {
   currentStaffedState,
@@ -328,8 +328,11 @@ const ContractorDashboard: React.FC<Props> = ({
             const candidatesCount = applications.filter(
               (a) => a.jobId === job.id && a.status === 'pending'
             ).length;
-            const registrationStatus = getRegistrationStatus(job);
             const staffing = getStaffingProgress(job.id);
+            const headerBadge = getJobHeaderBadge(
+              job,
+              staffing.status === 'completed'
+            );
             return (
               <TouchableOpacity
                 key={job.id}
@@ -358,8 +361,8 @@ const ContractorDashboard: React.FC<Props> = ({
                   </View>
                 </View>
                 <StatusBadge
-                  label={registrationStatus.label}
-                  tone={registrationStatus.tone}
+                  label={headerBadge.label}
+                  tone={headerBadge.tone}
                   small
                 />
               </TouchableOpacity>

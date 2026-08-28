@@ -6,6 +6,9 @@ import {
   ScrollView,
   TouchableOpacity,
   TouchableWithoutFeedback,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Modal,
   TextInput,
   Alert,
@@ -43,11 +46,15 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
     supportTickets,
     blockUser,
     unblockUser,
+    updateContractorProfile,
   } = useApp();
 
   const user = getUserById(userId);
   const [blockModalVisible, setBlockModalVisible] = useState(false);
   const [blockReason, setBlockReason] = useState('');
+  const [regEditVisible, setRegEditVisible] = useState(false);
+  const [regEditValue, setRegEditValue] = useState('');
+  const [regEditSubmitting, setRegEditSubmitting] = useState(false);
 
   const activity = useMemo(() => {
     if (!user) return null;
@@ -107,6 +114,41 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
     setBlockModalVisible(false);
     setBlockReason('');
     Alert.alert('המשתמש נחסם', `${user.fullName} נחסם/ה בהצלחה.`);
+  };
+
+  const openRegEdit = () => {
+    setRegEditValue(c?.contractorRegistrationNumber ?? '');
+    setRegEditVisible(true);
+  };
+
+  const handleRegEditConfirm = () => {
+    if (!c || regEditSubmitting) return;
+    const next = regEditValue.trim();
+    if (!next) {
+      Alert.alert('שגיאה', 'יש להזין מספר רישום.');
+      return;
+    }
+    if (!/^\d+$/.test(next)) {
+      Alert.alert('שגיאה', 'מספר הרישום חייב להכיל ספרות בלבד.');
+      return;
+    }
+    if (next === c.contractorRegistrationNumber) {
+      setRegEditVisible(false);
+      return;
+    }
+    setRegEditSubmitting(true);
+    try {
+      // Updates the ONE Contractor object in AppContext — same id, no new
+      // user, every other field untouched. All screens read this object, so
+      // the change shows everywhere immediately.
+      updateContractorProfile(c.id, { contractorRegistrationNumber: next });
+      setRegEditVisible(false);
+      Alert.alert('עודכן', 'מספר רישום הקבלנים עודכן.');
+    } catch {
+      Alert.alert('שגיאה', 'עדכון מספר הרישום נכשל. נסה שוב.');
+    } finally {
+      setRegEditSubmitting(false);
+    }
   };
 
   const handleUnblock = () => {
@@ -272,6 +314,14 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
               mono
               ltr
             />
+            <TouchableOpacity
+              style={styles.regEditBtn}
+              onPress={openRegEdit}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="create-outline" size={16} color={Colors.primary} />
+              <Text style={styles.regEditBtnText}>עדכן מספר רישום</Text>
+            </TouchableOpacity>
             <FieldRow
               label="אזורי פעילות"
               value={contractorAreas(c).join(', ') || '—'}
@@ -349,44 +399,128 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
         animationType="slide"
         onRequestClose={() => setBlockModalVisible(false)}
       >
-        <TouchableWithoutFeedback
-          onPress={() => setBlockModalVisible(false)}
-        >
+        {/* Tap any empty area (backdrop OR inside the sheet, outside the
+            input) → dismiss the keyboard only; the sheet stays open and the
+            typed reason is kept. "ביטול" / "אשר חסימה" still work. */}
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.modalBackdrop}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.modalCard}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>חסימת משתמש</Text>
+            <KeyboardAvoidingView
+              style={styles.modalKav}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <TouchableWithoutFeedback
+                onPress={Keyboard.dismiss}
+                accessible={false}
+              >
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>חסימת משתמש</Text>
+                  </View>
+                  <Text style={styles.modalSub}>
+                    ציין סיבה לחסימה. הסיבה תוצג למשתמש במסך החסימה.
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={blockReason}
+                    onChangeText={setBlockReason}
+                    placeholder="לדוגמה: דיווחים חוזרים על התנהגות בלתי הולמת"
+                    placeholderTextColor={Colors.textMuted}
+                    multiline
+                  />
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnCancel]}
+                      onPress={() => setBlockModalVisible(false)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnCancelText}>ביטול</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnConfirm]}
+                      onPress={handleBlockConfirm}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnConfirmText}>אשר חסימה</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <Text style={styles.modalSub}>
-                  ציין סיבה לחסימה. הסיבה תוצג למשתמש במסך החסימה.
-                </Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={blockReason}
-                  onChangeText={setBlockReason}
-                  placeholder="לדוגמה: דיווחים חוזרים על התנהגות בלתי הולמת"
-                  placeholderTextColor={Colors.textMuted}
-                  multiline
-                />
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={[styles.modalBtn, styles.modalBtnCancel]}
-                    onPress={() => setBlockModalVisible(false)}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.modalBtnCancelText}>ביטול</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalBtn, styles.modalBtnConfirm]}
-                    onPress={handleBlockConfirm}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.modalBtnConfirmText}>אשר חסימה</Text>
-                  </TouchableOpacity>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      <Modal
+        visible={regEditVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !regEditSubmitting && setRegEditVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.modalBackdrop}>
+            <KeyboardAvoidingView
+              style={styles.modalKav}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <TouchableWithoutFeedback
+                onPress={Keyboard.dismiss}
+                accessible={false}
+              >
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>עדכון מספר רישום קבלנים</Text>
+                  </View>
+
+                  <Text style={styles.fLabel}>מספר נוכחי</Text>
+                  <View style={styles.regReadonly}>
+                    <Text style={styles.regReadonlyValue}>
+                      {c?.contractorRegistrationNumber || '—'}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.fLabel}>מספר רישום חדש</Text>
+                  <TextInput
+                    style={[
+                      styles.modalInput,
+                      styles.regInput,
+                      { textAlign: 'left', writingDirection: 'ltr' },
+                    ]}
+                    value={regEditValue}
+                    onChangeText={(t) =>
+                      setRegEditValue(t.replace(/[^\d]/g, ''))
+                    }
+                    keyboardType="numeric"
+                    placeholder="לדוגמה: 105678"
+                    placeholderTextColor={Colors.textMuted}
+                  />
+
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnCancel]}
+                      onPress={() => setRegEditVisible(false)}
+                      disabled={regEditSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnCancelText}>ביטול</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.modalBtn,
+                        styles.regSaveBtn,
+                        regEditSubmitting && { opacity: 0.7 },
+                      ]}
+                      onPress={handleRegEditConfirm}
+                      disabled={regEditSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnConfirmText}>
+                        {regEditSubmitting ? 'שומר...' : 'עדכן'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            </TouchableWithoutFeedback>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
@@ -679,6 +813,42 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.overlay,
     justifyContent: 'flex-end',
   },
+  modalKav: { width: '100%' },
+  regEditBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.white,
+  },
+  regEditBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+  regReadonly: {
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.gray100,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  regReadonlyValue: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    textAlign: 'left',
+    writingDirection: 'ltr',
+  },
+  regInput: { minHeight: 0, paddingVertical: 12 },
+  regSaveBtn: { backgroundColor: Colors.primary },
   modalCard: {
     backgroundColor: Colors.white,
     borderTopLeftRadius: 20,
