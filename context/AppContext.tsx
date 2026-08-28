@@ -10,6 +10,7 @@
 import React, {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
   ReactNode,
@@ -57,6 +58,8 @@ import {
   buildAssignmentFromApplication,
   buildAssignmentFromInvitation,
   hasActiveAssignment,
+  getActiveAssignedWorkersCount,
+  isJobFullyStaffed as computeIsJobFullyStaffed,
   getStaffingProgress as computeStaffingProgress,
   StaffingProgress,
 } from '../services/assignmentService';
@@ -84,6 +87,15 @@ export interface LoginResult {
   status?: CustomerStatus;         // if registration record matched
   registration?: RegistrationRecord;
   reason?: 'not_found' | 'wrong_password' | 'pending' | 'rejected' | 'blocked';
+}
+
+/** Result of any action that would create a new staffing slot (accepting an
+ *  application / invitation). `ok: false, reason: 'full'` means the job had
+ *  already reached workersNeeded and nothing was changed — the caller should
+ *  surface "כל המקומות במשרה כבר אוישו." */
+export interface StaffingActionResult {
+  ok: boolean;
+  reason?: 'full';
 }
 
 /** The worker job-search screen's search/filter/sort — lifted up here
@@ -171,22 +183,59 @@ interface AppState {
 
   // Applications (worker -> job)
   applyToJob: (jobId: string, workerId: string, message?: string) => Application;
+  /** Accept / reject a pending application. Accepting is refused (returns
+   *  `{ ok: false, reason: 'full' }`, no state change) when the job's active
+   *  assignments already equal workersNeeded — this is the one guard against
+   *  overbooking, so no screen re-implements it. Rejecting always succeeds. */
   respondToApplication: (
     applicationId: string,
     accepted: boolean,
     response?: string
-  ) => void;
+  ) => StaffingActionResult;
+  /** Worker pulls back their own still-`pending` application. Never deletes
+   *  the record — flips status to 'withdrawn' and stamps `withdrawnAt`, so
+   *  the history stays intact and a fresh application can be filed later if
+   *  the job is still open. A no-op on any non-pending application. */
+  withdrawApplication: (applicationId: string) => void;
 
   // Invitations (contractor -> worker)
+  /** Send an invitation. Returns `null` (nothing created) when the job is
+   *  already fully staffed — the caller should surface
+   *  "כל המקומות במשרה כבר אוישו." */
   sendInvitation: (
     jobId: string,
     contractorId: string,
     workerId: string,
     message?: string
-  ) => Invitation;
+  ) => Invitation | null;
+  /** Accept / decline an invitation, with an optional free-text note from
+   *  the worker (stored on invitation.responseMessage, shown to the
+   *  contractor and included in their notification). Accepting is refused
+   *  (returns `{ ok: false, reason: 'full' }`, no state change) when the job
+   *  is already fully staffed. Declining always succeeds. */
   respondToInvitation: (
     invitationId: string,
-    accepted: boolean
+    accepted: boolean,
+    message?: string
+  ) => StaffingActionResult;
+  /** Contractor withdraws their own still-`pending` invitation. Never
+   *  deletes the record — flips status to 'cancelled' and stamps
+   *  `cancelledAt`. A no-op on any non-pending invitation (an accepted
+   *  invitation already produced an Assignment and must go through the
+   *  staffing-cancellation flow instead, never this one). */
+  cancelInvitation: (invitationId: string) => void;
+
+  // Assignments (real staffing)
+  /** Cancel an ACTIVE assignment — a staffed worker leaving the job, from
+   *  either side. Flips the Assignment (not the Application/Invitation that
+   *  produced it) to 'cancelled', stamps cancelledAt / cancelledBy /
+   *  cancellationMessage, notifies the other party, and lets the capacity
+   *  reconciler reopen registration if it had auto-closed. No-op on a
+   *  completed or already-cancelled assignment. */
+  cancelAssignment: (
+    assignmentId: string,
+    cancelledBy: 'worker' | 'contractor',
+    message?: string
   ) => void;
 
   // Favorite workers — personal to each contractor, never a global Worker
@@ -247,6 +296,9 @@ interface AppState {
   getAssignmentsForJob: (jobId: string) => Assignment[];
   getAssignmentsForWorker: (workerId: string) => Assignment[];
   getStaffingProgress: (jobId: string) => StaffingProgress;
+  /** Canonical "does this job still have room for another worker?" — active
+   *  assignment count vs workersNeeded. Use before any invite/accept action. */
+  isJobFullyStaffed: (jobId: string) => boolean;
   getNotificationsForUser: (userId: string) => AppNotification[];
   getTicketsForUser: (userId: string) => SupportTicket[];
 }
@@ -313,6 +365,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
     return seeded;
   });
+
+  // ---------------------------------------------------------------------
+  // Capacity <-> registration reconciliation
+  // ---------------------------------------------------------------------
+  // Staffing capacity is the source of truth for whether a job accepts new
+  // registrations. Any time the assignment collection changes we re-check
+  // every job:
+  //   • reached workersNeeded  -> auto-close (registrationClosureReason
+  //     'capacity'), unless the contractor had already closed it manually.
+  //   • dropped below workersNeeded AND it had been auto-closed -> reopen.
+  //   • closed manually -> never touched here.
+  // This is the ONE place that keeps job.acceptingApplications honest, so
+  // every screen can keep trusting isOpenForApplications(job) alone.
+  useEffect(() => {
+    setJobs((prevJobs) => {
+      let changed = false;
+      const next = prevJobs.map((j) => {
+        const full = computeIsJobFullyStaffed(assignments, j.id, j.workersNeeded);
+        if (full && j.acceptingApplications) {
+          changed = true;
+          return {
+            ...j,
+            acceptingApplications: false,
+            registrationClosureReason: 'capacity' as const,
+          };
+        }
+        if (
+          !full &&
+          !j.acceptingApplications &&
+          j.registrationClosureReason === 'capacity'
+        ) {
+          changed = true;
+          return {
+            ...j,
+            acceptingApplications: true,
+            registrationClosureReason: undefined,
+          };
+        }
+        return j;
+      });
+      return changed ? next : prevJobs;
+    });
+  }, [assignments]);
 
   // Normalize once at load — MOCK_CONVERSATIONS ships as legacy-shaped
   // records (single participantId, no participantIds array); this is the
@@ -724,15 +819,38 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, ...patch } : j)));
   }, []);
 
+  // The contractor's manual open/close switch. Closing stamps
+  // registrationClosureReason 'manual' so the capacity reconciler will NOT
+  // reopen it later. Opening clears the reason; opening a job that is
+  // actually full is ignored (the reconciler would just re-close it, and the
+  // UI hides the button in that case anyway).
   const setJobAcceptingApplications = useCallback<
     AppState['setJobAcceptingApplications']
-  >((jobId, accepting) => {
-    setJobs((prev) =>
-      prev.map((j) =>
-        j.id === jobId ? { ...j, acceptingApplications: accepting } : j
-      )
-    );
-  }, []);
+  >(
+    (jobId, accepting) => {
+      setJobs((prev) =>
+        prev.map((j) => {
+          if (j.id !== jobId) return j;
+          if (accepting) {
+            if (computeIsJobFullyStaffed(assignments, j.id, j.workersNeeded)) {
+              return j;
+            }
+            return {
+              ...j,
+              acceptingApplications: true,
+              registrationClosureReason: undefined,
+            };
+          }
+          return {
+            ...j,
+            acceptingApplications: false,
+            registrationClosureReason: 'manual' as const,
+          };
+        })
+      );
+    },
+    [assignments]
+  );
 
   // ---------------------------------------------------------------------
   // Applications
@@ -740,6 +858,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const applyToJob = useCallback<AppState['applyToJob']>(
     (jobId, workerId, message) => {
+      // Duplicate prevention looks only at *active* applications
+      // (pending / accepted). A historical withdrawn/rejected record for
+      // the same worker+job must never block a fresh application.
+      const activeDupe = applications.find(
+        (a) =>
+          a.jobId === jobId &&
+          a.workerId === workerId &&
+          (a.status === 'pending' || a.status === 'accepted')
+      );
+      if (activeDupe) return activeDupe;
+
       const app: Application = {
         id: newId('app'),
         jobId,
@@ -763,11 +892,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       return app;
     },
-    [jobs, workers, pushNotification]
+    [applications, jobs, workers, pushNotification]
+  );
+
+  const withdrawApplication = useCallback<AppState['withdrawApplication']>(
+    (applicationId) => {
+      setApplications((prev) =>
+        prev.map((a) =>
+          a.id === applicationId && a.status === 'pending'
+            ? { ...a, status: 'withdrawn', withdrawnAt: nowIso() }
+            : a
+        )
+      );
+    },
+    []
   );
 
   const respondToApplication = useCallback<AppState['respondToApplication']>(
     (applicationId, accepted, response) => {
+      const existing = applications.find((a) => a.id === applicationId);
+      if (!existing) return { ok: false };
+      const job = jobs.find((j) => j.id === existing.jobId);
+
+      // Overbooking guard — the one place it lives. Accepting a NEW worker
+      // onto a job that is already at workersNeeded is refused outright.
+      if (
+        accepted &&
+        job &&
+        !hasActiveAssignment(assignments, job.id, existing.workerId) &&
+        computeIsJobFullyStaffed(assignments, job.id, job.workersNeeded)
+      ) {
+        return { ok: false, reason: 'full' };
+      }
+
       let targetApp: Application | undefined;
       setApplications((prev) =>
         prev.map((a) => {
@@ -782,26 +939,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         })
       );
       if (targetApp) {
-        const job = jobs.find((j) => j.id === targetApp!.jobId);
         if (accepted && job) {
           setAssignments((prev) =>
-            hasActiveAssignment(prev, job.id, targetApp!.workerId)
+            hasActiveAssignment(prev, job.id, targetApp!.workerId) ||
+            computeIsJobFullyStaffed(prev, job.id, job.workersNeeded)
               ? prev
               : [...prev, buildAssignmentFromApplication(targetApp!, job)]
           );
         }
+        const jobTitle = job?.title ?? '';
+        const baseBody = accepted
+          ? `הבקשה שלך למשרה "${jobTitle}" אושרה.`
+          : `התקבלה החלטה לגבי הבקשה שלך למשרה "${jobTitle}".`;
+        const note = response?.trim();
         pushNotification({
           userId: targetApp.workerId,
           type: accepted ? 'application_accepted' : 'application_rejected',
           title: accepted ? 'הבקשה שלך אושרה' : 'הבקשה שלך נדחתה',
-          body: job
-            ? `בקשתך למשרה "${job.title}" ${accepted ? 'אושרה' : 'נדחתה'}`
-            : `בקשתך ${accepted ? 'אושרה' : 'נדחתה'}`,
+          body: note ? `${baseBody}\nהודעת הקבלן: "${note}"` : baseBody,
           relatedId: applicationId,
         });
       }
+      return { ok: true };
     },
-    [jobs, pushNotification]
+    [applications, jobs, assignments, pushNotification]
   );
 
   // ---------------------------------------------------------------------
@@ -810,6 +971,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const sendInvitation = useCallback<AppState['sendInvitation']>(
     (jobId, contractorId, workerId, message) => {
+      // Duplicate prevention looks only at *active* invitations
+      // (pending / accepted) for this worker+job. A historical
+      // declined/cancelled/expired record must never block a re-invite.
+      const activeDupe = invitations.find(
+        (i) =>
+          i.jobId === jobId &&
+          i.workerId === workerId &&
+          (i.status === 'pending' || i.status === 'accepted')
+      );
+      if (activeDupe) return activeDupe;
+
+      // Overbooking guard — a fully-staffed job takes no new invitations.
+      const job0 = jobs.find((j) => j.id === jobId);
+      if (
+        job0 &&
+        computeIsJobFullyStaffed(assignments, jobId, job0.workersNeeded)
+      ) {
+        return null;
+      }
+
       const inv: Invitation = {
         id: newId('inv'),
         jobId,
@@ -834,11 +1015,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
       return inv;
     },
-    [jobs, contractors, pushNotification]
+    [invitations, jobs, assignments, contractors, pushNotification]
+  );
+
+  const cancelInvitation = useCallback<AppState['cancelInvitation']>(
+    (invitationId) => {
+      setInvitations((prev) =>
+        prev.map((i) =>
+          i.id === invitationId && i.status === 'pending'
+            ? { ...i, status: 'cancelled', cancelledAt: nowIso() }
+            : i
+        )
+      );
+    },
+    []
   );
 
   const respondToInvitation = useCallback<AppState['respondToInvitation']>(
-    (invitationId, accepted) => {
+    (invitationId, accepted, message) => {
+      const existing = invitations.find((i) => i.id === invitationId);
+      if (!existing) return { ok: false };
+      const job = jobs.find((j) => j.id === existing.jobId);
+
+      // Overbooking guard — a worker cannot accept an invitation onto a job
+      // that filled up while the invitation was outstanding.
+      if (
+        accepted &&
+        job &&
+        !hasActiveAssignment(assignments, job.id, existing.workerId) &&
+        computeIsJobFullyStaffed(assignments, job.id, job.workersNeeded)
+      ) {
+        return { ok: false, reason: 'full' };
+      }
+
+      const note = message?.trim() || undefined;
       let target: Invitation | undefined;
       setInvitations((prev) =>
         prev.map((i) => {
@@ -847,32 +1057,96 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             ...i,
             status: accepted ? 'accepted' : 'declined',
             respondedAt: nowIso(),
+            responseMessage: note,
           };
           return target;
         })
       );
       if (target) {
-        const job = jobs.find((j) => j.id === target!.jobId);
         if (accepted && job) {
           setAssignments((prev) =>
-            hasActiveAssignment(prev, job.id, target!.workerId)
+            hasActiveAssignment(prev, job.id, target!.workerId) ||
+            computeIsJobFullyStaffed(prev, job.id, job.workersNeeded)
               ? prev
               : [...prev, buildAssignmentFromInvitation(target!, job)]
           );
         }
         const worker = workers.find((w) => w.id === target!.workerId);
+        const baseBody = worker
+          ? `${worker.fullName} ${accepted ? 'אישר' : 'דחה'} את ההזמנה למשרה "${
+              job?.title ?? ''
+            }"`
+          : 'התקבלה תגובה להזמנה';
         pushNotification({
           userId: target.contractorId,
           type: accepted ? 'invitation_accepted' : 'invitation_declined',
           title: accepted ? 'הזמנתך אושרה' : 'הזמנתך נדחתה',
-          body: worker
-            ? `${worker.fullName} ${accepted ? 'אישר' : 'דחה'} את ההזמנה`
-            : 'התקבלה תגובה להזמנה',
+          body: note ? `${baseBody}\nהודעת העובד: "${note}"` : baseBody,
           relatedId: invitationId,
         });
       }
+      return { ok: true };
     },
-    [jobs, workers, pushNotification]
+    [invitations, jobs, assignments, workers, pushNotification]
+  );
+
+  // ---------------------------------------------------------------------
+  // Assignment cancellation (staffed worker leaving the job)
+  // ---------------------------------------------------------------------
+
+  const cancelAssignment = useCallback<AppState['cancelAssignment']>(
+    (assignmentId, cancelledBy, message) => {
+      const existing = assignments.find((a) => a.id === assignmentId);
+      if (!existing || existing.status !== 'active') return;
+
+      const note = message?.trim() || undefined;
+      const ts = nowIso();
+
+      // Only the Assignment changes. The Application/Invitation that put this
+      // worker on the job stays `accepted` — that acceptance really happened.
+      setAssignments((prev) =>
+        prev.map((a) =>
+          a.id === assignmentId && a.status === 'active'
+            ? {
+                ...a,
+                status: 'cancelled',
+                cancelledAt: ts,
+                cancelledBy,
+                cancellationMessage: note,
+                updatedAt: ts,
+              }
+            : a
+        )
+      );
+      // Capacity auto-reopen is handled by the [assignments] reconciler.
+
+      const job = jobs.find((j) => j.id === existing.jobId);
+      const jobTitle = job?.title ?? '';
+
+      if (cancelledBy === 'contractor') {
+        const base = `השיבוץ שלך למשרה "${jobTitle}" בוטל על ידי הקבלן.`;
+        pushNotification({
+          userId: existing.workerId,
+          type: 'assignment_cancelled',
+          title: 'השיבוץ שלך בוטל',
+          body: note ? `${base}\nהודעת הקבלן: "${note}"` : base,
+          relatedId: existing.jobId,
+        });
+      } else {
+        const worker = workers.find((w) => w.id === existing.workerId);
+        const base = `${
+          worker?.fullName ?? 'עובד'
+        } ויתר/ה על השיבוץ למשרה "${jobTitle}".`;
+        pushNotification({
+          userId: existing.contractorId,
+          type: 'assignment_cancelled',
+          title: 'עובד ויתר על השיבוץ',
+          body: note ? `${base}\nהודעת העובד: "${note}"` : base,
+          relatedId: existing.jobId,
+        });
+      }
+    },
+    [assignments, jobs, workers, pushNotification]
   );
 
   // ---------------------------------------------------------------------
@@ -1196,6 +1470,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     [assignments, jobs]
   );
 
+  const isJobFullyStaffed = useCallback<AppState['isJobFullyStaffed']>(
+    (jobId) => {
+      const job = jobs.find((j) => j.id === jobId);
+      if (!job) return false;
+      return computeIsJobFullyStaffed(assignments, jobId, job.workersNeeded);
+    },
+    [assignments, jobs]
+  );
+
   const getNotificationsForUser = useCallback<
     AppState['getNotificationsForUser']
   >(
@@ -1252,8 +1535,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setJobAcceptingApplications,
       applyToJob,
       respondToApplication,
+      withdrawApplication,
       sendInvitation,
       respondToInvitation,
+      cancelInvitation,
+      cancelAssignment,
 
       toggleFavoriteWorker,
       isFavoriteWorker,
@@ -1286,6 +1572,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       getAssignmentsForJob,
       getAssignmentsForWorker,
       getStaffingProgress,
+      isJobFullyStaffed,
       getNotificationsForUser,
       getTicketsForUser,
     }),
@@ -1321,8 +1608,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setJobAcceptingApplications,
       applyToJob,
       respondToApplication,
+      withdrawApplication,
       sendInvitation,
       respondToInvitation,
+      cancelInvitation,
+      cancelAssignment,
       toggleFavoriteWorker,
       isFavoriteWorker,
       getFavoriteWorkerIds,
@@ -1348,6 +1638,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       getAssignmentsForJob,
       getAssignmentsForWorker,
       getStaffingProgress,
+      isJobFullyStaffed,
       getNotificationsForUser,
       getTicketsForUser,
     ]

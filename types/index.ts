@@ -204,8 +204,19 @@ export interface JobPost {
    *  changing how any screen reads this field. Max 5, enforced in the UI. */
   worksiteImages?: string[];
   /** When false, workers cannot submit new applications.
-   *  Controlled by the contractor from JobDetails. Defaults to true on creation. */
+   *  Controlled by the contractor from JobDetails. Defaults to true on creation.
+   *  Also flipped automatically by AppContext when staffing capacity is
+   *  reached / freed — see registrationClosureReason. */
   acceptingApplications: boolean;
+  /** Why the job is currently closed to new registrations. Only meaningful
+   *  while acceptingApplications === false:
+   *   - 'manual'   — the contractor pressed "סגור משרה להרשמה". Stays closed
+   *                  even if staffing later drops below workersNeeded.
+   *   - 'capacity' — the system auto-closed it because active assignments
+   *                  reached workersNeeded. Auto-reopens if an assignment is
+   *                  later removed and capacity frees up.
+   *  Undefined whenever the job is open. */
+  registrationClosureReason?: 'manual' | 'capacity';
 }
 
 /** Legacy alias for screens that still import { Job }. */
@@ -213,7 +224,13 @@ export type Job = JobPost;
 
 export type ApplicationStatus = 'pending' | 'accepted' | 'rejected' | 'withdrawn';
 
-/** Worker -> Job. Created by the worker from the AvailableJobs screen. */
+/** Worker -> Job. Created by the worker from the AvailableJobs screen.
+ *  A record is NEVER deleted — a worker who changes their mind moves the
+ *  application to `withdrawn` (keeping full history). `appliedAt` is the
+ *  "sent" timestamp; `respondedAt` covers both accept and reject (the
+ *  `status` disambiguates which); `withdrawnAt` is stamped only when the
+ *  worker pulls the application back. All are ISO strings, rendered via
+ *  formatDateTime(). */
 export interface Application {
   id: string;
   jobId: string;
@@ -221,6 +238,12 @@ export interface Application {
   message?: string;
   appliedAt: string;
   respondedAt?: string;
+  withdrawnAt?: string;
+  /** The contractor's optional free-text note attached when they accept or
+   *  reject the application (one field for both — the `status` says which
+   *  decision it belongs to). Shown to the worker as "הודעת הקבלן". This is
+   *  the single "response message" field; do not add accept/reject-specific
+   *  variants. */
   contractorResponse?: string;
   status: ApplicationStatus;
 }
@@ -229,9 +252,23 @@ export interface Application {
 export type JobRequest = Application;
 export type JobRequestStatus = ApplicationStatus;
 
-export type InvitationStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+export type InvitationStatus =
+  | 'pending'
+  | 'accepted'
+  | 'declined'
+  | 'expired'
+  | 'cancelled';
 
-/** Contractor -> Worker. Created from SearchWorkers or SmartMatch. */
+// (Invitation.responseMessage — the worker's optional note when accepting or
+// declining — is declared on the Invitation interface below.)
+
+/** Contractor -> Worker. Created from SearchWorkers or SmartMatch.
+ *  Like Application, a record is NEVER deleted — a contractor who changes
+ *  their mind about a still-`pending` invitation moves it to `cancelled`
+ *  (keeping history). `sentAt` is the "sent" timestamp; `respondedAt`
+ *  covers both accept and decline (the `status` disambiguates); `cancelledAt`
+ *  is stamped only when the contractor withdraws the invitation. All ISO
+ *  strings, rendered via formatDateTime(). */
 export interface Invitation {
   id: string;
   jobId: string;
@@ -240,6 +277,11 @@ export interface Invitation {
   message?: string;
   sentAt: string;
   respondedAt?: string;
+  cancelledAt?: string;
+  /** The worker's optional free-text note attached when they accept or
+   *  decline the invitation (mirror of Application.contractorResponse — one
+   *  field for both decisions). Shown to the contractor as "הודעת העובד". */
+  responseMessage?: string;
   status: InvitationStatus;
 }
 
@@ -281,7 +323,13 @@ export type AssignmentStatus = 'active' | 'completed' | 'cancelled';
 /** Created the moment a contractor accepts a worker's application, or a
  *  worker accepts a contractor's invitation. This is the single source of
  *  truth for "who is actually staffed on this job" — never derive staffing
- *  counts from Application/Invitation counts directly. */
+ *  counts from Application/Invitation counts directly.
+ *
+ *  Cancelling a *staffed* worker changes THIS record's status to 'cancelled'
+ *  (never delete it, never touch the Application/Invitation that produced it —
+ *  that acceptance really happened and stays `accepted` in history). The
+ *  Application/Invitation is "how the worker got here"; the Assignment is
+ *  "are they on the job right now". */
 export interface Assignment {
   id: string;
   jobId: string;
@@ -292,6 +340,10 @@ export interface Assignment {
   status: AssignmentStatus;
   createdAt: string;
   updatedAt: string;
+  /** Set only when status became 'cancelled'. */
+  cancelledAt?: string;
+  cancelledBy?: 'worker' | 'contractor';
+  cancellationMessage?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +423,7 @@ export type NotificationType =
   | 'invitation_received'
   | 'invitation_accepted'
   | 'invitation_declined'
+  | 'assignment_cancelled'
   | 'new_message'
   | 'review'
   | 'registration_approved'

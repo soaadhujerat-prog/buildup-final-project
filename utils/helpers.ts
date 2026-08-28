@@ -1,3 +1,5 @@
+import type { ApplicationStatus, InvitationStatus } from '../types';
+
 export const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
   return date.toLocaleDateString('he-IL', {
@@ -43,6 +45,25 @@ export const formatConversationTime = (isoString: string): string => {
   });
 };
 
+/** The one shared "date + time" formatter for every lifecycle timestamp in
+ *  the app (application sent/accepted/rejected/withdrawn, invitation
+ *  sent/accepted/rejected/cancelled). Output: "28.08.2026 בשעה 14:38" —
+ *  DD.MM.YYYY, 24-hour HH:mm, always rendered in the device's local
+ *  timezone. Never hand-roll this per screen. */
+export const formatDateTime = (isoString?: string): string => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+
+  return `${dd}.${mm}.${yyyy} בשעה ${hh}:${min}`;
+};
+
 export const formatCurrency = (amount: number): string => {
   return `${amount.toLocaleString('he-IL')} ₪`;
 };
@@ -86,6 +107,91 @@ export const getMatchLabel = (score: number): string => {
   if (score >= 70) return 'התאמה טובה';
   if (score >= 50) return 'התאמה בינונית';
   return 'התאמה חלשה';
+};
+
+// ---------------------------------------------------------------------------
+// Application / Invitation status → badge label + tone (one shared source, so
+// every screen that shows a lifecycle pill reads the same thing).
+// ---------------------------------------------------------------------------
+
+export type BadgeTone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
+
+export const APPLICATION_STATUS_LABEL: Record<ApplicationStatus, string> = {
+  pending: 'ממתין',
+  accepted: 'התקבל',
+  rejected: 'נדחתה',
+  withdrawn: 'בוטלה',
+};
+
+export const APPLICATION_STATUS_TONE: Record<ApplicationStatus, BadgeTone> = {
+  pending: 'warning',
+  accepted: 'success',
+  rejected: 'danger',
+  withdrawn: 'neutral',
+};
+
+export const INVITATION_STATUS_LABEL: Record<InvitationStatus, string> = {
+  pending: 'ממתין',
+  accepted: 'התקבל',
+  declined: 'נדחתה',
+  expired: 'פגה',
+  cancelled: 'בוטלה',
+};
+
+export const INVITATION_STATUS_TONE: Record<InvitationStatus, BadgeTone> = {
+  pending: 'warning',
+  accepted: 'success',
+  declined: 'danger',
+  expired: 'neutral',
+  cancelled: 'neutral',
+};
+
+/** Human timeline sentences for an application, every one a full
+ *  "<what happened> ב־DD.MM.YYYY בשעה HH:mm" line. Line 1 is always the
+ *  "sent" line; a second line is added for the terminal states that carry
+ *  their own timestamp. */
+export const applicationTimeline = (app: {
+  appliedAt: string;
+  respondedAt?: string;
+  withdrawnAt?: string;
+  status: ApplicationStatus;
+}): string[] => {
+  const lines: string[] = [`הבקשה נשלחה ב־${formatDateTime(app.appliedAt)}`];
+  if (app.status === 'accepted' && app.respondedAt) {
+    lines.push(`אושרה ב־${formatDateTime(app.respondedAt)}`);
+  } else if (app.status === 'rejected' && app.respondedAt) {
+    lines.push(`נדחתה ב־${formatDateTime(app.respondedAt)}`);
+  } else if (app.status === 'withdrawn' && app.withdrawnAt) {
+    lines.push(`בוטלה על ידי העובד ב־${formatDateTime(app.withdrawnAt)}`);
+  }
+  return lines;
+};
+
+/** Human timeline sentences for an invitation. `perspective` only changes
+ *  the wording of the "cancelled" line — "בוטלה על ידך" for the contractor
+ *  who cancelled it, "בוטלה על ידי הקבלן" for the worker who received it. */
+export const invitationTimeline = (
+  inv: {
+    sentAt: string;
+    respondedAt?: string;
+    cancelledAt?: string;
+    status: InvitationStatus;
+  },
+  perspective: 'worker' | 'contractor'
+): string[] => {
+  const lines: string[] = [`ההזמנה נשלחה ב־${formatDateTime(inv.sentAt)}`];
+  if (inv.status === 'accepted' && inv.respondedAt) {
+    lines.push(`אושרה ב־${formatDateTime(inv.respondedAt)}`);
+  } else if (inv.status === 'declined' && inv.respondedAt) {
+    lines.push(`נדחתה ב־${formatDateTime(inv.respondedAt)}`);
+  } else if (inv.status === 'cancelled' && inv.cancelledAt) {
+    lines.push(
+      perspective === 'contractor'
+        ? `בוטלה על ידך ב־${formatDateTime(inv.cancelledAt)}`
+        : `בוטלה על ידי הקבלן ב־${formatDateTime(inv.cancelledAt)}`
+    );
+  }
+  return lines;
 };
 
 export const getRequestStatusLabel = (status: string): string => {

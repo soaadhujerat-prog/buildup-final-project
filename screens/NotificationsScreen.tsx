@@ -37,6 +37,7 @@ const iconForType = (
       };
     case 'application_rejected':
     case 'invitation_declined':
+    case 'assignment_cancelled':
     case 'job_rejected':
     case 'registration_rejected':
     case 'account_blocked':

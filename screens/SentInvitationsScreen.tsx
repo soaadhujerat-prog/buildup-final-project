@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   FlatList,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +15,11 @@ import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '..
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
+import {
+  invitationTimeline,
+  INVITATION_STATUS_LABEL,
+  INVITATION_STATUS_TONE,
+} from '../utils/helpers';
 import { Contractor, InvitationStatus, Invitation, Worker } from '../types';
 
 interface Props {
@@ -30,8 +36,20 @@ const SentInvitationsScreen: React.FC<Props> = ({
   onOpenJobDetails,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, invitations, jobs, getUserById } = useApp();
+  const { currentUser, invitations, jobs, getUserById, cancelInvitation } =
+    useApp();
   const me = currentUser as Contractor | undefined;
+
+  const handleCancel = (inv: Invitation) => {
+    Alert.alert('לבטל את ההזמנה?', 'העובד לא יוכל יותר לאשר את ההזמנה הזו.', [
+      { text: 'חזור', style: 'cancel' },
+      {
+        text: 'ביטול הזמנה',
+        style: 'destructive',
+        onPress: () => cancelInvitation(inv.id),
+      },
+    ]);
+  };
 
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -56,6 +74,7 @@ const SentInvitationsScreen: React.FC<Props> = ({
     pending: myInvitations.filter((i) => i.status === 'pending').length,
     accepted: myInvitations.filter((i) => i.status === 'accepted').length,
     declined: myInvitations.filter((i) => i.status === 'declined').length,
+    cancelled: myInvitations.filter((i) => i.status === 'cancelled').length,
   };
 
   return (
@@ -95,6 +114,11 @@ const SentInvitationsScreen: React.FC<Props> = ({
           active={filter === 'declined'}
           tone="danger"
           onPress={() => setFilter('declined')}
+        />
+        <Chip
+          label={`בוטלו (${counts.cancelled})`}
+          active={filter === 'cancelled'}
+          onPress={() => setFilter('cancelled')}
         />
       </ScrollView>
 
@@ -137,6 +161,7 @@ const SentInvitationsScreen: React.FC<Props> = ({
                 jobTitle={job?.title ?? '—'}
                 onPressWorker={() => worker && onOpenWorkerProfile(worker.id)}
                 onPressJob={() => job && onOpenJobDetails(job.id)}
+                onCancel={() => handleCancel(item)}
               />
             );
           }}
@@ -184,19 +209,19 @@ const InvitationRow: React.FC<{
   jobTitle: string;
   onPressWorker: () => void;
   onPressJob: () => void;
-}> = ({ inv, worker, workerName, workerMeta, jobTitle, onPressWorker, onPressJob }) => {
-  const tone =
-    inv.status === 'pending'
-      ? 'warning'
-      : inv.status === 'accepted'
-      ? 'success'
-      : 'danger';
-  const label =
-    inv.status === 'pending'
-      ? 'ממתין'
-      : inv.status === 'accepted'
-      ? 'התקבל'
-      : 'נדחה';
+  onCancel: () => void;
+}> = ({
+  inv,
+  worker,
+  workerName,
+  workerMeta,
+  jobTitle,
+  onPressWorker,
+  onPressJob,
+  onCancel,
+}) => {
+  const tone = INVITATION_STATUS_TONE[inv.status];
+  const label = INVITATION_STATUS_LABEL[inv.status];
   return (
     <View style={styles.card}>
       <TouchableOpacity
@@ -242,20 +267,35 @@ const InvitationRow: React.FC<{
         </Text>
       )}
 
-      <Text style={styles.sentAt}>
-        נשלח:{' '}
-        <Text style={{ writingDirection: 'ltr' }}>
-          {new Date(inv.sentAt).toLocaleDateString('he-IL')}
-        </Text>
-        {inv.respondedAt && (
-          <>
-            {' · נענה: '}
-            <Text style={{ writingDirection: 'ltr' }}>
-              {new Date(inv.respondedAt).toLocaleDateString('he-IL')}
-            </Text>
-          </>
-        )}
-      </Text>
+      <View style={styles.timeline}>
+        {invitationTimeline(inv, 'contractor').map((line) => (
+          <Text key={line} style={styles.sentAt}>
+            {line}
+          </Text>
+        ))}
+      </View>
+
+      {inv.responseMessage ? (
+        <View style={styles.responseNote}>
+          <Text style={styles.responseNoteLabel}>הודעת העובד</Text>
+          <Text style={styles.responseNoteText}>{inv.responseMessage}</Text>
+        </View>
+      ) : null}
+
+      {inv.status === 'pending' && (
+        <TouchableOpacity
+          style={styles.cancelBtn}
+          onPress={onCancel}
+          activeOpacity={0.85}
+        >
+          <Ionicons
+            name="close-circle-outline"
+            size={16}
+            color={Colors.danger}
+          />
+          <Text style={styles.cancelText}>ביטול הזמנה</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -392,10 +432,54 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     fontStyle: 'italic',
   },
+  timeline: {
+    width: '100%',
+    gap: 2,
+  },
   sentAt: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
     textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 7,
+    flexShrink: 1,
+  },
+  responseNote: {
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.sm,
+    padding: 8,
+    gap: 2,
+  },
+  responseNoteLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  responseNoteText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 5,
+  },
+  cancelBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.white,
+  },
+  cancelText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.danger,
     writingDirection: 'rtl',
   },
 

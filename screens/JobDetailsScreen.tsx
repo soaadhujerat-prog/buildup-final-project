@@ -17,9 +17,19 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
-import { getRegistrationStatus } from '../services/jobStatusService';
+import ResponseDialog from '../components/ResponseDialog';
+import { getRegistrationStatus, isOpenForApplications } from '../services/jobStatusService';
 import { callPhone } from '../utils/contact';
-import { Application, Contractor, Worker } from '../types';
+import {
+  formatDateTime,
+  applicationTimeline,
+  invitationTimeline,
+  APPLICATION_STATUS_LABEL,
+  APPLICATION_STATUS_TONE,
+  INVITATION_STATUS_LABEL,
+  INVITATION_STATUS_TONE,
+} from '../utils/helpers';
+import { Application, Contractor, Invitation, Worker } from '../types';
 
 interface Props {
   jobId: string;
@@ -55,9 +65,12 @@ const JobDetailsScreen: React.FC<Props> = ({
     getUserById,
     getApplicationsForJob,
     getStaffingProgress,
+    isJobFullyStaffed,
     invitations,
     applyToJob,
     respondToApplication,
+    withdrawApplication,
+    cancelInvitation,
     setJobAcceptingApplications,
     isFavoriteContractor,
     toggleFavoriteContractor,
@@ -66,6 +79,9 @@ const JobDetailsScreen: React.FC<Props> = ({
   const job = getJobById(jobId);
   const [applying, setApplying] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [candidateDialog, setCandidateDialog] = useState<
+    { mode: 'accept' | 'reject'; app: Application } | null
+  >(null);
 
   if (!job) {
     return (
@@ -95,15 +111,65 @@ const JobDetailsScreen: React.FC<Props> = ({
     toggleFavoriteContractor(currentUser.id, contractor.id);
   };
 
-  // For worker mode: did I already apply?
-  const myExistingApplication = useMemo(() => {
-    if (!isWorker) return null;
-    return candidates.find((a) => a.workerId === currentUser?.id) ?? null;
+  // For worker mode: my application history for this job (newest first).
+  // There can be more than one row over time — e.g. a withdrawn application
+  // followed by a fresh one — so we never assume a single record.
+  const myApplications = useMemo(() => {
+    if (!isWorker || !currentUser) return [];
+    return candidates
+      .filter((a) => a.workerId === currentUser.id)
+      .sort(
+        (a, b) =>
+          new Date(b.appliedAt).getTime() - new Date(a.appliedAt).getTime()
+      );
   }, [candidates, isWorker, currentUser]);
 
-  // Invitations sent for this job (contractor mode)
+  // The one that still "counts" — pending or accepted. Duplicate prevention
+  // and the action bar both key off this, never off historical rows.
+  const myActiveApplication = useMemo(
+    () =>
+      myApplications.find(
+        (a) => a.status === 'pending' || a.status === 'accepted'
+      ) ?? null,
+    [myApplications]
+  );
+  const myLatestApplication = myApplications[0] ?? null;
+
+  const jobOpen = isOpenForApplications(job);
+  const staffing = getStaffingProgress(job.id);
+  const fullyStaffed = isJobFullyStaffed(job.id);
+
+  // Candidates the contractor should treat as live right now (drives the
+  // "מועמדים ממתינים" count) — withdrawn / rejected are history, not pending.
+  const pendingCandidatesCount = useMemo(
+    () => candidates.filter((a) => a.status === 'pending').length,
+    [candidates]
+  );
+
+  // Candidates ordered so live ones sit on top, history sinks to the bottom.
+  const orderedCandidates = useMemo(() => {
+    const rank: Record<Application['status'], number> = {
+      pending: 0,
+      accepted: 1,
+      rejected: 2,
+      withdrawn: 3,
+    };
+    return [...candidates].sort((a, b) => {
+      if (rank[a.status] !== rank[b.status]) {
+        return rank[a.status] - rank[b.status];
+      }
+      return new Date(b.appliedAt).getTime() - new Date(a.appliedAt).getTime();
+    });
+  }, [candidates]);
+
+  // Invitations sent for this job (contractor mode) — newest first.
   const invitationsForJob = useMemo(
-    () => invitations.filter((i) => i.jobId === job.id),
+    () =>
+      invitations
+        .filter((i) => i.jobId === job.id)
+        .sort(
+          (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()
+        ),
     [invitations, job.id]
   );
 
@@ -121,27 +187,178 @@ const JobDetailsScreen: React.FC<Props> = ({
   };
 
   const handleAccept = (app: Application) => {
-    Alert.alert('אישור מועמד', `לאשר את ${getUserById(app.workerId)?.fullName}?`, [
-      { text: 'ביטול', style: 'cancel' },
-      {
-        text: 'אשר',
-        onPress: () => respondToApplication(app.id, true),
-      },
-    ]);
+    if (fullyStaffed) {
+      Alert.alert('כל המקומות במשרה כבר אוישו.');
+      return;
+    }
+    setCandidateDialog({ mode: 'accept', app });
   };
 
   const handleReject = (app: Application) => {
-    Alert.alert('דחיית מועמד', `לדחות את ${getUserById(app.workerId)?.fullName}?`, [
-      { text: 'ביטול', style: 'cancel' },
-      {
-        text: 'דחה',
-        style: 'destructive',
-        onPress: () => respondToApplication(app.id, false),
-      },
-    ]);
+    setCandidateDialog({ mode: 'reject', app });
+  };
+
+  const submitCandidateDialog = (message: string) => {
+    if (!candidateDialog) return;
+    const { mode, app } = candidateDialog;
+    setCandidateDialog(null);
+    const res = respondToApplication(
+      app.id,
+      mode === 'accept',
+      message || undefined
+    );
+    if (mode === 'accept' && !res.ok && res.reason === 'full') {
+      Alert.alert('כל המקומות במשרה כבר אוישו.');
+    }
+  };
+
+  const handleWithdraw = (app: Application) => {
+    Alert.alert(
+      'לבטל את הבקשה?',
+      'הבקשה שלך למשרה תבוטל. כל עוד ההרשמה פתוחה, תוכל להגיש בקשה חדשה בהמשך.',
+      [
+        { text: 'חזור', style: 'cancel' },
+        {
+          text: 'ביטול הבקשה',
+          style: 'destructive',
+          onPress: () => withdrawApplication(app.id),
+        },
+      ]
+    );
+  };
+
+  const handleCancelInvitation = (inv: Invitation) => {
+    Alert.alert(
+      'לבטל את ההזמנה?',
+      'העובד לא יוכל יותר לאשר את ההזמנה הזו.',
+      [
+        { text: 'חזור', style: 'cancel' },
+        {
+          text: 'ביטול הזמנה',
+          style: 'destructive',
+          onPress: () => cancelInvitation(inv.id),
+        },
+      ]
+    );
   };
 
   const registrationStatus = getRegistrationStatus(job);
+
+  const renderContractorResponse = (app: Application) =>
+    app.contractorResponse ? (
+      <View style={styles.responseNote}>
+        <Text style={styles.responseNoteLabel}>הודעת הקבלן</Text>
+        <Text style={styles.responseNoteText}>{app.contractorResponse}</Text>
+      </View>
+    ) : null;
+
+  const renderApplyButton = (label: string) => (
+    <TouchableOpacity
+      style={[styles.actionBtn, styles.applyBtn, applying && { opacity: 0.7 }]}
+      onPress={handleApply}
+      disabled={applying}
+      activeOpacity={0.85}
+    >
+      <Ionicons name="send" size={20} color={Colors.white} />
+      <Text style={styles.applyText}>{applying ? 'שולח...' : label}</Text>
+    </TouchableOpacity>
+  );
+
+  // The worker's bottom action area. Always shows a clear status line + a
+  // date/time line, and an explicit action (never a bare status message):
+  // apply / re-apply when the job is open, or "ביטול הבקשה" while pending.
+  const renderWorkerAction = () => {
+    if (myActiveApplication?.status === 'pending') {
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, { backgroundColor: '#FEF3C7' }]}>
+            <Ionicons name="hourglass" size={20} color={Colors.warning} />
+            <Text style={styles.appliedText}>ממתינה לתשובת הקבלן</Text>
+          </View>
+          <Text style={styles.workerStatusTime}>
+            הבקשה נשלחה ב־{formatDateTime(myActiveApplication.appliedAt)}
+          </Text>
+          <TouchableOpacity
+            style={styles.withdrawBtn}
+            onPress={() => handleWithdraw(myActiveApplication)}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name="close-circle-outline"
+              size={18}
+              color={Colors.danger}
+            />
+            <Text style={styles.withdrawBtnText}>ביטול הבקשה</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (myActiveApplication?.status === 'accepted') {
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, { backgroundColor: '#DCFCE7' }]}>
+            <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
+            <Text style={styles.appliedText}>הבקשה אושרה</Text>
+          </View>
+          {myActiveApplication.respondedAt && (
+            <Text style={styles.workerStatusTime}>
+              אושרה ב־{formatDateTime(myActiveApplication.respondedAt)}
+            </Text>
+          )}
+          {renderContractorResponse(myActiveApplication)}
+        </View>
+      );
+    }
+
+    if (myLatestApplication?.status === 'withdrawn') {
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, styles.appliedBox]}>
+            <Ionicons
+              name="arrow-undo-outline"
+              size={20}
+              color={Colors.textSecondary}
+            />
+            <Text style={styles.appliedText}>הבקשה בוטלה</Text>
+          </View>
+          {myLatestApplication.withdrawnAt && (
+            <Text style={styles.workerStatusTime}>
+              בוטלה ב־{formatDateTime(myLatestApplication.withdrawnAt)}
+            </Text>
+          )}
+          {jobOpen && renderApplyButton('הגש מועמדות מחדש')}
+        </View>
+      );
+    }
+
+    if (myLatestApplication?.status === 'rejected') {
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, { backgroundColor: '#FEE2E2' }]}>
+            <Ionicons name="close-circle" size={20} color={Colors.danger} />
+            <Text style={styles.appliedText}>הבקשה נדחתה</Text>
+          </View>
+          {myLatestApplication.respondedAt && (
+            <Text style={styles.workerStatusTime}>
+              נדחתה ב־{formatDateTime(myLatestApplication.respondedAt)}
+            </Text>
+          )}
+          {renderContractorResponse(myLatestApplication)}
+        </View>
+      );
+    }
+
+    if (jobOpen) return renderApplyButton('הגש מועמדות');
+
+    return (
+      <View style={[styles.actionBtn, styles.appliedBox]}>
+        <Text style={styles.appliedText}>
+          {fullyStaffed ? 'השיבוץ למשרה הושלם' : 'המשרה סגורה להרשמה'}
+        </Text>
+      </View>
+    );
+  };
 
   const handleToggleApplications = () => {
     const opening = !job.acceptingApplications;
@@ -398,7 +615,7 @@ const JobDetailsScreen: React.FC<Props> = ({
               <View style={styles.sectionHead}>
                 <Text style={styles.sectionTitle}>מצב שיבוץ</Text>
               </View>
-              <StaffingProgress progress={getStaffingProgress(job.id)} />
+              <StaffingProgress progress={staffing} />
               <TouchableOpacity
                 style={styles.manageStaffingBtn}
                 onPress={() => onOpenStaffing?.(job.id)}
@@ -409,88 +626,114 @@ const JobDetailsScreen: React.FC<Props> = ({
               </TouchableOpacity>
             </View>
 
-            {/* Candidates section */}
+            {/* Candidates section — the count is pending-only, so the title
+                says so explicitly; accepted / rejected / withdrawn rows stay
+                below as history and never inflate the number. */}
             <View style={styles.section}>
               <View style={styles.sectionHeadRow}>
                 <View style={styles.countPill}>
-                  <Text style={styles.countPillText}>{candidates.length}</Text>
+                  <Text style={styles.countPillText}>
+                    {pendingCandidatesCount}
+                  </Text>
                 </View>
-                <Text style={styles.sectionTitle}>מועמדים</Text>
+                <Text style={styles.sectionTitle}>מועמדים ממתינים</Text>
               </View>
               {candidates.length === 0 ? (
                 <Text style={styles.emptyHint}>
                   עדיין לא הוגשו מועמדויות. נסה הזמנה ישירה או התאמה חכמה.
                 </Text>
               ) : (
-                candidates.map((app) => {
-                  const w = getUserById(app.workerId) as Worker | undefined;
-                  if (!w) return null;
-                  return (
-                    <View key={app.id} style={styles.candidateRow}>
-                      <TouchableOpacity
-                        style={styles.candidateMain}
-                        onPress={() => onOpenWorkerProfile(w.id)}
-                        activeOpacity={0.85}
+                <>
+                  {fullyStaffed && pendingCandidatesCount > 0 && (
+                    <Text style={styles.capacityHint}>
+                      המשרה מאוישת במלואה — לא ניתן לאשר מועמדים נוספים.
+                    </Text>
+                  )}
+                  {orderedCandidates.map((app) => {
+                    const w = getUserById(app.workerId) as Worker | undefined;
+                    if (!w) return null;
+                    const isHistory =
+                      app.status === 'withdrawn' || app.status === 'rejected';
+                    return (
+                      <View
+                        key={app.id}
+                        style={[
+                          styles.candidateRow,
+                          isHistory && styles.candidateRowHistory,
+                        ]}
                       >
-                        <WorkerAvatar worker={w} size={36} />
-                        <View style={{ flex: 1 }}>
-                          <View style={styles.candidateTopline}>
-                            <StatusBadge
-                              label={
-                                app.status === 'pending'
-                                  ? 'ממתין'
-                                  : app.status === 'accepted'
-                                  ? 'אושר'
-                                  : 'נדחה'
-                              }
-                              tone={
-                                app.status === 'pending'
-                                  ? 'warning'
-                                  : app.status === 'accepted'
-                                  ? 'success'
-                                  : 'danger'
-                              }
-                              small
-                            />
-                            <Text style={styles.candidateName}>
-                              {w.fullName}
-                            </Text>
-                          </View>
-                          <Text style={styles.candidateMeta}>
-                            {w.profession} · {w.experienceYears} שנים · {w.city}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
+                        <View style={styles.candidateHeader}>
+                          <TouchableOpacity
+                            style={styles.candidateMain}
+                            onPress={() => onOpenWorkerProfile(w.id)}
+                            activeOpacity={0.85}
+                          >
+                            <WorkerAvatar worker={w} size={36} />
+                            <View style={{ flex: 1 }}>
+                              <View style={styles.candidateTopline}>
+                                <StatusBadge
+                                  label={APPLICATION_STATUS_LABEL[app.status]}
+                                  tone={APPLICATION_STATUS_TONE[app.status]}
+                                  small
+                                />
+                                <Text
+                                  style={styles.candidateName}
+                                  numberOfLines={1}
+                                >
+                                  {w.fullName}
+                                </Text>
+                              </View>
+                              <Text
+                                style={styles.candidateMeta}
+                                numberOfLines={1}
+                              >
+                                {w.profession} · {w.experienceYears} שנים ·{' '}
+                                {w.city}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
 
-                      {app.status === 'pending' && (
-                        <View style={styles.candidateActions}>
-                          <TouchableOpacity
-                            onPress={() => handleAccept(app)}
-                            style={styles.acceptBtn}
-                            activeOpacity={0.85}
-                          >
-                            <Ionicons
-                              name="checkmark"
-                              size={18}
-                              color={Colors.white}
-                            />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => handleReject(app)}
-                            style={styles.rejectBtn}
-                            activeOpacity={0.85}
-                          >
-                            <Ionicons
-                              name="close"
-                              size={18}
-                              color={Colors.danger}
-                            />
-                          </TouchableOpacity>
+                          {app.status === 'pending' && (
+                            <View style={styles.candidateActions}>
+                              {!fullyStaffed && (
+                                <TouchableOpacity
+                                  onPress={() => handleAccept(app)}
+                                  style={styles.acceptBtn}
+                                  activeOpacity={0.85}
+                                >
+                                  <Ionicons
+                                    name="checkmark"
+                                    size={18}
+                                    color={Colors.white}
+                                  />
+                                </TouchableOpacity>
+                              )}
+                              <TouchableOpacity
+                                onPress={() => handleReject(app)}
+                                style={styles.rejectBtn}
+                                activeOpacity={0.85}
+                              >
+                                <Ionicons
+                                  name="close"
+                                  size={18}
+                                  color={Colors.danger}
+                                />
+                              </TouchableOpacity>
+                            </View>
+                          )}
                         </View>
-                      )}
-                    </View>
-                  );
-                })
+
+                        <View style={styles.timelineBlock}>
+                          {applicationTimeline(app).map((line) => (
+                            <Text key={line} style={styles.timelineText}>
+                              {line}
+                            </Text>
+                          ))}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
               )}
             </View>
 
@@ -517,38 +760,48 @@ const JobDetailsScreen: React.FC<Props> = ({
                 invitationsForJob.slice(0, 5).map((inv) => {
                   const w = getUserById(inv.workerId) as Worker | undefined;
                   return (
-                    <TouchableOpacity
-                      key={inv.id}
-                      style={styles.invRow}
-                      onPress={() =>
-                        w ? onOpenWorkerProfile(w.id) : null
-                      }
-                      activeOpacity={0.85}
-                    >
-                      <Text style={styles.invMeta}>
-                        {new Date(inv.sentAt).toLocaleDateString('he-IL')}
-                      </Text>
-                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                        <Text style={styles.invName}>{w?.fullName ?? '—'}</Text>
-                        <StatusBadge
-                          label={
-                            inv.status === 'pending'
-                              ? 'ממתין'
-                              : inv.status === 'accepted'
-                              ? 'התקבל'
-                              : 'נדחה'
+                    <View key={inv.id} style={styles.invRow}>
+                      <View style={styles.invHeader}>
+                        <TouchableOpacity
+                          style={styles.invMain}
+                          onPress={() =>
+                            w ? onOpenWorkerProfile(w.id) : null
                           }
-                          tone={
-                            inv.status === 'pending'
-                              ? 'warning'
-                              : inv.status === 'accepted'
-                              ? 'success'
-                              : 'danger'
-                          }
-                          small
-                        />
+                          activeOpacity={0.85}
+                        >
+                          <View style={styles.invTopline}>
+                            <StatusBadge
+                              label={INVITATION_STATUS_LABEL[inv.status]}
+                              tone={INVITATION_STATUS_TONE[inv.status]}
+                              small
+                            />
+                            <Text style={styles.invName} numberOfLines={1}>
+                              {w?.fullName ?? '—'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+
+                        {inv.status === 'pending' && (
+                          <TouchableOpacity
+                            style={styles.invCancelBtn}
+                            onPress={() => handleCancelInvitation(inv)}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={styles.invCancelText}>
+                              ביטול הזמנה
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
-                    </TouchableOpacity>
+
+                      <View style={styles.timelineBlock}>
+                        {invitationTimeline(inv, 'contractor').map((line) => (
+                          <Text key={line} style={styles.timelineText}>
+                            {line}
+                          </Text>
+                        ))}
+                      </View>
+                    </View>
                   );
                 })
               )}
@@ -565,53 +818,72 @@ const JobDetailsScreen: React.FC<Props> = ({
               )}
             </View>
 
-            {/* Toggle accepting applications */}
-            <TouchableOpacity
-              style={[
-                styles.toggleApplicationsBtn,
-                job.acceptingApplications
-                  ? styles.toggleApplicationsBtnClose
-                  : styles.toggleApplicationsBtnOpen,
-              ]}
-              onPress={handleToggleApplications}
-              activeOpacity={0.85}
-            >
-              <Ionicons
-                name={
-                  job.acceptingApplications
-                    ? 'lock-closed-outline'
-                    : 'lock-open-outline'
-                }
-                size={18}
-                color={
-                  job.acceptingApplications ? Colors.danger : Colors.success
-                }
-              />
-              <Text
-                style={[
-                  styles.toggleApplicationsText,
-                  job.acceptingApplications
-                    ? { color: Colors.danger }
-                    : { color: Colors.success },
-                ]}
-              >
-                {job.acceptingApplications
-                  ? 'סגור משרה להרשמה'
-                  : 'פתח משרה להרשמה'}
-              </Text>
-            </TouchableOpacity>
+            {/* Registration + staffing actions. When the job is fully
+                staffed the system has already closed registration
+                (reason 'capacity'); there is nothing sensible to toggle and
+                no room to invite anyone, so we show a status line instead. */}
+            {fullyStaffed ? (
+              <View style={styles.completedBanner}>
+                <Ionicons
+                  name="checkmark-done"
+                  size={18}
+                  color={Colors.success}
+                />
+                <Text style={styles.completedBannerText}>
+                  השיבוץ הושלם — {staffing.filled} מתוך {staffing.needed} עובדים
+                  שובצו. ההרשמה נסגרה אוטומטית.
+                </Text>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.toggleApplicationsBtn,
+                    job.acceptingApplications
+                      ? styles.toggleApplicationsBtnClose
+                      : styles.toggleApplicationsBtnOpen,
+                  ]}
+                  onPress={handleToggleApplications}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name={
+                      job.acceptingApplications
+                        ? 'lock-closed-outline'
+                        : 'lock-open-outline'
+                    }
+                    size={18}
+                    color={
+                      job.acceptingApplications ? Colors.danger : Colors.success
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.toggleApplicationsText,
+                      job.acceptingApplications
+                        ? { color: Colors.danger }
+                        : { color: Colors.success },
+                    ]}
+                  >
+                    {job.acceptingApplications
+                      ? 'סגור משרה להרשמה'
+                      : 'פתח משרה להרשמה'}
+                  </Text>
+                </TouchableOpacity>
 
-            {/* Smart match for this job */}
-            <TouchableOpacity
-              style={styles.smartMatchBtn}
-              onPress={() => onOpenSmartMatchForJob(job.id)}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="sparkles" size={20} color={Colors.white} />
-              <Text style={styles.smartMatchText}>
-                מצא מועמדים מתאימים בהתאמה חכמה
-              </Text>
-            </TouchableOpacity>
+                {/* Smart match for this job */}
+                <TouchableOpacity
+                  style={styles.smartMatchBtn}
+                  onPress={() => onOpenSmartMatchForJob(job.id)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="sparkles" size={20} color={Colors.white} />
+                  <Text style={styles.smartMatchText}>
+                    מצא מועמדים מתאימים בהתאמה חכמה
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
           </>
         )}
       </ScrollView>
@@ -619,67 +891,33 @@ const JobDetailsScreen: React.FC<Props> = ({
       {/* === Worker mode action bar === */}
       {isWorker && (
         <View style={[styles.actionBar, { paddingBottom: insets.bottom + 12 }]}>
-          {myExistingApplication ? (
-            <View
-              style={[
-                styles.actionBtn,
-                styles.appliedBox,
-                {
-                  backgroundColor:
-                    myExistingApplication.status === 'accepted'
-                      ? '#DCFCE7'
-                      : myExistingApplication.status === 'rejected'
-                      ? '#FEE2E2'
-                      : '#FEF3C7',
-                },
-              ]}
-            >
-              <Ionicons
-                name={
-                  myExistingApplication.status === 'accepted'
-                    ? 'checkmark-circle'
-                    : myExistingApplication.status === 'rejected'
-                    ? 'close-circle'
-                    : 'hourglass'
-                }
-                size={20}
-                color={
-                  myExistingApplication.status === 'accepted'
-                    ? Colors.success
-                    : myExistingApplication.status === 'rejected'
-                    ? Colors.danger
-                    : Colors.warning
-                }
-              />
-              <Text style={styles.appliedText}>
-                {myExistingApplication.status === 'accepted'
-                  ? 'הבקשה אושרה'
-                  : myExistingApplication.status === 'rejected'
-                  ? 'הבקשה נדחתה'
-                  : 'הבקשה ממתינה לתשובה'}
-              </Text>
-            </View>
-          ) : job.acceptingApplications ? (
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.applyBtn, applying && { opacity: 0.7 }]}
-              onPress={handleApply}
-              disabled={applying}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="send" size={20} color={Colors.white} />
-              <Text style={styles.applyText}>
-                {applying ? 'שולח...' : 'הגש מועמדות'}
-              </Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={[styles.actionBtn, styles.appliedBox]}>
-              <Text style={styles.appliedText}>
-                המשרה סגורה להרשמה
-              </Text>
-            </View>
-          )}
+          {renderWorkerAction()}
         </View>
       )}
+
+      <ResponseDialog
+        visible={!!candidateDialog}
+        title={
+          candidateDialog?.mode === 'accept'
+            ? 'לאשר את המועמד?'
+            : 'לדחות את הבקשה?'
+        }
+        message={
+          candidateDialog?.mode === 'accept' ? 'העובד ישובץ למשרה.' : undefined
+        }
+        inputLabel="הודעה לעובד (אופציונלי)"
+        inputPlaceholder={
+          candidateDialog?.mode === 'accept'
+            ? 'שמחים לצרף אותך לפרויקט. ניצור איתך קשר לגבי פרטי ההגעה.'
+            : 'תודה על ההתעניינות. בשלב זה בחרנו מועמד אחר.'
+        }
+        confirmLabel={
+          candidateDialog?.mode === 'accept' ? 'אישור ושיבוץ' : 'דחיית הבקשה'
+        }
+        destructive={candidateDialog?.mode === 'reject'}
+        onConfirm={submitCandidateDialog}
+        onClose={() => setCandidateDialog(null)}
+      />
 
       {/* Worksite image full-screen preview */}
       <Modal
@@ -1031,17 +1269,24 @@ const styles = StyleSheet.create({
   },
 
   candidateRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: 8,
+    flexDirection: 'column',
+    gap: 4,
+    paddingVertical: 10,
     borderBottomColor: Colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  candidateRowHistory: {
+    opacity: 0.6,
+  },
+  candidateHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
   },
   candidateMain: {
     flex: 1,
     flexDirection: 'row-reverse',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: Spacing.sm,
   },
   candidateTopline: {
@@ -1049,11 +1294,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  // Full-width block under the header row so the "…ב־DD.MM.YYYY בשעה HH:mm"
+  // sentences get the whole card width and wrap cleanly instead of being
+  // squeezed next to the avatar/actions.
+  timelineBlock: {
+    width: '100%',
+    gap: 2,
+  },
+  timelineText: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 7,
+    flexShrink: 1,
+  },
+  capacityHint: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    paddingBottom: 8,
+  },
   candidateName: {
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.text,
     writingDirection: 'rtl',
+    flexShrink: 1,
   },
   candidateMeta: {
     fontSize: FontSize.xs,
@@ -1065,6 +1334,7 @@ const styles = StyleSheet.create({
   candidateActions: {
     flexDirection: 'row-reverse',
     gap: 6,
+    paddingTop: 2,
   },
   acceptBtn: {
     width: 36,
@@ -1086,23 +1356,48 @@ const styles = StyleSheet.create({
   },
 
   invRow: {
+    flexDirection: 'column',
+    gap: 4,
+    paddingVertical: 10,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  invHeader: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: Spacing.sm,
-    paddingVertical: 8,
-    borderBottomColor: Colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  invMain: {
+    flex: 1,
+  },
+  invTopline: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
   },
   invName: {
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.text,
     writingDirection: 'rtl',
-    marginBottom: 2,
   },
   invMeta: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
+  },
+  invCancelBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.white,
+  },
+  invCancelText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.danger,
+    writingDirection: 'rtl',
   },
 
   seeAllBtn: { alignItems: 'center', paddingVertical: 8, marginTop: 4 },
@@ -1110,6 +1405,26 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '700',
     fontSize: FontSize.sm,
+  },
+
+  completedBanner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#DCFCE7',
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
+    marginTop: Spacing.sm,
+  },
+  completedBannerText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.success,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 6,
   },
 
   smartMatchBtn: {
@@ -1182,6 +1497,53 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     fontWeight: '700',
     color: Colors.text,
+    writingDirection: 'rtl',
+  },
+
+  workerStatusWrap: {
+    gap: 8,
+  },
+  workerStatusTime: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  responseNote: {
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    gap: 2,
+  },
+  responseNoteLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  responseNoteText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 5,
+  },
+  withdrawBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.white,
+  },
+  withdrawBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.danger,
     writingDirection: 'rtl',
   },
 });

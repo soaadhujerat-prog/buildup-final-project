@@ -15,6 +15,10 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import { getRegistrationStatus, isOpenForApplications } from '../services/jobStatusService';
+import {
+  APPLICATION_STATUS_LABEL,
+  APPLICATION_STATUS_TONE,
+} from '../utils/helpers';
 import { Contractor, Worker } from '../types';
 
 interface Props {
@@ -281,20 +285,8 @@ const ContractorDashboard: React.FC<Props> = ({
                   </Text>
                 </View>
                 <StatusBadge
-                  label={
-                    app.status === 'pending'
-                      ? 'ממתין'
-                      : app.status === 'accepted'
-                      ? 'אושר'
-                      : 'נדחה'
-                  }
-                  tone={
-                    app.status === 'pending'
-                      ? 'warning'
-                      : app.status === 'accepted'
-                      ? 'success'
-                      : 'danger'
-                  }
+                  label={APPLICATION_STATUS_LABEL[app.status]}
+                  tone={APPLICATION_STATUS_TONE[app.status]}
                   small
                 />
               </TouchableOpacity>
@@ -313,7 +305,7 @@ const ContractorDashboard: React.FC<Props> = ({
         ) : (
           recentJobs.map((job) => {
             const candidatesCount = applications.filter(
-              (a) => a.jobId === job.id
+              (a) => a.jobId === job.id && a.status === 'pending'
             ).length;
             const registrationStatus = getRegistrationStatus(job);
             const staffing = getStaffingProgress(job.id);

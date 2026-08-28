@@ -5,9 +5,13 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Modal,
   Alert,
   TextInput,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +21,12 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import { callPhone } from '../utils/contact';
+import {
+  INVITATION_STATUS_LABEL,
+  INVITATION_STATUS_TONE,
+} from '../utils/helpers';
+import { isOpenForApplications } from '../services/jobStatusService';
+import { hasActiveAssignment } from '../services/assignmentService';
 import { Contractor, Worker } from '../types';
 
 interface Props {
@@ -39,6 +49,7 @@ const WorkerProfileScreen: React.FC<Props> = ({
     jobs,
     sendInvitation,
     invitations,
+    assignments,
     isFavoriteWorker,
     toggleFavoriteWorker,
   } = useApp();
@@ -56,12 +67,29 @@ const WorkerProfileScreen: React.FC<Props> = ({
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState('');
 
-  const myOpenJobs = useMemo(() => {
+  // Jobs this contractor can actually invite THIS worker to. Source of truth
+  // is `jobs` from AppContext filtered by the canonical registration check
+  // (isOpenForApplications → job.acceptingApplications), NOT the job
+  // lifecycle `job.status` — the two are different concepts, and keying off
+  // `status === 'open'` was hiding jobs that are still open to registration
+  // but already `in_progress`. A job is also hidden when the worker is
+  // already staffed on it, or already has an *active* (pending/accepted)
+  // invitation for it. Old declined/cancelled invitations never hide a job.
+  const invitableJobs = useMemo(() => {
     if (!isContractor || !me) return [];
-    return jobs.filter(
-      (j) => j.contractorId === me.id && j.status === 'open'
-    );
-  }, [jobs, me, isContractor]);
+    return jobs.filter((j) => {
+      if (j.contractorId !== me.id) return false;
+      if (!isOpenForApplications(j)) return false;
+      if (hasActiveAssignment(assignments, j.id, workerId)) return false;
+      const hasActiveInvitation = invitations.some(
+        (i) =>
+          i.jobId === j.id &&
+          i.workerId === workerId &&
+          (i.status === 'pending' || i.status === 'accepted')
+      );
+      return !hasActiveInvitation;
+    });
+  }, [jobs, me, isContractor, assignments, invitations, workerId]);
 
   // Has the contractor already invited this worker for any job?
   const existingInvitations = useMemo(() => {
@@ -84,10 +112,19 @@ const WorkerProfileScreen: React.FC<Props> = ({
 
   const handleSendInvite = () => {
     if (!selectedJobId || !me) return;
-    sendInvitation(selectedJobId, me.id, worker.id, inviteMessage.trim() || undefined);
+    const created = sendInvitation(
+      selectedJobId,
+      me.id,
+      worker.id,
+      inviteMessage.trim() || undefined
+    );
     setPickerVisible(false);
     setSelectedJobId(null);
     setInviteMessage('');
+    if (!created) {
+      Alert.alert('כל המקומות במשרה כבר אוישו.');
+      return;
+    }
     Alert.alert('הזמנה נשלחה', `ההזמנה נשלחה ל-${worker.fullName}.`);
   };
 
@@ -224,20 +261,8 @@ const WorkerProfileScreen: React.FC<Props> = ({
                   activeOpacity={0.85}
                 >
                   <StatusBadge
-                    label={
-                      inv.status === 'pending'
-                        ? 'ממתין'
-                        : inv.status === 'accepted'
-                        ? 'התקבל'
-                        : 'נדחה'
-                    }
-                    tone={
-                      inv.status === 'pending'
-                        ? 'warning'
-                        : inv.status === 'accepted'
-                        ? 'success'
-                        : 'danger'
-                    }
+                    label={INVITATION_STATUS_LABEL[inv.status]}
+                    tone={INVITATION_STATUS_TONE[inv.status]}
                     small
                   />
                   <Text style={styles.invText} numberOfLines={1}>
@@ -283,11 +308,11 @@ const WorkerProfileScreen: React.FC<Props> = ({
             style={styles.inviteBtn}
             onPress={() => setPickerVisible(true)}
             activeOpacity={0.85}
-            disabled={myOpenJobs.length === 0}
+            disabled={invitableJobs.length === 0}
           >
             <Ionicons name="paper-plane" size={20} color={Colors.white} />
             <Text style={styles.inviteText}>
-              {myOpenJobs.length === 0
+              {invitableJobs.length === 0
                 ? 'אין משרות פתוחות להזמנה'
                 : 'הזמן לעבודה'}
             </Text>
@@ -302,7 +327,18 @@ const WorkerProfileScreen: React.FC<Props> = ({
         animationType="slide"
         onRequestClose={() => setPickerVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
+        {/* Tap on the dimmed area dismisses the keyboard only — it never
+            closes the sheet, clears the selected job, or wipes the message. */}
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.modalBackdrop}>
+            <KeyboardAvoidingView
+              style={styles.modalKav}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <TouchableWithoutFeedback
+                onPress={Keyboard.dismiss}
+                accessible={false}
+              >
           <View style={styles.modalCard}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>בחר משרה</Text>
@@ -310,8 +346,11 @@ const WorkerProfileScreen: React.FC<Props> = ({
               לאיזו משרה להזמין את {worker.fullName}?
             </Text>
 
-            <ScrollView style={{ maxHeight: 240 }}>
-              {myOpenJobs.map((j) => {
+            <ScrollView
+              style={{ maxHeight: 240 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {invitableJobs.map((j) => {
                 const active = selectedJobId === j.id;
                 return (
                   <TouchableOpacity
@@ -378,7 +417,10 @@ const WorkerProfileScreen: React.FC<Props> = ({
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </View>
   );
@@ -681,6 +723,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.overlay,
     justifyContent: 'flex-end',
+  },
+  modalKav: {
+    width: '100%',
   },
   modalCard: {
     backgroundColor: Colors.white,

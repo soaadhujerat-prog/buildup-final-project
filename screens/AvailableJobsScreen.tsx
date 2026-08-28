@@ -314,6 +314,8 @@ const AvailableJobsScreen: React.FC<Props> = ({
           data={results}
           keyExtractor={(j) => j.id}
           contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => (
             <JobCard

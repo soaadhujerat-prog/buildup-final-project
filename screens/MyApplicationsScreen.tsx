@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   FlatList,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +14,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow, FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
-import { formatJobRateCompact } from '../utils/helpers';
+import {
+  formatJobRateCompact,
+  applicationTimeline,
+  APPLICATION_STATUS_LABEL,
+  APPLICATION_STATUS_TONE,
+} from '../utils/helpers';
 import {
   Application,
   ApplicationStatus,
@@ -35,8 +41,24 @@ const MyApplicationsScreen: React.FC<Props> = ({
   initialFilter = 'all',
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, applications, jobs, getUserById } = useApp();
+  const { currentUser, applications, jobs, getUserById, withdrawApplication } =
+    useApp();
   const me = currentUser as Worker | undefined;
+
+  const handleWithdraw = (app: Application) => {
+    Alert.alert(
+      'לבטל את הבקשה?',
+      'הבקשה שלך למשרה תבוטל. כל עוד ההרשמה פתוחה, תוכל להגיש בקשה חדשה בהמשך.',
+      [
+        { text: 'חזור', style: 'cancel' },
+        {
+          text: 'ביטול הבקשה',
+          style: 'destructive',
+          onPress: () => withdrawApplication(app.id),
+        },
+      ]
+    );
+  };
 
   const [filter, setFilter] = useState<Filter>(initialFilter);
 
@@ -64,6 +86,7 @@ const MyApplicationsScreen: React.FC<Props> = ({
     pending: myApplications.filter((a) => a.status === 'pending').length,
     accepted: myApplications.filter((a) => a.status === 'accepted').length,
     rejected: myApplications.filter((a) => a.status === 'rejected').length,
+    withdrawn: myApplications.filter((a) => a.status === 'withdrawn').length,
   };
 
   return (
@@ -103,6 +126,11 @@ const MyApplicationsScreen: React.FC<Props> = ({
           active={filter === 'rejected'}
           tone="danger"
           onPress={() => setFilter('rejected')}
+        />
+        <Chip
+          label={`בוטלו (${counts.withdrawn})`}
+          active={filter === 'withdrawn'}
+          onPress={() => setFilter('withdrawn')}
         />
       </ScrollView>
 
@@ -146,6 +174,7 @@ const MyApplicationsScreen: React.FC<Props> = ({
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }
                 onPress={() => job && onOpenJobDetails(job.id)}
+                onWithdraw={() => handleWithdraw(item)}
               />
             );
           }}
@@ -194,6 +223,7 @@ const ApplicationRow: React.FC<{
   jobRateLabel: string;
   contractorName: string;
   onPress: () => void;
+  onWithdraw: () => void;
 }> = ({
   app,
   jobTitle,
@@ -201,22 +231,8 @@ const ApplicationRow: React.FC<{
   jobRateLabel,
   contractorName,
   onPress,
+  onWithdraw,
 }) => {
-  const displayLabel =
-    app.status === 'pending'
-      ? 'ממתין'
-      : app.status === 'accepted'
-      ? 'אושר'
-      : app.status === 'rejected'
-      ? 'נדחה'
-      : 'בוטל';
-  const displayTone =
-    app.status === 'pending'
-      ? 'warning'
-      : app.status === 'accepted'
-      ? 'success'
-      : 'danger';
-
   return (
     <TouchableOpacity
       style={styles.card}
@@ -224,7 +240,11 @@ const ApplicationRow: React.FC<{
       activeOpacity={0.85}
     >
       <View style={styles.cardHead}>
-        <StatusBadge label={displayLabel} tone={displayTone as any} small />
+        <StatusBadge
+          label={APPLICATION_STATUS_LABEL[app.status]}
+          tone={APPLICATION_STATUS_TONE[app.status]}
+          small
+        />
         <Text style={styles.title} numberOfLines={1}>
           {jobTitle}
         </Text>
@@ -260,25 +280,34 @@ const ApplicationRow: React.FC<{
         </View>
       </View>
 
-      <Text style={styles.appliedAt}>
-        הגשת בקשה:{' '}
-        <Text style={{ writingDirection: 'ltr' }}>
-          {new Date(app.appliedAt).toLocaleDateString('he-IL')}
-        </Text>
-        {app.respondedAt && (
-          <>
-            {' · נענתה: '}
-            <Text style={{ writingDirection: 'ltr' }}>
-              {new Date(app.respondedAt).toLocaleDateString('he-IL')}
-            </Text>
-          </>
-        )}
-      </Text>
+      <View style={styles.timeline}>
+        {applicationTimeline(app).map((line) => (
+          <Text key={line} style={styles.appliedAt}>
+            {line}
+          </Text>
+        ))}
+      </View>
 
       {app.contractorResponse && (
-        <Text style={styles.response} numberOfLines={2}>
-          הקבלן השיב: {app.contractorResponse}
-        </Text>
+        <View style={styles.response}>
+          <Text style={styles.responseLabel}>הודעת הקבלן</Text>
+          <Text style={styles.responseText}>{app.contractorResponse}</Text>
+        </View>
+      )}
+
+      {app.status === 'pending' && (
+        <TouchableOpacity
+          style={styles.withdrawBtn}
+          onPress={onWithdraw}
+          activeOpacity={0.85}
+        >
+          <Ionicons
+            name="close-circle-outline"
+            size={16}
+            color={Colors.danger}
+          />
+          <Text style={styles.withdrawText}>ביטול הבקשה</Text>
+        </TouchableOpacity>
       )}
     </TouchableOpacity>
   );
@@ -391,21 +420,55 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontWeight: '600',
   },
+  timeline: {
+    width: '100%',
+    gap: 2,
+  },
   appliedAt: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
     textAlign: 'right',
     writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 7,
+    flexShrink: 1,
+  },
+  withdrawBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.white,
+  },
+  withdrawText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.danger,
+    writingDirection: 'rtl',
   },
   response: {
-    fontSize: FontSize.sm,
-    color: Colors.text,
     backgroundColor: Colors.primaryFaint,
     padding: 8,
     borderRadius: Radius.sm,
+    gap: 2,
+  },
+  responseLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.textSecondary,
     textAlign: 'right',
     writingDirection: 'rtl',
-    fontStyle: 'italic',
+  },
+  responseText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 5,
   },
 
   emptyWrap: {

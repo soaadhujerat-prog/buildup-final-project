@@ -493,7 +493,7 @@ export const MOCK_APPLICATIONS: Application[] = [
     jobId: 'j1',
     workerId: 'w1',
     message: 'שלום, יש לי ניסיון רב בפרויקטים מסוג זה. זמין להתחיל מיד.',
-    appliedAt: '2024-07-02',
+    appliedAt: '2024-07-02T14:38:00',
     status: 'pending',
   },
   {
@@ -501,8 +501,8 @@ export const MOCK_APPLICATIONS: Application[] = [
     jobId: 'j1',
     workerId: 'w3',
     message: 'מנוסה בבניינים רב-קומתיים. ניתן לראות תיק עבודות.',
-    appliedAt: '2024-07-01',
-    respondedAt: '2024-07-02',
+    appliedAt: '2024-07-01T09:12:00',
+    respondedAt: '2024-07-02T11:05:00',
     contractorResponse: 'תודה! נחזור אליך בקרוב לתיאום.',
     status: 'accepted',
   },
@@ -511,7 +511,7 @@ export const MOCK_APPLICATIONS: Application[] = [
     jobId: 'j2',
     workerId: 'w1',
     message: 'מנוסה בפרויקטים מסוג זה עם 12 שנות ניסיון.',
-    appliedAt: '2024-07-03',
+    appliedAt: '2024-07-03T16:20:00',
     status: 'pending',
   },
   {
@@ -519,10 +519,25 @@ export const MOCK_APPLICATIONS: Application[] = [
     jobId: 'j4',
     workerId: 'w1',
     message: 'אשמח להצטרף לפרויקט.',
-    appliedAt: '2024-07-01',
-    respondedAt: '2024-07-02',
+    appliedAt: '2024-07-01T08:45:00',
+    respondedAt: '2024-07-02T18:30:00',
     contractorResponse: 'תודה על ההתעניינות, מצאנו מועמד מתאים יותר.',
     status: 'rejected',
+  },
+  {
+    // Second accepted worker on j1 (workersNeeded = 2). With app2 this makes
+    // j1 fully staffed from first render, so the capacity reconciler
+    // auto-closes its registration — a ready-made fixture for the
+    // "fully staffed" UI states. app1 (w1, still pending on j1) then
+    // exercises "a pending application on a job that has since filled up".
+    id: 'app5',
+    jobId: 'j1',
+    workerId: 'w5',
+    message: 'זמין להתחיל מיד, ניסיון רב בפרויקטים דומים.',
+    appliedAt: '2024-07-02T09:30:00',
+    respondedAt: '2024-07-03T08:10:00',
+    contractorResponse: 'מעולה, נתאם התחלה.',
+    status: 'accepted',
   },
 ];
 
@@ -540,7 +555,7 @@ export const MOCK_INVITATIONS: Invitation[] = [
     contractorId: 'c1',
     workerId: 'w7',
     message: 'היי נסים, ראיתי את הפרופיל שלך ונראה שאתה מתאים מאוד לפרויקט.',
-    sentAt: '2024-07-04',
+    sentAt: '2024-07-04T14:40:00',
     status: 'pending',
   },
   {
@@ -549,8 +564,8 @@ export const MOCK_INVITATIONS: Invitation[] = [
     contractorId: 'c1',
     workerId: 'w4',
     message: 'אחמד, אשמח לבדוק אם תוכל להצטרף לפרויקט הגבס.',
-    sentAt: '2024-07-03',
-    respondedAt: '2024-07-04',
+    sentAt: '2024-07-03T10:15:00',
+    respondedAt: '2024-07-04T09:44:00',
     status: 'accepted',
   },
 ];

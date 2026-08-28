@@ -15,6 +15,12 @@ import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '..
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
+import ResponseDialog from '../components/ResponseDialog';
+import {
+  applicationTimeline,
+  APPLICATION_STATUS_LABEL,
+  APPLICATION_STATUS_TONE,
+} from '../utils/helpers';
 import { Application, ApplicationStatus, Worker, Contractor } from '../types';
 
 interface Props {
@@ -39,10 +45,17 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
     jobs,
     getUserById,
     respondToApplication,
+    isJobFullyStaffed,
   } = useApp();
   const me = currentUser as Contractor | undefined;
 
+  const capacityAlert = () =>
+    Alert.alert('כל המקומות במשרה כבר אוישו.');
+
   const [filter, setFilter] = useState<Filter>(initialFilter);
+  const [dialog, setDialog] = useState<
+    { mode: 'accept' | 'reject'; app: Application } | null
+  >(null);
 
   // SOURCE: applications joined to my jobs
   const myJobIds = useMemo(
@@ -75,25 +88,26 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
   };
 
   const handleAccept = (app: Application) => {
-    const w = getUserById(app.workerId);
-    Alert.alert('אישור מועמד', `לאשר את ${w?.fullName ?? 'המועמד'}?`, [
-      { text: 'ביטול', style: 'cancel' },
-      {
-        text: 'אשר',
-        onPress: () => respondToApplication(app.id, true),
-      },
-    ]);
+    if (isJobFullyStaffed(app.jobId)) {
+      capacityAlert();
+      return;
+    }
+    setDialog({ mode: 'accept', app });
   };
   const handleReject = (app: Application) => {
-    const w = getUserById(app.workerId);
-    Alert.alert('דחיית מועמד', `לדחות את ${w?.fullName ?? 'המועמד'}?`, [
-      { text: 'ביטול', style: 'cancel' },
-      {
-        text: 'דחה',
-        style: 'destructive',
-        onPress: () => respondToApplication(app.id, false),
-      },
-    ]);
+    setDialog({ mode: 'reject', app });
+  };
+
+  const submitDialog = (message: string) => {
+    if (!dialog) return;
+    const { mode, app } = dialog;
+    setDialog(null);
+    const res = respondToApplication(
+      app.id,
+      mode === 'accept',
+      message || undefined
+    );
+    if (mode === 'accept' && !res.ok && res.reason === 'full') capacityAlert();
   };
 
   return (
@@ -173,6 +187,7 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
                 workerExperience={worker?.experienceYears ?? 0}
                 workerCity={worker?.city ?? ''}
                 jobTitle={job?.title ?? '—'}
+                jobFull={isJobFullyStaffed(item.jobId)}
                 onPressWorker={() =>
                   worker && onOpenWorkerProfile(worker.id)
                 }
@@ -184,6 +199,26 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
           }}
         />
       )}
+
+      <ResponseDialog
+        visible={!!dialog}
+        title={dialog?.mode === 'accept' ? 'לאשר את המועמד?' : 'לדחות את הבקשה?'}
+        message={
+          dialog?.mode === 'accept' ? 'העובד ישובץ למשרה.' : undefined
+        }
+        inputLabel="הודעה לעובד (אופציונלי)"
+        inputPlaceholder={
+          dialog?.mode === 'accept'
+            ? 'שמחים לצרף אותך לפרויקט. ניצור איתך קשר לגבי פרטי ההגעה.'
+            : 'תודה על ההתעניינות. בשלב זה בחרנו מועמד אחר.'
+        }
+        confirmLabel={
+          dialog?.mode === 'accept' ? 'אישור ושיבוץ' : 'דחיית הבקשה'
+        }
+        destructive={dialog?.mode === 'reject'}
+        onConfirm={submitDialog}
+        onClose={() => setDialog(null)}
+      />
     </View>
   );
 };
@@ -226,6 +261,7 @@ const ApplicationRow: React.FC<{
   workerExperience: number;
   workerCity: string;
   jobTitle: string;
+  jobFull: boolean;
   onPressWorker: () => void;
   onPressJob: () => void;
   onAccept: () => void;
@@ -238,23 +274,14 @@ const ApplicationRow: React.FC<{
   workerExperience,
   workerCity,
   jobTitle,
+  jobFull,
   onPressWorker,
   onPressJob,
   onAccept,
   onReject,
 }) => {
-  const tone =
-    app.status === 'pending'
-      ? 'warning'
-      : app.status === 'accepted'
-      ? 'success'
-      : 'danger';
-  const label =
-    app.status === 'pending'
-      ? 'ממתין'
-      : app.status === 'accepted'
-      ? 'אושר'
-      : 'נדחה';
+  const tone = APPLICATION_STATUS_TONE[app.status];
+  const label = APPLICATION_STATUS_LABEL[app.status];
 
   return (
     <View style={styles.card}>
@@ -303,32 +330,42 @@ const ApplicationRow: React.FC<{
         </Text>
       )}
 
-      <Text style={styles.appliedAt}>
-        הוגש:{' '}
-        <Text style={{ writingDirection: 'ltr' }}>
-          {new Date(app.appliedAt).toLocaleDateString('he-IL')}
-        </Text>
-      </Text>
+      <View style={styles.timeline}>
+        {applicationTimeline(app).map((line) => (
+          <Text key={line} style={styles.appliedAt}>
+            {line}
+          </Text>
+        ))}
+      </View>
 
       {app.status === 'pending' && (
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.rejectBtn}
-            onPress={onReject}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="close" size={18} color={Colors.danger} />
-            <Text style={styles.rejectText}>דחה</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.acceptBtn}
-            onPress={onAccept}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="checkmark" size={18} color={Colors.white} />
-            <Text style={styles.acceptText}>אשר</Text>
-          </TouchableOpacity>
-        </View>
+        <>
+          {jobFull && (
+            <Text style={styles.capacityHint}>
+              המשרה מאוישת במלואה — לא ניתן לאשר מועמדים נוספים.
+            </Text>
+          )}
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.rejectBtn}
+              onPress={onReject}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="close" size={18} color={Colors.danger} />
+              <Text style={styles.rejectText}>דחה</Text>
+            </TouchableOpacity>
+            {!jobFull && (
+              <TouchableOpacity
+                style={styles.acceptBtn}
+                onPress={onAccept}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="checkmark" size={18} color={Colors.white} />
+                <Text style={styles.acceptText}>אשר</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </>
       )}
     </View>
   );
@@ -466,9 +503,22 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     fontStyle: 'italic',
   },
+  timeline: {
+    width: '100%',
+    gap: 2,
+  },
   appliedAt: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 7,
+    flexShrink: 1,
+  },
+  capacityHint: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
   },

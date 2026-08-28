@@ -14,7 +14,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow , FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
-import { formatJobRateCompact } from '../utils/helpers';
+import ResponseDialog from '../components/ResponseDialog';
+import {
+  formatJobRateCompact,
+  invitationTimeline,
+  INVITATION_STATUS_TONE,
+} from '../utils/helpers';
 import {
   Contractor,
   Invitation,
@@ -40,10 +45,14 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
     jobs,
     getUserById,
     respondToInvitation,
+    isJobFullyStaffed,
   } = useApp();
   const me = currentUser as Worker | undefined;
 
   const [filter, setFilter] = useState<Filter>('all');
+  const [dialog, setDialog] = useState<
+    { mode: 'accept' | 'decline'; inv: Invitation } | null
+  >(null);
 
   // SOURCE: invitations.filter(workerId === me.id)
   const myInvitations = useMemo(
@@ -67,37 +76,33 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
     pending: myInvitations.filter((i) => i.status === 'pending').length,
     accepted: myInvitations.filter((i) => i.status === 'accepted').length,
     declined: myInvitations.filter((i) => i.status === 'declined').length,
+    cancelled: myInvitations.filter((i) => i.status === 'cancelled').length,
   };
 
   const handleAccept = (inv: Invitation) => {
-    const job = jobs.find((j) => j.id === inv.jobId);
-    Alert.alert(
-      'אישור הזמנה',
-      `לאשר את ההזמנה למשרה "${job?.title ?? ''}"?`,
-      [
-        { text: 'ביטול', style: 'cancel' },
-        {
-          text: 'אשר',
-          onPress: () => respondToInvitation(inv.id, true),
-        },
-      ]
-    );
+    if (isJobFullyStaffed(inv.jobId)) {
+      Alert.alert('כל המקומות במשרה כבר אוישו.');
+      return;
+    }
+    setDialog({ mode: 'accept', inv });
   };
 
   const handleDecline = (inv: Invitation) => {
-    const job = jobs.find((j) => j.id === inv.jobId);
-    Alert.alert(
-      'דחיית הזמנה',
-      `לדחות את ההזמנה למשרה "${job?.title ?? ''}"?`,
-      [
-        { text: 'ביטול', style: 'cancel' },
-        {
-          text: 'דחה',
-          style: 'destructive',
-          onPress: () => respondToInvitation(inv.id, false),
-        },
-      ]
+    setDialog({ mode: 'decline', inv });
+  };
+
+  const submitDialog = (message: string) => {
+    if (!dialog) return;
+    const { mode, inv } = dialog;
+    setDialog(null);
+    const res = respondToInvitation(
+      inv.id,
+      mode === 'accept',
+      message || undefined
     );
+    if (mode === 'accept' && !res.ok && res.reason === 'full') {
+      Alert.alert('כל המקומות במשרה כבר אוישו.');
+    }
   };
 
   return (
@@ -137,6 +142,11 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
           active={filter === 'declined'}
           tone="danger"
           onPress={() => setFilter('declined')}
+        />
+        <Chip
+          label={`בוטלו (${counts.cancelled})`}
+          active={filter === 'cancelled'}
+          onPress={() => setFilter('cancelled')}
         />
       </ScrollView>
 
@@ -178,6 +188,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
                 jobTitle={job?.title ?? '—'}
                 jobCity={job?.city ?? ''}
                 jobRateLabel={job ? formatJobRateCompact(job) : ''}
+                jobFull={isJobFullyStaffed(item.jobId)}
                 contractorName={
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }
@@ -189,6 +200,32 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
           }}
         />
       )}
+
+      <ResponseDialog
+        visible={!!dialog}
+        title={
+          dialog?.mode === 'accept'
+            ? 'לאשר את ההזמנה?'
+            : 'לדחות את ההזמנה?'
+        }
+        message={
+          dialog?.mode === 'accept'
+            ? 'הקבלן יקבל עדכון שאישרת את ההזמנה ותשובץ למשרה.'
+            : 'הקבלן יקבל עדכון שדחית את ההזמנה.'
+        }
+        inputLabel="הודעה לקבלן (אופציונלי)"
+        inputPlaceholder={
+          dialog?.mode === 'accept'
+            ? 'תודה, אשמח להצטרף. אהיה זמין בתאריך שנקבע.'
+            : 'תודה על ההזמנה, אך איני פנוי בתאריך הזה.'
+        }
+        confirmLabel={
+          dialog?.mode === 'accept' ? 'אישור ההזמנה' : 'דחיית ההזמנה'
+        }
+        destructive={dialog?.mode === 'decline'}
+        onConfirm={submitDialog}
+        onClose={() => setDialog(null)}
+      />
     </View>
   );
 };
@@ -228,6 +265,7 @@ const InvitationCard: React.FC<{
   jobTitle: string;
   jobCity: string;
   jobRateLabel: string;
+  jobFull: boolean;
   contractorName: string;
   onPressJob: () => void;
   onAccept: () => void;
@@ -237,23 +275,23 @@ const InvitationCard: React.FC<{
   jobTitle,
   jobCity,
   jobRateLabel,
+  jobFull,
   contractorName,
   onPressJob,
   onAccept,
   onDecline,
 }) => {
-  const tone =
-    inv.status === 'pending'
-      ? 'warning'
-      : inv.status === 'accepted'
-      ? 'success'
-      : 'danger';
+  const tone = INVITATION_STATUS_TONE[inv.status];
   const label =
     inv.status === 'pending'
       ? 'חדש'
       : inv.status === 'accepted'
       ? 'אישרת'
-      : 'דחית';
+      : inv.status === 'declined'
+      ? 'דחית'
+      : inv.status === 'cancelled'
+      ? 'בוטלה'
+      : 'פג תוקף';
 
   return (
     <View style={styles.card}>
@@ -300,20 +338,20 @@ const InvitationCard: React.FC<{
         <Text style={styles.message}>{inv.message}</Text>
       )}
 
-      <Text style={styles.sentAt}>
-        נשלח:{' '}
-        <Text style={{ writingDirection: 'ltr' }}>
-          {new Date(inv.sentAt).toLocaleDateString('he-IL')}
-        </Text>
-        {inv.respondedAt && (
-          <>
-            {' · נענה: '}
-            <Text style={{ writingDirection: 'ltr' }}>
-              {new Date(inv.respondedAt).toLocaleDateString('he-IL')}
-            </Text>
-          </>
-        )}
-      </Text>
+      <View style={styles.timeline}>
+        {invitationTimeline(inv, 'worker').map((line) => (
+          <Text key={line} style={styles.sentAt}>
+            {line}
+          </Text>
+        ))}
+      </View>
+
+      {inv.responseMessage ? (
+        <View style={styles.responseNote}>
+          <Text style={styles.responseNoteLabel}>ההודעה ששלחת</Text>
+          <Text style={styles.responseNoteText}>{inv.responseMessage}</Text>
+        </View>
+      ) : null}
 
       <TouchableOpacity
         style={styles.viewJobBtn}
@@ -326,24 +364,33 @@ const InvitationCard: React.FC<{
       </TouchableOpacity>
 
       {inv.status === 'pending' && (
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.declineBtn}
-            onPress={onDecline}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="close" size={18} color={Colors.danger} />
-            <Text style={styles.declineText}>דחה</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.acceptBtn}
-            onPress={onAccept}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="checkmark" size={18} color={Colors.white} />
-            <Text style={styles.acceptText}>אשר</Text>
-          </TouchableOpacity>
-        </View>
+        <>
+          {jobFull && (
+            <Text style={styles.capacityHint}>
+              המשרה כבר אוישה במלואה — לא ניתן לאשר את ההזמנה.
+            </Text>
+          )}
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.declineBtn}
+              onPress={onDecline}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="close" size={18} color={Colors.danger} />
+              <Text style={styles.declineText}>דחה</Text>
+            </TouchableOpacity>
+            {!jobFull && (
+              <TouchableOpacity
+                style={styles.acceptBtn}
+                onPress={onAccept}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="checkmark" size={18} color={Colors.white} />
+                <Text style={styles.acceptText}>אשר</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </>
       )}
     </View>
   );
@@ -484,11 +531,44 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     fontStyle: 'italic',
   },
+  timeline: {
+    width: '100%',
+    gap: 2,
+  },
   sentAt: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
     textAlign: 'right',
     writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 7,
+    flexShrink: 1,
+  },
+  capacityHint: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  responseNote: {
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.sm,
+    padding: 8,
+    gap: 2,
+  },
+  responseNoteLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  responseNoteText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 5,
   },
 
   viewJobBtn: {

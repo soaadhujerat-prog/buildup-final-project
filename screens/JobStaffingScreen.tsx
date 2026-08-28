@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,7 +7,9 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
+import ResponseDialog from '../components/ResponseDialog';
 import { callPhone } from '../utils/contact';
+import { formatDateTime } from '../utils/helpers';
 import { Worker, Assignment } from '../types';
 
 interface Props {
@@ -28,23 +30,55 @@ const JobStaffingScreen: React.FC<Props> = ({
   onOpenSmartMatch,
 }) => {
   const insets = useSafeAreaInsets();
-  const { getJobById, getUserById, getAssignmentsForJob, getStaffingProgress } =
-    useApp();
+  const {
+    getJobById,
+    getUserById,
+    getAssignmentsForJob,
+    getStaffingProgress,
+    cancelAssignment,
+  } = useApp();
 
   const job = getJobById(jobId);
   const progress = getStaffingProgress(jobId);
 
   const staffedWorkers = useMemo(() => {
-    const activeAssignments = getAssignmentsForJob(jobId).filter(
-      (a) => a.status === 'active'
-    );
-    return activeAssignments
+    return getAssignmentsForJob(jobId)
+      .filter((a) => a.status === 'active')
       .map((a) => ({
         assignment: a,
         worker: getUserById(a.workerId) as Worker | undefined,
       }))
       .filter((x): x is { assignment: Assignment; worker: Worker } => !!x.worker);
   }, [jobId, getAssignmentsForJob, getUserById]);
+
+  // Cancelled staffing stays in history — shown as a footer, never mixed in
+  // with the live "who's on the job" list.
+  const cancelledAssignments = useMemo(() => {
+    return getAssignmentsForJob(jobId)
+      .filter((a) => a.status === 'cancelled')
+      .map((a) => ({
+        assignment: a,
+        worker: getUserById(a.workerId) as Worker | undefined,
+      }))
+      .filter((x): x is { assignment: Assignment; worker: Worker } => !!x.worker)
+      .sort(
+        (a, b) =>
+          new Date(b.assignment.cancelledAt ?? b.assignment.updatedAt).getTime() -
+          new Date(a.assignment.cancelledAt ?? a.assignment.updatedAt).getTime()
+      );
+  }, [jobId, getAssignmentsForJob, getUserById]);
+
+  const [cancelTarget, setCancelTarget] = useState<{
+    assignment: Assignment;
+    worker: Worker;
+  } | null>(null);
+
+  const submitCancel = (message: string) => {
+    if (!cancelTarget) return;
+    const id = cancelTarget.assignment.id;
+    setCancelTarget(null);
+    cancelAssignment(id, 'contractor', message || undefined);
+  };
 
   if (!job) {
     return (
@@ -134,8 +168,54 @@ const JobStaffingScreen: React.FC<Props> = ({
               onOpenChat(item.worker.id)
             }
             onPressCall={() => callPhone(item.worker.phone)}
+            onCancel={() =>
+              setCancelTarget({ assignment: item.assignment, worker: item.worker })
+            }
           />
         )}
+        ListFooterComponent={
+          cancelledAssignments.length > 0 ? (
+            <View style={styles.historyWrap}>
+              <Text style={styles.historyTitle}>שיבוצים שבוטלו</Text>
+              {cancelledAssignments.map(({ assignment, worker }) => (
+                <View key={assignment.id} style={styles.historyRow}>
+                  <View style={styles.historyTop}>
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={16}
+                      color={Colors.danger}
+                    />
+                    <Text style={styles.historyName}>{worker.fullName}</Text>
+                  </View>
+                  <Text style={styles.historyMeta}>
+                    בוטל על ידי{' '}
+                    {assignment.cancelledBy === 'worker' ? 'העובד' : 'הקבלן'}
+                    {assignment.cancelledAt
+                      ? ` ב־${formatDateTime(assignment.cancelledAt)}`
+                      : ''}
+                  </Text>
+                  {assignment.cancellationMessage ? (
+                    <Text style={styles.historyMessage}>
+                      “{assignment.cancellationMessage}”
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : null
+        }
+      />
+
+      <ResponseDialog
+        visible={!!cancelTarget}
+        title={`לבטל את השיבוץ של ${cancelTarget?.worker.fullName ?? ''}?`}
+        message="העובד יוסר מהשיבוץ למשרה והמערכת תעדכן את מספר המקומות הפנויים."
+        inputLabel="הודעה לעובד (אופציונלי)"
+        inputPlaceholder="למשל: חל שינוי בצורכי הפרויקט ולכן השיבוץ בוטל."
+        confirmLabel="ביטול שיבוץ"
+        destructive
+        onConfirm={submitCancel}
+        onClose={() => setCancelTarget(null)}
       />
     </View>
   );
@@ -146,7 +226,8 @@ const WorkerAssignmentCard: React.FC<{
   onPressProfile: () => void;
   onPressMessage: () => void;
   onPressCall: () => void;
-}> = ({ worker, onPressProfile, onPressMessage, onPressCall }) => (
+  onCancel: () => void;
+}> = ({ worker, onPressProfile, onPressMessage, onPressCall, onCancel }) => (
   <View style={styles.card}>
     <TouchableOpacity
       style={styles.cardHead}
@@ -186,6 +267,16 @@ const WorkerAssignmentCard: React.FC<{
         <Text style={styles.actionBtnText}>התקשר</Text>
       </TouchableOpacity>
     </View>
+
+    <TouchableOpacity
+      style={styles.cancelBtn}
+      onPress={onCancel}
+      activeOpacity={0.85}
+      accessibilityLabel={`ביטול השיבוץ של ${worker.fullName}`}
+    >
+      <Ionicons name="close-circle-outline" size={16} color={Colors.danger} />
+      <Text style={styles.cancelBtnText}>ביטול שיבוץ</Text>
+    </TouchableOpacity>
   </View>
 );
 
@@ -308,6 +399,71 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.primary,
     writingDirection: 'rtl',
+  },
+  cancelBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.white,
+  },
+  cancelBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.danger,
+    writingDirection: 'rtl',
+  },
+
+  historyWrap: {
+    marginTop: Spacing.lg,
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    gap: 10,
+    ...Shadow.small,
+  },
+  historyTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    color: Colors.primary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  historyRow: {
+    gap: 3,
+    paddingVertical: 8,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  historyTop: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyName: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.text,
+    writingDirection: 'rtl',
+  },
+  historyMeta: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 6,
+  },
+  historyMessage: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    fontStyle: 'italic',
+    lineHeight: FontSize.sm + 5,
   },
 
   emptyWrap: {

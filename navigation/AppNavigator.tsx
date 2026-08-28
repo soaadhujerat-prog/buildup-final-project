@@ -328,6 +328,15 @@ const AppNavigator: React.FC = () => {
           if (role === 'contractor')
             push({ name: 'ContractorSentInvitations' });
           break;
+        case 'assignment_cancelled':
+          // relatedId = jobId. Worker -> their assignments list;
+          // contractor -> that job's staffing screen.
+          if (role === 'worker') {
+            push({ name: 'WorkerMyAssignments' });
+          } else if (role === 'contractor' && relatedId) {
+            push({ name: 'ContractorJobStaffing', jobId: relatedId });
+          }
+          break;
         case 'new_message':
           push({ name: 'Messages' });
           break;

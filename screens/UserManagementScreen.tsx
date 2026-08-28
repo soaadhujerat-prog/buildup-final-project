@@ -156,6 +156,8 @@ const UserManagementScreen: React.FC<Props> = ({
           data={filtered}
           keyExtractor={(u) => u.id}
           contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => (
             <UserRow user={item} onPress={() => onOpenUser(item.id)} />

@@ -108,6 +108,8 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
         ref={scrollRef}
         contentContainerStyle={styles.messagesContainer}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
         {conversation.messages.length === 0 && (
           <View style={styles.emptyChat}>

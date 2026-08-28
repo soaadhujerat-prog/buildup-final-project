@@ -326,6 +326,8 @@ const SearchWorkersScreen: React.FC<Props> = ({
           data={results}
           keyExtractor={(w) => w.id}
           contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => (
             <WorkerCard

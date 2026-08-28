@@ -15,6 +15,7 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import { rankWorkersForJob, matchBand } from '../utils/matching';
+import { isOpenForApplications } from '../services/jobStatusService';
 import { Contractor, JobPost, MatchResult } from '../types';
 
 interface Props {
@@ -34,10 +35,13 @@ const SmartMatchScreen: React.FC<Props> = ({
   const { currentUser, jobs, workers, invitations, sendInvitation } = useApp();
   const me = currentUser as Contractor | undefined;
 
+  // Canonical "open to registration" check — same source of truth every
+  // other screen uses. A job that filled its capacity is auto-closed
+  // (acceptingApplications === false) and correctly drops out here.
   const myOpenJobs = useMemo(
     () =>
       jobs.filter(
-        (j) => j.contractorId === me?.id && j.status === 'open'
+        (j) => j.contractorId === me?.id && isOpenForApplications(j)
       ),
     [jobs, me]
   );
@@ -73,7 +77,11 @@ const SmartMatchScreen: React.FC<Props> = ({
 
   const handleInvite = (workerId: string, workerName: string) => {
     if (!selectedJobId || !me) return;
-    sendInvitation(selectedJobId, me.id, workerId);
+    const created = sendInvitation(selectedJobId, me.id, workerId);
+    if (!created) {
+      Alert.alert('כל המקומות במשרה כבר אוישו.');
+      return;
+    }
     Alert.alert('הזמנה נשלחה', `ההזמנה נשלחה ל-${workerName}.`);
   };
 

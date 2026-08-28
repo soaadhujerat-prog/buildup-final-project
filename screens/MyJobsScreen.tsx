@@ -137,7 +137,11 @@ const MyJobsScreen: React.FC<Props> = ({
           renderItem={({ item }) => (
             <JobRow
               job={item}
-              applicationsCount={getApplicationsForJob(item.id).length}
+              applicationsCount={
+                getApplicationsForJob(item.id).filter(
+                  (a) => a.status === 'pending'
+                ).length
+              }
               staffing={getStaffingProgress(item.id)}
               onPress={() => onOpenJobDetails(item.id)}
             />
@@ -196,6 +200,7 @@ const JobRow: React.FC<{
   onPress: () => void;
 }> = ({ job, applicationsCount, staffing, onPress }) => {
   const registrationStatus = getRegistrationStatus(job);
+  const staffingComplete = staffing.status === 'completed';
 
   return (
     <TouchableOpacity
@@ -208,9 +213,12 @@ const JobRow: React.FC<{
       </View>
       <View style={{ flex: 1 }}>
         <View style={styles.rowTop}>
+          {/* Once staffing is complete the "registration" pill is
+              redundant/confusing — the job is done being filled, so say
+              exactly that. */}
           <StatusBadge
-            label={registrationStatus.label}
-            tone={registrationStatus.tone}
+            label={staffingComplete ? 'השיבוץ הושלם' : registrationStatus.label}
+            tone={staffingComplete ? 'success' : registrationStatus.tone}
             small
           />
           <Text style={styles.title} numberOfLines={1}>

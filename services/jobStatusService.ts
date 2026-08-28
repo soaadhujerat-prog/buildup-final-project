@@ -18,6 +18,14 @@
 
 import { JobPost } from '../types';
 
+// Capacity helpers live in assignmentService (staffing domain). Re-exported
+// here so any screen asking "can this job take another worker?" has a single
+// import site alongside isOpenForApplications and never re-implements the rule.
+export {
+  getActiveAssignedWorkersCount,
+  isJobFullyStaffed,
+} from './assignmentService';
+
 export interface RegistrationStatusInfo {
   label: string;
   tone: 'success' | 'info';
@@ -25,7 +33,15 @@ export interface RegistrationStatusInfo {
 
 /** The business-logic source of truth for "is this job still open to new
  *  applications?" — label/color derivations (getRegistrationStatus) must
- *  read through this, never re-check `acceptingApplications` on their own. */
+ *  read through this, never re-check `acceptingApplications` on their own.
+ *
+ *  `acceptingApplications` is kept in sync with staffing capacity by
+ *  AppContext: the moment active assignments reach `workersNeeded` the job
+ *  is auto-closed (registrationClosureReason: 'capacity'); if an assignment
+ *  is later removed and it had been auto-closed, it reopens. A contractor's
+ *  manual close (reason: 'manual') is never reopened automatically. So this
+ *  one boolean already reflects capacity — callers don't need to re-check
+ *  the assignment count themselves. */
 export const isOpenForApplications = (
   job: Pick<JobPost, 'acceptingApplications'>
 ): boolean => job.acceptingApplications === true;

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import ResponseDialog from '../components/ResponseDialog';
 import { callPhone } from '../utils/contact';
+import { formatDateTime } from '../utils/helpers';
 import { Assignment, Contractor, JobPost, Worker } from '../types';
 
 interface Props {
@@ -43,9 +45,23 @@ const MyAssignmentsScreen: React.FC<Props> = ({
   onOpenChat,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, getJobById, getAssignmentsForWorker, getUserById } =
-    useApp();
+  const {
+    currentUser,
+    getJobById,
+    getAssignmentsForWorker,
+    getUserById,
+    cancelAssignment,
+  } = useApp();
   const me = currentUser as Worker | undefined;
+
+  const [cancelTarget, setCancelTarget] = useState<AssignmentRow | null>(null);
+
+  const submitCancel = (message: string) => {
+    if (!cancelTarget) return;
+    const id = cancelTarget.assignment.id;
+    setCancelTarget(null);
+    cancelAssignment(id, 'worker', message || undefined);
+  };
 
   // Real staffing data only — never re-derive from application/invitation
   // counts. An Assignment exists here exactly because a contractor accepted
@@ -160,6 +176,25 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                   />
                 </TouchableOpacity>
 
+                {item.assignment.status === 'cancelled' && (
+                  <View style={styles.cancelInfo}>
+                    <Text style={styles.cancelInfoMeta}>
+                      בוטל על ידי{' '}
+                      {item.assignment.cancelledBy === 'worker'
+                        ? 'העובד'
+                        : 'הקבלן'}
+                      {item.assignment.cancelledAt
+                        ? ` ב־${formatDateTime(item.assignment.cancelledAt)}`
+                        : ''}
+                    </Text>
+                    {item.assignment.cancellationMessage ? (
+                      <Text style={styles.cancelInfoMessage}>
+                        “{item.assignment.cancellationMessage}”
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+
                 {contractor && (
                   <View style={styles.cardActions}>
                     <TouchableOpacity
@@ -192,11 +227,39 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                     </TouchableOpacity>
                   </View>
                 )}
+
+                {item.assignment.status === 'active' && (
+                  <TouchableOpacity
+                    style={styles.giveUpBtn}
+                    onPress={() => setCancelTarget(item)}
+                    activeOpacity={0.85}
+                    accessibilityLabel="ויתור על השיבוץ"
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={16}
+                      color={Colors.danger}
+                    />
+                    <Text style={styles.giveUpBtnText}>ויתור על השיבוץ</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             );
           }}
         />
       )}
+
+      <ResponseDialog
+        visible={!!cancelTarget}
+        title="לוותר על השיבוץ?"
+        message="הקבלן יקבל עדכון שאינך יכול להשתתף במשרה."
+        inputLabel="הודעה לקבלן (אופציונלי)"
+        inputPlaceholder="למשל: לצערי לא אוכל להגיע בתאריך שנקבע."
+        confirmLabel="ויתור על השיבוץ"
+        destructive
+        onConfirm={submitCancel}
+        onClose={() => setCancelTarget(null)}
+      />
     </View>
   );
 };
@@ -251,6 +314,44 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'row-reverse',
     gap: 8,
+  },
+  cancelInfo: {
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.sm,
+    padding: Spacing.sm,
+    gap: 3,
+  },
+  cancelInfoMeta: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 6,
+  },
+  cancelInfoMessage: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    fontStyle: 'italic',
+    lineHeight: FontSize.sm + 5,
+  },
+  giveUpBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+    backgroundColor: Colors.white,
+  },
+  giveUpBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.danger,
+    writingDirection: 'rtl',
   },
   actionBtn: {
     flex: 1,

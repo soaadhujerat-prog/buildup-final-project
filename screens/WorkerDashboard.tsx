@@ -15,7 +15,12 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
-import { formatJobRateCompact } from '../utils/helpers';
+import {
+  formatJobRateCompact,
+  formatDateTime,
+  INVITATION_STATUS_LABEL,
+  INVITATION_STATUS_TONE,
+} from '../utils/helpers';
 import { Worker, ApplicationStatus } from '../types';
 
 interface Props {
@@ -351,24 +356,12 @@ const WorkerDashboard: React.FC<Props> = ({
                     {job?.title ?? 'משרה'}
                   </Text>
                   <Text style={[styles.rowSub, { writingDirection: 'ltr' }]}>
-                    {new Date(inv.sentAt).toLocaleDateString('he-IL')}
+                    {formatDateTime(inv.sentAt)}
                   </Text>
                 </View>
                 <StatusBadge
-                  label={
-                    inv.status === 'pending'
-                      ? 'ממתין'
-                      : inv.status === 'accepted'
-                      ? 'אישרת'
-                      : 'דחית'
-                  }
-                  tone={
-                    inv.status === 'pending'
-                      ? 'warning'
-                      : inv.status === 'accepted'
-                      ? 'success'
-                      : 'danger'
-                  }
+                  label={INVITATION_STATUS_LABEL[inv.status]}
+                  tone={INVITATION_STATUS_TONE[inv.status]}
                   small
                 />
               </TouchableOpacity>

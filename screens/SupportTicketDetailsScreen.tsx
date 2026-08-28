@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -99,12 +101,19 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
         <Text style={styles.headerTitle}>פרטי פנייה</Text>
       </View>
 
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={insets.top + 56}
+      >
       <ScrollView
         contentContainerStyle={{
           padding: Spacing.lg,
           paddingBottom: 40,
         }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         {/* Ticket header */}
         <View style={styles.heroCard}>
@@ -282,6 +291,7 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
           </View>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 };

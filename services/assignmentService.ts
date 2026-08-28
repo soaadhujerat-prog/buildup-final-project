@@ -52,6 +52,26 @@ export const buildAssignmentFromInvitation = (
   updatedAt: nowIso(),
 });
 
+/** THE canonical "how many workers are actually staffed on this job right
+ *  now" number. Counts only `active` Assignment records — never pending /
+ *  rejected / withdrawn applications or pending / declined / cancelled
+ *  invitations. Every capacity decision in the app must go through this. */
+export const getActiveAssignedWorkersCount = (
+  assignments: Assignment[],
+  jobId: string
+): number =>
+  assignments.filter((a) => a.jobId === jobId && a.status === 'active').length;
+
+/** Canonical "is this job's staffing full?" check. `>=` (not `===`) so a
+ *  bad-data over-count can never read as "still has room". */
+export const isJobFullyStaffed = (
+  assignments: Assignment[],
+  jobId: string,
+  workersNeeded: number
+): boolean =>
+  getActiveAssignedWorkersCount(assignments, jobId) >=
+  Math.max(workersNeeded, 0);
+
 export const getAssignmentsByJob = (
   assignments: Assignment[],
   jobId: string
@@ -86,9 +106,7 @@ export const getStaffingProgress = (
   jobId: string,
   workersNeeded: number
 ): StaffingProgress => {
-  const filled = assignments.filter(
-    (a) => a.jobId === jobId && a.status === 'active'
-  ).length;
+  const filled = getActiveAssignedWorkersCount(assignments, jobId);
   const needed = Math.max(workersNeeded, 0);
   const percent =
     needed > 0 ? Math.min(100, Math.round((filled / needed) * 100)) : 0;
