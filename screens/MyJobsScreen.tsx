@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import StaffingProgress from '../components/StaffingProgress';
 import { StaffingProgress as StaffingProgressData } from '../services/assignmentService';
 import { getRegistrationStatus } from '../services/jobStatusService';
 import { Contractor, JobPost } from '../types';
+import { useRememberedScroll } from '../utils/scrollMemory';
 
 interface Props {
   onBack: () => void;
@@ -35,6 +36,11 @@ const MyJobsScreen: React.FC<Props> = ({
   const { currentUser, jobs, getApplicationsForJob, getStaffingProgress } =
     useApp();
   const me = currentUser as Contractor | undefined;
+
+  const listRef = useRef<FlatList>(null);
+  const { onScroll, scrollEventThrottle, restoreOnce } = useRememberedScroll(
+    'contractor/my-jobs'
+  );
 
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -67,7 +73,7 @@ const MyJobsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>המשרות שלי</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">המשרות שלי</Text>
       </View>
 
       <ScrollView
@@ -129,10 +135,16 @@ const MyJobsScreen: React.FC<Props> = ({
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           style={styles.results}
           data={filtered}
           keyExtractor={(j) => j.id}
           contentContainerStyle={styles.list}
+          onScroll={onScroll}
+          scrollEventThrottle={scrollEventThrottle}
+          onContentSizeChange={() =>
+            restoreOnce((y) => listRef.current?.scrollToOffset({ offset: y, animated: false }))
+          }
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => (
             <JobRow

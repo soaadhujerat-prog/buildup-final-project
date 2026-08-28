@@ -66,11 +66,20 @@ const SmartMatchScreen: React.FC<Props> = ({
     [workers, selectedJob]
   );
 
+  // Only a still-live invitation (pending / accepted) marks a worker as
+  // "already invited" and hides the invite button. A historical
+  // declined / expired / cancelled record — including one auto-cancelled
+  // because the job was momentarily full — must NOT block a fresh invite
+  // once a seat frees up again.
   const invitedWorkerIds = useMemo(() => {
     if (!selectedJobId) return new Set<string>();
     return new Set(
       invitations
-        .filter((i) => i.jobId === selectedJobId)
+        .filter(
+          (i) =>
+            i.jobId === selectedJobId &&
+            (i.status === 'pending' || i.status === 'accepted')
+        )
         .map((i) => i.workerId)
     );
   }, [invitations, selectedJobId]);
@@ -91,7 +100,7 @@ const SmartMatchScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>התאמה חכמה</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">התאמה חכמה</Text>
       </View>
 
       {myOpenJobs.length === 0 ? (

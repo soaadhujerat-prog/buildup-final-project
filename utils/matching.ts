@@ -16,6 +16,7 @@ import {
   MatchReason,
   ProfessionCategory,
 } from '../types';
+import { workerProfessions, workerPrimaryProfession } from './normalize';
 
 // ---------------------------------------------------------------------------
 // City -> Area map. Used for locality scoring.
@@ -72,9 +73,11 @@ function scoreProfession(worker: Worker, job: JobPost): MatchReason {
   let score = 0;
   let label = 'מקצוע שונה';
 
-  if (worker.profession.trim() === job.profession.trim()) {
+  const jobProfession = job.profession.trim();
+  const exact = workerProfessions(worker).some((p) => p.trim() === jobProfession);
+  if (exact) {
     score = w;
-    label = `מקצוע מדויק: ${worker.profession}`;
+    label = `מקצוע מדויק: ${jobProfession || workerPrimaryProfession(worker)}`;
   } else if (worker.professionCategory === job.professionCategory) {
     score = Math.round(w * 0.7);
     label = `אותו תחום: ${worker.professionCategory}`;
@@ -158,7 +161,7 @@ function certificationsReason(worker: Worker, job: JobPost): MatchReason | null 
   const required = job.requiredCertifications ?? [];
   if (required.length === 0) return null;
 
-  const workerCerts = worker.certifications ?? [];
+  const workerCerts = (worker.certifications ?? []).map((wc) => wc.name);
   const missing = required.filter(
     (c) => !workerCerts.some((wc) => wc.includes(c) || c.includes(wc))
   );

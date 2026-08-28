@@ -64,6 +64,27 @@ export const formatDateTime = (isoString?: string): string => {
   return `${dd}.${mm}.${yyyy} בשעה ${hh}:${min}`;
 };
 
+// ---------------------------------------------------------------------------
+// Phone — one shared normalizer + validator for every form (worker &
+// contractor sign-up, both profile-edit screens). Validation always runs on
+// the NORMALIZED value, never on what the user typed, so an already-valid
+// stored number like "054-9876543" passes untouched.
+// ---------------------------------------------------------------------------
+
+/** Strip spaces, hyphens, parentheses and dots; turn a +972 / 972 prefix
+ *  back into a leading 0. Returns digits only (with the leading 0). */
+export const normalizePhone = (raw: string): string => {
+  const cleaned = (raw ?? '').replace(/[\s\-().]/g, '');
+  return cleaned
+    .replace(/^\+?972/, '0')
+    .replace(/[^\d]/g, '');
+};
+
+/** Valid Israeli line: 10 digits starting 0 (mobile / most landlines) or a
+ *  9-digit 0-prefixed landline. Checked on the normalized value. */
+export const isValidIsraeliPhone = (raw: string): boolean =>
+  /^0\d{8,9}$/.test(normalizePhone(raw));
+
 export const formatCurrency = (amount: number): string => {
   return `${amount.toLocaleString('he-IL')} ₪`;
 };
@@ -167,6 +188,13 @@ export const applicationTimeline = (app: {
   return lines;
 };
 
+/** The single human sentence shown wherever an invitation was auto-cancelled
+ *  because the job filled up (cancellationReason === 'capacity_full') — one
+ *  clear line with date + time + reason, never a bare timestamp followed by a
+ *  separate "המשרה אוישה במלואה" fragment. */
+export const invitationCapacityCancelSentence = (cancelledAt?: string): string =>
+  `ההזמנה בוטלה ב־${formatDateTime(cancelledAt)} משום שהמשרה אוישה במלואה.`;
+
 /** Human timeline sentences for an invitation. `perspective` changes the
  *  wording of the "cancelled" line — "בוטלה על ידך" for the contractor who
  *  cancelled it, "בוטלה על ידי הקבלן" for the worker who received it — unless
@@ -189,8 +217,7 @@ export const invitationTimeline = (
     lines.push(`נדחתה ב־${formatDateTime(inv.respondedAt)}`);
   } else if (inv.status === 'cancelled' && inv.cancelledAt) {
     if (inv.cancellationReason === 'capacity_full') {
-      lines.push(`בוטלה ב־${formatDateTime(inv.cancelledAt)}`);
-      lines.push('המשרה אוישה במלואה');
+      lines.push(invitationCapacityCancelSentence(inv.cancelledAt));
     } else {
       lines.push(
         perspective === 'contractor'

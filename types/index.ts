@@ -54,10 +54,18 @@ export interface Admin extends BaseUser {
 export interface Worker extends BaseUser {
   role: 'worker';
   city: string;
+  /** @deprecated Legacy single-profession field. Source of truth is
+   *  `professions` (a worker can practise several specific trades). Kept —
+   *  and always normalized to mirror `professions[0]` — so the many list
+   *  rows / cards that show one profession keep working unchanged. */
   profession: string;
+  /** The worker's specific trades, e.g. ['בנאי', 'ברזלן', 'טפסן']. Always
+   *  non-empty after normalization; `profession` mirrors index 0. Filters
+   *  that look for a profession check membership here. */
+  professions: string[];
   professionCategory: ProfessionCategory;
   skills: string[];
-  certifications: string[];
+  certifications: Certification[];
   experienceYears: number;
   preferredAreas: string[];
   isAvailable: boolean;
@@ -77,7 +85,14 @@ export interface Contractor extends BaseUser {
   companyName: string;
   contractorRegistrationNumber: string;
   city: string;
-  areaOfOperation: string;
+  /** @deprecated Legacy single-area field. Source of truth is
+   *  `areasOfOperation` (a contractor can operate in several regions). Kept
+   *  optional only so any old record still type-checks; always normalized to
+   *  mirror `areasOfOperation[0]`. */
+  areaOfOperation?: string;
+  /** The regions the contractor operates in, e.g. ['מרכז', 'שרון']. Always
+   *  non-empty after normalization. */
+  areasOfOperation: string[];
   projectTypes: string[];
   licenseDetails: string;
   bio?: string;
@@ -100,7 +115,18 @@ export interface UploadedDocument {
   fileName: string;
   mimeType?: string;
   size?: number;
-  type: 'id_card';
+  type: 'id_card' | 'certification';
+}
+
+/** A named professional certificate the worker holds, with an optional
+ *  scan/photo of the certificate itself. The document belongs to THIS
+ *  certification — never a loose array detached from the names. Frontend
+ *  keeps only the local URI + metadata (see UploadedDocument); a real
+ *  backend uploads it to Storage later. */
+export interface Certification {
+  id?: string;
+  name: string;
+  document?: UploadedDocument;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,10 +141,12 @@ export interface WorkerRegistrationData {
   email: string;
   city: string;
   password: string;
+  /** @deprecated mirror of `professions[0]` — see Worker.profession. */
   profession: string;
+  professions: string[];
   professionCategory: ProfessionCategory;
   skills: string[];
-  certifications: string[];
+  certifications: Certification[];
   experienceYears: number;
   preferredAreas: string[];
   isAvailable: boolean;
@@ -136,7 +164,9 @@ export interface ContractorRegistrationData {
   phone: string;
   email: string;
   city: string;
-  areaOfOperation: string;
+  /** @deprecated mirror of `areasOfOperation[0]` — see Contractor.areaOfOperation. */
+  areaOfOperation?: string;
+  areasOfOperation: string[];
   projectTypes: string[];
   licenseDetails: string;
   password: string;

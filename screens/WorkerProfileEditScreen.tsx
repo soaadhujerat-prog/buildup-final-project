@@ -28,13 +28,16 @@ import { useApp } from '../context/AppContext';
 import ChipInput from '../components/ChipInput';
 import CityPickerField from '../components/CityPickerField';
 import HorizontalChipPicker from '../components/HorizontalChipPicker';
+import CertificationsField from '../components/CertificationsField';
 import WorkerAvatar from '../components/WorkerAvatar';
 import {
   AREAS_ISRAEL,
   PROFESSIONS_BY_CATEGORY,
   PROFESSION_CATEGORIES,
 } from '../data/mockData';
-import { ProfessionCategory, Worker } from '../types';
+import { Certification, ProfessionCategory, Worker } from '../types';
+import { isValidIsraeliPhone, normalizePhone } from '../utils/helpers';
+import { workerProfessions, normalizeCertifications } from '../utils/normalize';
 
 interface Props {
   onBack: () => void;
@@ -51,13 +54,15 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const [profCategory, setProfCategory] = useState<ProfessionCategory>(
     (me?.professionCategory ?? 'בנייה') as ProfessionCategory
   );
-  const [profession, setProfession] = useState(me?.profession ?? '');
+  const [professions, setProfessions] = useState<string[]>(
+    me ? workerProfessions(me) : []
+  );
   const [experienceYears, setExperienceYears] = useState(
     String(me?.experienceYears ?? '')
   );
   const [skills, setSkills] = useState<string[]>(me?.skills ?? []);
-  const [certifications, setCertifications] = useState<string[]>(
-    me?.certifications ?? []
+  const [certifications, setCertifications] = useState<Certification[]>(
+    normalizeCertifications(me?.certifications)
   );
   const [hourlyRate, setHourlyRate] = useState(String(me?.hourlyRate ?? ''));
   const [dailyRate, setDailyRate] = useState(String(me?.dailyRate ?? ''));
@@ -93,6 +98,11 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const toggleArea = (a: string) => {
     setPreferredAreas((prev) =>
       prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]
+    );
+  };
+  const toggleProfession = (p: string) => {
+    setProfessions((prev) =>
+      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
     );
   };
 
@@ -165,9 +175,12 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const handleSave = () => {
     if (submitting) return;
     if (!phone.trim()) return Alert.alert('שגיאה', 'טלפון חובה');
+    if (!isValidIsraeliPhone(phone))
+      return Alert.alert('שגיאה', 'מספר טלפון לא תקין');
     if (!email.trim() || !email.includes('@'))
       return Alert.alert('שגיאה', 'אימייל לא תקין');
-    if (!profession.trim()) return Alert.alert('שגיאה', 'מקצוע חובה');
+    if (professions.length === 0)
+      return Alert.alert('שגיאה', 'יש לבחור לפחות מקצוע אחד');
     const exp = Number(experienceYears);
     if (isNaN(exp) || exp < 0)
       return Alert.alert('שגיאה', 'שנות ניסיון חייב להיות מספר');
@@ -183,14 +196,17 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     setSubmitting(true);
     updateWorkerProfile(me.id, {
       avatarUrl: avatarUri,
-      phone: phone.trim(),
+      phone: normalizePhone(phone),
       email: email.trim(),
       city,
       professionCategory: profCategory,
-      profession,
+      profession: professions[0],
+      professions,
       experienceYears: exp,
       skills,
-      certifications,
+      certifications: certifications
+        .map((c) => ({ ...c, name: c.name.trim() }))
+        .filter((c) => c.name.length > 0),
       hourlyRate: hr,
       dailyRate: dr,
       bio: bio.trim(),
@@ -212,7 +228,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>עריכת פרופיל</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">עריכת פרופיל</Text>
       </View>
 
       <ScrollView
@@ -268,8 +284,14 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
               onChange={(v) => {
                 setProfCategory(v as ProfessionCategory);
                 const list = PROFESSIONS_BY_CATEGORY[v] ?? [];
-                if (list.length > 0 && !list.includes(profession))
-                  setProfession(list[0]);
+                setProfessions((prev) => {
+                  const kept = prev.filter((p) => list.includes(p));
+                  return kept.length > 0
+                    ? kept
+                    : list.length > 0
+                    ? [list[0]]
+                    : [];
+                });
               }}
               chipStyle={styles.chip}
               chipActiveStyle={styles.chipActive}
@@ -279,17 +301,30 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
           </View>
           <View style={styles.inputGroup}>
             <View style={styles.labelRow}>
-              <Text style={styles.label}>מקצוע ספציפי</Text>
+              <Text style={styles.label}>מקצוע ספציפי (ניתן לבחור כמה)</Text>
             </View>
-            <HorizontalChipPicker
-              options={professionChoices}
-              value={profession}
-              onChange={setProfession}
-              chipStyle={styles.chip}
-              chipActiveStyle={styles.chipActive}
-              textStyle={styles.chipText}
-              textActiveStyle={styles.chipTextActive}
-            />
+            <View style={styles.chipWrap}>
+              {professionChoices.map((p) => {
+                const active = professions.includes(p);
+                return (
+                  <TouchableOpacity
+                    key={p}
+                    onPress={() => toggleProfession(p)}
+                    style={[styles.chip, active && styles.chipActive]}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        active && styles.chipTextActive,
+                      ]}
+                    >
+                      {p}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
           <Field
             label="שנות ניסיון"
@@ -303,11 +338,10 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
             onChange={setSkills}
             placeholder="הוסף מיומנות..."
           />
-          <ChipInput
-            label="הסמכות"
-            values={certifications}
+          <CertificationsField
+            label="הסמכות ותעודות"
+            value={certifications}
             onChange={setCertifications}
-            placeholder="הוסף הסמכה..."
           />
         </Section>
 
@@ -654,6 +688,7 @@ const styles = StyleSheet.create({
   textarea: { minHeight: 110, textAlignVertical: 'top' },
 
   chipRow: { flexDirection: 'row-reverse', gap: 8 },
+  chipWrap: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 },
   chip: {
     height: FC.height,
     justifyContent: 'center',

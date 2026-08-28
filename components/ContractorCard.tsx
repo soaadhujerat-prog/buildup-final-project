@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Contractor } from '../types';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import ContractorAvatar from './ContractorAvatar';
+import { contractorAreas } from '../utils/normalize';
 
 interface ContractorCardProps {
   contractor: Contractor;
@@ -20,7 +21,7 @@ const ContractorCard: React.FC<ContractorCardProps> = ({
   onToggleFavorite,
   openJobsCount,
 }) => {
-  const locationLabel = [contractor.city, contractor.areaOfOperation]
+  const locationLabel = [contractor.city, ...contractorAreas(contractor)]
     .filter(Boolean)
     .join(' · ');
 

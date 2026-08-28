@@ -20,6 +20,12 @@ import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
 import { Contractor, Worker } from '../types';
+import {
+  workerProfessions,
+  workerPrimaryProfession,
+  contractorAreas,
+  certificationNames,
+} from '../utils/normalize';
 
 interface Props {
   userId: string;
@@ -130,7 +136,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>פרטי משתמש</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">פרטי משתמש</Text>
       </View>
 
       <ScrollView
@@ -153,7 +159,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
             <Text style={styles.heroRole}>
               {isWorker ? 'עובד' : 'קבלן'}
               {' · '}
-              {isWorker ? w?.profession : c?.companyName}
+              {isWorker ? (w ? workerPrimaryProfession(w) : '') : c?.companyName}
             </Text>
             <View style={styles.heroBadges}>
               <StatusBadge
@@ -225,7 +231,10 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
         {w && (
           <>
             <Section title="פרופיל מקצועי">
-              <FieldRow label="מקצוע" value={w.profession} />
+              <FieldRow
+                label={workerProfessions(w).length > 1 ? 'מקצועות' : 'מקצוע'}
+                value={workerProfessions(w).join(', ')}
+              />
               <FieldRow label="תחום" value={w.professionCategory} />
               <FieldRow
                 label="שנות ניסיון"
@@ -238,8 +247,8 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
               <FieldRow
                 label="תעודות"
                 value={
-                  w.certifications.length
-                    ? w.certifications.join(', ')
+                  certificationNames(w.certifications).length
+                    ? certificationNames(w.certifications).join(', ')
                     : '—'
                 }
               />
@@ -263,7 +272,10 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
               mono
               ltr
             />
-            <FieldRow label="אזור פעילות" value={c.areaOfOperation} />
+            <FieldRow
+              label="אזורי פעילות"
+              value={contractorAreas(c).join(', ') || '—'}
+            />
             <FieldRow
               label="סוגי פרויקטים"
               value={c.projectTypes.join(', ')}

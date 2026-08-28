@@ -287,7 +287,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>
+        <Text style={styles.headerTitle} pointerEvents="none">
           {isEditMode ? 'עריכת משרה' : 'פרסם משרה חדשה'}
         </Text>
         <Text style={styles.headerSubtitle}>

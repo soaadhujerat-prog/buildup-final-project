@@ -78,7 +78,7 @@ const UserManagementScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ניהול משתמשים</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">ניהול משתמשים</Text>
       </View>
 
       <View style={styles.searchBox}>

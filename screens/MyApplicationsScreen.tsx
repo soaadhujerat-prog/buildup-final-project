@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ import {
   Contractor,
   Worker,
 } from '../types';
+import { useRememberedScroll } from '../utils/scrollMemory';
 
 interface Props {
   onBack: () => void;
@@ -54,6 +55,11 @@ const MyApplicationsScreen: React.FC<Props> = ({
     withdrawApplication,
   } = useApp();
   const me = currentUser as Worker | undefined;
+
+  const listRef = useRef<FlatList>(null);
+  const { onScroll, scrollEventThrottle, restoreOnce } = useRememberedScroll(
+    'worker/my-applications'
+  );
 
   const handleWithdraw = (app: Application) => {
     Alert.alert(
@@ -105,7 +111,7 @@ const MyApplicationsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>הבקשות שלי</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">הבקשות שלי</Text>
       </View>
 
       <ScrollView
@@ -164,10 +170,16 @@ const MyApplicationsScreen: React.FC<Props> = ({
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           style={styles.results}
           data={filtered}
           keyExtractor={(a) => a.id}
           contentContainerStyle={styles.list}
+          onScroll={onScroll}
+          scrollEventThrottle={scrollEventThrottle}
+          onContentSizeChange={() =>
+            restoreOnce((y) => listRef.current?.scrollToOffset({ offset: y, animated: false }))
+          }
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => {
             const job = jobs.find((j) => j.id === item.jobId);

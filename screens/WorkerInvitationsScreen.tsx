@@ -117,7 +117,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>הזמנות מקבלנים</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">הזמנות מקבלנים</Text>
       </View>
 
       <ScrollView
@@ -451,8 +451,12 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
 
+  // RTL horizontal filter row: the ScrollView is mirrored (scaleX -1) so
+  // scrollX=0 anchors to the FIRST chip painted flush at the right edge
+  // ("הכל" visible immediately, no scroll needed); each chip is un-mirrored
+  // so its text reads normally. Data order is never reversed.
   chipRow: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     gap: FC.gap,
@@ -467,6 +471,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    transform: [{ scaleX: -1 }],
   },
   chipText: {
     fontSize: FontSize.sm,
@@ -484,6 +489,7 @@ const styles = StyleSheet.create({
   filterScroll: {
     flexGrow: 0,
     flexShrink: 0,
+    transform: [{ scaleX: -1 }],
   },
 
   list: {

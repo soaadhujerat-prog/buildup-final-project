@@ -13,6 +13,7 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import ContractorAvatar from '../components/ContractorAvatar';
 import { Contractor } from '../types';
+import { contractorAreas } from '../utils/normalize';
 
 interface Props {
   onBack: () => void;
@@ -48,7 +49,7 @@ const ContractorProfileScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>הפרופיל שלי</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">הפרופיל שלי</Text>
         <TouchableOpacity onPress={onOpenSettings} style={styles.settingsBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="settings-outline" size={22} color={Colors.text} />
         </TouchableOpacity>
@@ -82,7 +83,10 @@ const ContractorProfileScreen: React.FC<Props> = ({
           />
           <FieldRow label="פרטי רישיון" value={me.licenseDetails} />
           <FieldRow label="עיר" value={me.city} />
-          <FieldRow label="אזור פעילות" value={me.areaOfOperation} />
+          <FieldRow
+            label="אזורי פעילות"
+            value={contractorAreas(me).join(' · ') || '—'}
+          />
         </Section>
 
         {/* Project types */}

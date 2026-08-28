@@ -20,6 +20,13 @@ interface Props {
   onChange: (doc: UploadedDocument | null) => void;
   label?: string;
   error?: string;
+  /** What kind of document this field captures — stamped onto the picked
+   *  UploadedDocument. Defaults to the original ID-card use. */
+  documentType?: UploadedDocument['type'];
+  /** Action-sheet heading. Defaults to "הוספת תעודת זהות". */
+  sheetTitle?: string;
+  /** Hint under the empty drop-zone. */
+  emptyHint?: string;
 }
 
 /** True when a document should be rendered as an image thumbnail rather
@@ -50,6 +57,9 @@ const DocumentUploadField: React.FC<Props> = ({
   onChange,
   label = 'צילום / צירוף תעודת זהות',
   error,
+  documentType = 'id_card',
+  sheetTitle = 'הוספת תעודת זהות',
+  emptyHint = 'לחץ להוספה — צילום, גלריה או קובץ PDF',
 }) => {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<SheetAction | null>(null);
@@ -94,7 +104,7 @@ const DocumentUploadField: React.FC<Props> = ({
         fileName: asset.fileName || `id-card-${Date.now()}.jpg`,
         mimeType: asset.mimeType ?? 'image/jpeg',
         size: asset.fileSize,
-        type: 'id_card',
+        type: documentType,
       });
     } catch {
       setNotice('לא ניתן היה לפתוח את המצלמה. נסה שוב.');
@@ -123,7 +133,7 @@ const DocumentUploadField: React.FC<Props> = ({
         fileName: asset.fileName || `id-card-${Date.now()}.jpg`,
         mimeType: asset.mimeType ?? 'image/jpeg',
         size: asset.fileSize,
-        type: 'id_card',
+        type: documentType,
       });
     } catch {
       setNotice('לא ניתן היה לפתוח את הגלריה. נסה שוב.');
@@ -147,7 +157,7 @@ const DocumentUploadField: React.FC<Props> = ({
         fileName: asset.name,
         mimeType: asset.mimeType,
         size: asset.size,
-        type: 'id_card',
+        type: documentType,
       });
     } catch {
       setNotice('לא ניתן היה לבחור קובץ. נסה שוב.');
@@ -168,7 +178,7 @@ const DocumentUploadField: React.FC<Props> = ({
         <TouchableOpacity style={styles.emptyCard} onPress={openSheet} activeOpacity={0.8}>
           <Ionicons name="camera-outline" size={30} color={Colors.textMuted} />
           <Text style={styles.emptyText}>{label}</Text>
-          <Text style={styles.emptyHint}>לחץ להוספה — צילום, גלריה או קובץ PDF</Text>
+          <Text style={styles.emptyHint}>{emptyHint}</Text>
         </TouchableOpacity>
       ) : (
         <View style={[styles.previewCard, error && styles.previewCardError]}>
@@ -234,7 +244,7 @@ const DocumentUploadField: React.FC<Props> = ({
               >
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
-              <Text style={styles.sheetTitle}>הוספת תעודת זהות</Text>
+              <Text style={styles.sheetTitle}>{sheetTitle}</Text>
               <View style={styles.sheetHeaderSpacer} />
             </View>
 

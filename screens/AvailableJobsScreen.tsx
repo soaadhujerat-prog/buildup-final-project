@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +19,7 @@ import JobSortBottomSheet, {
   getJobSortLabel,
 } from '../components/JobSortBottomSheet';
 import { Contractor, Worker } from '../types';
+import { useRememberedScroll } from '../utils/scrollMemory';
 
 interface Props {
   onBack: () => void;
@@ -66,6 +67,13 @@ const AvailableJobsScreen: React.FC<Props> = ({
 
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [sortSheetVisible, setSortSheetVisible] = useState(false);
+
+  // Preserve scroll position across "list → JobDetails → back" (this screen
+  // fully unmounts while a drilldown route is on top).
+  const listRef = useRef<FlatList>(null);
+  const { onScroll, scrollEventThrottle, restoreOnce } = useRememberedScroll(
+    'worker/available-jobs'
+  );
 
   const favoriteContractorIds = useMemo(
     () => (workerId ? getFavoriteContractorIds(workerId) : []),
@@ -194,7 +202,7 @@ const AvailableJobsScreen: React.FC<Props> = ({
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>חיפוש עבודות</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">חיפוש עבודות</Text>
         <Text style={styles.headerSubtitle}>מצא את המשרה שמתאימה לך</Text>
       </View>
 
@@ -310,12 +318,18 @@ const AvailableJobsScreen: React.FC<Props> = ({
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           style={styles.results}
           data={results}
           keyExtractor={(j) => j.id}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          onScroll={onScroll}
+          scrollEventThrottle={scrollEventThrottle}
+          onContentSizeChange={() =>
+            restoreOnce((y) => listRef.current?.scrollToOffset({ offset: y, animated: false }))
+          }
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => (
             <JobCard

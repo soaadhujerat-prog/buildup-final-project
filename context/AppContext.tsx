@@ -74,6 +74,11 @@ import {
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
 import { JobSortOption } from '../components/JobSortBottomSheet';
+import {
+  workerProfessions,
+  contractorAreas,
+  normalizeCertifications,
+} from '../utils/normalize';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -681,10 +686,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           status: 'approved',
           createdAt: nowIso(),
           city: d.city,
-          profession: d.profession,
+          profession: workerProfessions(d)[0] ?? d.profession,
+          professions: workerProfessions(d),
           professionCategory: d.professionCategory,
           skills: d.skills,
-          certifications: d.certifications,
+          certifications: normalizeCertifications(d.certifications),
           experienceYears: d.experienceYears,
           preferredAreas: d.preferredAreas,
           isAvailable: d.isAvailable,
@@ -715,7 +721,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           companyName: d.companyName,
           contractorRegistrationNumber: d.contractorRegistrationNumber,
           city: d.city,
-          areaOfOperation: d.areaOfOperation,
+          areasOfOperation: contractorAreas(d),
+          areaOfOperation: contractorAreas(d)[0],
           projectTypes: d.projectTypes,
           licenseDetails: d.licenseDetails,
           bio: d.bio,

@@ -63,7 +63,7 @@ const FavoriteWorkersScreen: React.FC<Props> = ({
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>עובדים מועדפים</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">עובדים מועדפים</Text>
         <Text style={styles.headerSubtitle}>העובדים ששמרת לגישה מהירה</Text>
       </View>
 

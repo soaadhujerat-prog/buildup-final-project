@@ -34,6 +34,7 @@ import {
   INVITATION_STATUS_TONE,
 } from '../utils/helpers';
 import { Application, Contractor, Invitation, Worker } from '../types';
+import { contractorAreas } from '../utils/normalize';
 
 interface Props {
   jobId: string;
@@ -87,6 +88,7 @@ const JobDetailsScreen: React.FC<Props> = ({
   const [candidateDialog, setCandidateDialog] = useState<
     { mode: 'accept' | 'reject'; app: Application } | null
   >(null);
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
 
   if (!job) {
     return (
@@ -188,11 +190,12 @@ const JobDetailsScreen: React.FC<Props> = ({
     [invitations, job.id]
   );
 
-  const handleApply = () => {
+  const submitApplication = (message: string) => {
     if (!isWorker || !currentUser) return;
+    setApplyDialogOpen(false);
     setApplying(true);
     setTimeout(() => {
-      applyToJob(job.id, currentUser.id);
+      applyToJob(job.id, currentUser.id, message || undefined);
       setApplying(false);
       Alert.alert(
         'הבקשה נשלחה',
@@ -270,7 +273,7 @@ const JobDetailsScreen: React.FC<Props> = ({
   const renderApplyButton = (label: string) => (
     <TouchableOpacity
       style={[styles.actionBtn, styles.applyBtn, applying && { opacity: 0.7 }]}
-      onPress={handleApply}
+      onPress={() => setApplyDialogOpen(true)}
       disabled={applying}
       activeOpacity={0.85}
     >
@@ -439,7 +442,7 @@ const JobDetailsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>פרטי המשרה</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">פרטי המשרה</Text>
       </View>
 
       <ScrollView
@@ -501,7 +504,9 @@ const JobDetailsScreen: React.FC<Props> = ({
                   {contractor.companyName ?? contractor.fullName}
                 </Text>
                 <Text style={styles.contractorMeta}>
-                  {contractor.city} · {contractor.areaOfOperation}
+                  {[contractor.city, ...contractorAreas(contractor)]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </Text>
               </View>
               {isWorker && (
@@ -816,6 +821,17 @@ const JobDetailsScreen: React.FC<Props> = ({
                             </Text>
                           ) : null}
                         </View>
+
+                        {app.message?.trim() ? (
+                          <View style={styles.responseNote}>
+                            <Text style={styles.responseNoteLabel}>
+                              הודעת העובד
+                            </Text>
+                            <Text style={styles.responseNoteText}>
+                              {app.message.trim()}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                     );
                   })}
@@ -1024,6 +1040,17 @@ const JobDetailsScreen: React.FC<Props> = ({
         destructive={candidateDialog?.mode === 'reject'}
         onConfirm={submitCandidateDialog}
         onClose={() => setCandidateDialog(null)}
+      />
+
+      <ResponseDialog
+        visible={applyDialogOpen}
+        title="הגשת מועמדות"
+        message="ניתן לצרף הודעה קצרה לקבלן (אופציונלי)"
+        inputLabel="הודעה לקבלן (אופציונלי)"
+        inputPlaceholder="שלום, יש לי ניסיון בפרויקטים דומים ואשמח להצטרף לעבודה."
+        confirmLabel="הגש מועמדות"
+        onConfirm={submitApplication}
+        onClose={() => setApplyDialogOpen(false)}
       />
 
       {/* Worksite image full-screen preview */}

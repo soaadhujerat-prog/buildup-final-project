@@ -14,6 +14,11 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import { Worker } from '../types';
+import {
+  workerProfessions,
+  workerPrimaryProfession,
+  normalizeCertifications,
+} from '../utils/normalize';
 
 interface Props {
   onBack: () => void;
@@ -49,7 +54,7 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>הפרופיל המקצועי</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">הפרופיל המקצועי</Text>
         <TouchableOpacity onPress={onOpenSettings} style={styles.settingsBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="settings-outline" size={22} color={Colors.text} />
         </TouchableOpacity>
@@ -64,7 +69,7 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
           <WorkerAvatar worker={me} size={80} style={{ marginBottom: Spacing.sm }} />
           <Text style={styles.heroName}>{me.fullName}</Text>
           <Text style={styles.heroProfession}>
-            {me.profession} · {me.experienceYears} שנות ניסיון
+            {workerProfessions(me).join(' · ')} · {me.experienceYears} שנות ניסיון
           </Text>
           <View style={styles.heroBadges}>
             <StatusBadge
@@ -98,7 +103,10 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
         {/* Profession info */}
         <Section title="פרטים מקצועיים">
           <FieldRow label="תחום" value={me.professionCategory} />
-          <FieldRow label="מקצוע" value={me.profession} />
+          <FieldRow
+            label={workerProfessions(me).length > 1 ? 'מקצועות' : 'מקצוע'}
+            value={workerProfessions(me).join(', ') || workerPrimaryProfession(me)}
+          />
           <FieldRow
             label="שנות ניסיון"
             value={`${me.experienceYears} שנים`}
@@ -138,11 +146,23 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
         )}
 
         {/* Certifications */}
-        {me.certifications.length > 0 && (
+        {normalizeCertifications(me.certifications).length > 0 && (
           <Section title="הסמכות ותעודות">
-            {me.certifications.map((c) => (
-              <View key={c} style={styles.certRow}>
-                <Text style={styles.certText}>{c}</Text>
+            {normalizeCertifications(me.certifications).map((c, i) => (
+              <View key={c.id ?? `${c.name}-${i}`} style={styles.certRow}>
+                {c.document ? (
+                  <View style={styles.certDocTag}>
+                    <Ionicons
+                      name="document-attach-outline"
+                      size={12}
+                      color={Colors.primary}
+                    />
+                    <Text style={styles.certDocText}>מסמך מצורף</Text>
+                  </View>
+                ) : (
+                  <View />
+                )}
+                <Text style={styles.certText}>{c.name}</Text>
                 <Ionicons
                   name="ribbon-outline"
                   size={18}
@@ -413,6 +433,21 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     textAlign: 'right',
     flex: 1,
+  },
+  certDocTag: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: Colors.primaryFaint,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.sm,
+  },
+  certDocText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
   },
 
   editBtn: {

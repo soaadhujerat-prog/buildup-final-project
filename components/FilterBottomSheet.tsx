@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { Worker } from '../types';
+import { workerProfessions, workerHasProfession } from '../utils/normalize';
 import CityPickerField from './CityPickerField';
 import ProfessionSelectorModal from './ProfessionSelectorModal';
 import SkillsSelectorModal from './SkillsSelectorModal';
@@ -74,7 +75,12 @@ export const filterWorkers = (
 
   return workers.filter((w) => {
     if (q) {
-      const haystack = [w.fullName, w.profession, w.professionCategory, w.skills.join(' ')]
+      const haystack = [
+        w.fullName,
+        workerProfessions(w).join(' '),
+        w.professionCategory,
+        w.skills.join(' '),
+      ]
         .join(' ')
         .toLowerCase();
       if (!haystack.includes(q)) return false;
@@ -82,7 +88,7 @@ export const filterWorkers = (
     if (filters.professionCategory && w.professionCategory !== filters.professionCategory) {
       return false;
     }
-    if (filters.profession && w.profession !== filters.profession) return false;
+    if (filters.profession && !workerHasProfession(w, filters.profession)) return false;
     if (filters.city && w.city !== filters.city) return false;
     if (filters.availableOnly && !w.isAvailable) return false;
     if (filters.minExperience > 0 && w.experienceYears < filters.minExperience) return false;

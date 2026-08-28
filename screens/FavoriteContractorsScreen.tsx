@@ -61,7 +61,7 @@ const FavoriteContractorsScreen: React.FC<Props> = ({ onBack, onOpenAvailableJob
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>קבלנים מועדפים</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">קבלנים מועדפים</Text>
         <Text style={styles.headerSubtitle}>הקבלנים ששמרת לגישה מהירה</Text>
       </View>
 

@@ -43,7 +43,7 @@ const MessagesScreen: React.FC<Props> = ({ onBack, onOpenConversation }) => {
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>הודעות</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">הודעות</Text>
       </View>
 
       {myConversations.length === 0 ? (

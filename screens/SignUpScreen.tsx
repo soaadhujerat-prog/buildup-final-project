@@ -25,11 +25,14 @@ import {
   PROJECT_TYPES,
 } from '../data/mockData';
 import {
+  Certification,
   ContractorRegistrationData,
   ProfessionCategory,
   UploadedDocument,
   WorkerRegistrationData,
 } from '../types';
+import CertificationsField from '../components/CertificationsField';
+import { isValidIsraeliPhone, normalizePhone } from '../utils/helpers';
 
 type Role = 'worker' | 'contractor';
 
@@ -63,9 +66,9 @@ const SignUpScreen: React.FC<Props> = ({
   // Worker-only fields
   const [profCategory, setProfCategory] =
     useState<ProfessionCategory>('בנייה');
-  const [profession, setProfession] = useState('בנאי');
+  const [professions, setProfessions] = useState<string[]>(['בנאי']);
   const [skills, setSkills] = useState('');               // comma separated
-  const [certifications, setCertifications] = useState(''); // comma separated
+  const [certifications, setCertifications] = useState<Certification[]>([]);
   const [experienceYears, setExperienceYears] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
   const [dailyRate, setDailyRate] = useState('');
@@ -75,7 +78,7 @@ const SignUpScreen: React.FC<Props> = ({
   // Contractor-only fields
   const [companyName, setCompanyName] = useState('');
   const [contractorRegNumber, setContractorRegNumber] = useState('');
-  const [areaOfOperation, setAreaOfOperation] = useState('מרכז');
+  const [areasOfOperation, setAreasOfOperation] = useState<string[]>(['מרכז']);
   const [projectTypes, setProjectTypes] = useState<string[]>(['מגורים']);
   const [licenseDetails, setLicenseDetails] = useState('');
 
@@ -93,9 +96,19 @@ const SignUpScreen: React.FC<Props> = ({
       prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]
     );
   };
+  const toggleProfession = (p: string) => {
+    setProfessions((prev) =>
+      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
+    );
+  };
   const toggleProjectType = (t: string) => {
     setProjectTypes((prev) =>
       prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  };
+  const toggleAreaOfOperation = (a: string) => {
+    setAreasOfOperation((prev) =>
+      prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]
     );
   };
 
@@ -106,13 +119,14 @@ const SignUpScreen: React.FC<Props> = ({
       errs.push('תעודת זהות חובה (לפחות 5 ספרות)');
     if (!idDocument) errs.push('יש לצרף צילום או קובץ של תעודת זהות');
     if (!phone.trim()) errs.push('מספר טלפון חובה');
+    else if (!isValidIsraeliPhone(phone)) errs.push('מספר טלפון לא תקין');
     if (!email.trim() || !email.includes('@')) errs.push('כתובת אימייל לא תקינה');
     if (!city.trim()) errs.push('יש לבחור עיר');
     if (password.length < 4) errs.push('סיסמה חייבת לפחות 4 תווים');
     if (password !== confirmPwd) errs.push('הסיסמאות אינן תואמות');
 
     if (role === 'worker') {
-      if (!profession.trim()) errs.push('מקצוע חובה');
+      if (professions.length === 0) errs.push('יש לבחור לפחות מקצוע אחד');
       if (!experienceYears || isNaN(Number(experienceYears)))
         errs.push('שנות ניסיון חייב להיות מספר');
       if (!hourlyRate || isNaN(Number(hourlyRate)))
@@ -126,6 +140,8 @@ const SignUpScreen: React.FC<Props> = ({
       if (!contractorRegNumber.trim())
         errs.push('מספר רישום קבלנים חובה');
       if (!licenseDetails.trim()) errs.push('פרטי רישיון/סיווג חובה');
+      if (areasOfOperation.length === 0)
+        errs.push('יש לבחור לפחות אזור פעילות אחד');
       if (projectTypes.length === 0)
         errs.push('יש לבחור לפחות סוג פרויקט אחד');
     }
@@ -149,20 +165,20 @@ const SignUpScreen: React.FC<Props> = ({
           fullName: fullName.trim(),
           idNumber: idNumber.trim(),
           idDocument,
-          phone: phone.trim(),
+          phone: normalizePhone(phone),
           email: email.trim(),
           city,
           password,
-          profession,
+          profession: professions[0],
+          professions,
           professionCategory: profCategory,
           skills: skills
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean),
           certifications: certifications
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
+            .map((c) => ({ ...c, name: c.name.trim() }))
+            .filter((c) => c.name.length > 0),
           experienceYears: Number(experienceYears),
           preferredAreas,
           isAvailable,
@@ -178,10 +194,11 @@ const SignUpScreen: React.FC<Props> = ({
           idNumber: idNumber.trim(),
           idDocument,
           contractorRegistrationNumber: contractorRegNumber.trim(),
-          phone: phone.trim(),
+          phone: normalizePhone(phone),
           email: email.trim(),
           city,
-          areaOfOperation,
+          areasOfOperation,
+          areaOfOperation: areasOfOperation[0],
           projectTypes,
           licenseDetails: licenseDetails.trim(),
           password,
@@ -275,7 +292,15 @@ const SignUpScreen: React.FC<Props> = ({
                   onChange={(v) => {
                     setProfCategory(v as ProfessionCategory);
                     const list = PROFESSIONS_BY_CATEGORY[v] ?? [];
-                    if (list.length > 0) setProfession(list[0]);
+                    // keep only picks that still belong to the new category
+                    setProfessions((prev) => {
+                      const kept = prev.filter((p) => list.includes(p));
+                      return kept.length > 0
+                        ? kept
+                        : list.length > 0
+                        ? [list[0]]
+                        : [];
+                    });
                   }}
                   chipStyle={styles.chip}
                   chipActiveStyle={styles.chipActive}
@@ -286,18 +311,30 @@ const SignUpScreen: React.FC<Props> = ({
               </View>
               <View style={styles.inputGroup}>
                 <View style={styles.labelRow}>
-                  <Text style={styles.label}>מקצוע ספציפי</Text>
+                  <Text style={styles.label}>מקצוע ספציפי (ניתן לבחור כמה)</Text>
                 </View>
-                <HorizontalChipPicker
-                  options={professionChoices}
-                  value={profession}
-                  onChange={setProfession}
-                  chipStyle={styles.chip}
-                  chipActiveStyle={styles.chipActive}
-                  textStyle={styles.chipText}
-                  textActiveStyle={styles.chipTextActive}
-                  activeOpacity={0.8}
-                />
+                <View style={styles.chipRow}>
+                  {professionChoices.map((p) => {
+                    const active = professions.includes(p);
+                    return (
+                      <TouchableOpacity
+                        key={p}
+                        onPress={() => toggleProfession(p)}
+                        style={[styles.chip, active && styles.chipActive]}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          style={[
+                            styles.chipText,
+                            active && styles.chipTextActive,
+                          ]}
+                        >
+                          {p}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
               <Field
                 label="שנות ניסיון"
@@ -314,12 +351,9 @@ const SignUpScreen: React.FC<Props> = ({
                 placeholder="לוחות חשמל, תשתיות, חשמל ביתי"
                 icon="construct-outline"
               />
-              <Field
-                label="תעודות והסמכות (מופרד בפסיקים)"
+              <CertificationsField
                 value={certifications}
                 onChange={setCertifications}
-                placeholder="חשמלאי מוסמך, תעודת בטיחות"
-                icon="ribbon-outline"
               />
             </Section>
 
@@ -404,18 +438,30 @@ const SignUpScreen: React.FC<Props> = ({
             />
             <View style={styles.inputGroup}>
               <View style={styles.labelRow}>
-                <Text style={styles.label}>אזור פעילות</Text>
+                <Text style={styles.label}>אזורי פעילות (ניתן לבחור כמה)</Text>
               </View>
-              <HorizontalChipPicker
-                options={AREAS_ISRAEL}
-                value={areaOfOperation}
-                onChange={setAreaOfOperation}
-                chipStyle={styles.chip}
-                chipActiveStyle={styles.chipActive}
-                textStyle={styles.chipText}
-                textActiveStyle={styles.chipTextActive}
-                activeOpacity={0.8}
-              />
+              <View style={styles.chipRow}>
+                {AREAS_ISRAEL.map((a) => {
+                  const active = areasOfOperation.includes(a);
+                  return (
+                    <TouchableOpacity
+                      key={a}
+                      onPress={() => toggleAreaOfOperation(a)}
+                      style={[styles.chip, active && styles.chipActive]}
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          active && styles.chipTextActive,
+                        ]}
+                      >
+                        {a}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
 
             <Text style={styles.label}>סוגי פרויקטים</Text>

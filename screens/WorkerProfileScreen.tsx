@@ -28,6 +28,7 @@ import {
 import { isOpenForApplications } from '../services/jobStatusService';
 import { hasActiveAssignment } from '../services/assignmentService';
 import { Contractor, Worker } from '../types';
+import { workerProfessions, normalizeCertifications } from '../utils/normalize';
 
 interface Props {
   workerId: string;
@@ -134,7 +135,7 @@ const WorkerProfileScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>פרופיל עובד</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">פרופיל עובד</Text>
         {isContractor && (
           <TouchableOpacity
             onPress={handleToggleFavorite}
@@ -168,7 +169,8 @@ const WorkerProfileScreen: React.FC<Props> = ({
               <Text style={styles.heroName}>{worker.fullName}</Text>
             </View>
             <Text style={styles.heroProfession}>
-              {worker.profession} · {worker.experienceYears} שנות ניסיון
+              {workerProfessions(worker).join(' · ')} · {worker.experienceYears}{' '}
+              שנות ניסיון
             </Text>
             <View style={styles.heroBadges}>
               <StatusBadge
@@ -203,7 +205,10 @@ const WorkerProfileScreen: React.FC<Props> = ({
         {/* Profession info */}
         <Section title="פרטים מקצועיים">
           <FieldRow label="תחום" value={worker.professionCategory} />
-          <FieldRow label="מקצוע" value={worker.profession} />
+          <FieldRow
+            label={workerProfessions(worker).length > 1 ? 'מקצועות' : 'מקצוע'}
+            value={workerProfessions(worker).join(', ')}
+          />
           <FieldRow
             label="שנות ניסיון"
             value={`${worker.experienceYears} שנים`}
@@ -231,11 +236,23 @@ const WorkerProfileScreen: React.FC<Props> = ({
         )}
 
         {/* Certifications */}
-        {worker.certifications.length > 0 && (
+        {normalizeCertifications(worker.certifications).length > 0 && (
           <Section title="הסמכות ותעודות">
-            {worker.certifications.map((c) => (
-              <View key={c} style={styles.certRow}>
-                <Text style={styles.certText}>{c}</Text>
+            {normalizeCertifications(worker.certifications).map((c, i) => (
+              <View key={c.id ?? `${c.name}-${i}`} style={styles.certRow}>
+                {c.document ? (
+                  <View style={styles.certDocTag}>
+                    <Ionicons
+                      name="document-attach-outline"
+                      size={12}
+                      color={Colors.primary}
+                    />
+                    <Text style={styles.certDocText}>מסמך מצורף</Text>
+                  </View>
+                ) : (
+                  <View />
+                )}
+                <Text style={styles.certText}>{c.name}</Text>
                 <Ionicons
                   name="ribbon-outline"
                   size={18}
@@ -650,6 +667,21 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     textAlign: 'right',
     flex: 1,
+  },
+  certDocTag: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: Colors.primaryFaint,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.sm,
+  },
+  certDocText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
   },
 
   invRow: {

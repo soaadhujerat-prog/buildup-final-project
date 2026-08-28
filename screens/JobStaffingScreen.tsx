@@ -101,7 +101,7 @@ const JobStaffingScreen: React.FC<Props> = ({
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ניהול שיבוצים</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">ניהול שיבוצים</Text>
       </View>
 
       <FlatList

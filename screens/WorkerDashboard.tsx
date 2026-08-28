@@ -22,6 +22,7 @@ import {
   INVITATION_STATUS_TONE,
 } from '../utils/helpers';
 import { Worker, ApplicationStatus } from '../types';
+import { workerHasProfession, workerPrimaryProfession } from '../utils/normalize';
 
 interface Props {
   onOpenProProfile: () => void;
@@ -112,7 +113,7 @@ const WorkerDashboard: React.FC<Props> = ({
       .filter((j) => j.status === 'open')
       .filter((j) => {
         const sameCategory = j.professionCategory === me.professionCategory;
-        const sameProfession = j.profession === me.profession;
+        const sameProfession = workerHasProfession(me, j.profession);
         const inMyAreas =
           me.preferredAreas.some((a) => a) &&
           (j.city === me.city || me.preferredAreas.length > 0);
@@ -175,7 +176,7 @@ const WorkerDashboard: React.FC<Props> = ({
             <View style={{ flex: 1 }}>
               <Text style={styles.hello}>שלום, {me.fullName}</Text>
               <Text style={styles.role}>
-                {me.profession} · {me.experienceYears} שנות ניסיון
+                {workerPrimaryProfession(me)} · {me.experienceYears} שנות ניסיון
               </Text>
             </View>
           </View>

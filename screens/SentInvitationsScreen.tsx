@@ -98,7 +98,7 @@ const SentInvitationsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>הזמנות שנשלחו</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">הזמנות שנשלחו</Text>
       </View>
 
       <ScrollView
@@ -358,8 +358,11 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
 
+  // RTL horizontal filter row — mirrored ScrollView keeps the first chip
+  // ("הכל") flush at the right edge with no initial scroll; each chip is
+  // un-mirrored so its text reads normally. See WorkerInvitationsScreen.
   chipRow: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     gap: FC.gap,
@@ -374,6 +377,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    transform: [{ scaleX: -1 }],
   },
   chipText: {
     fontSize: FontSize.sm,
@@ -391,6 +395,7 @@ const styles = StyleSheet.create({
   filterScroll: {
     flexGrow: 0,
     flexShrink: 0,
+    transform: [{ scaleX: -1 }],
   },
 
   list: {

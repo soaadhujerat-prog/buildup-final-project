@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -31,6 +31,7 @@ import {
   Worker,
   Contractor,
 } from '../types';
+import { useRememberedScroll } from '../utils/scrollMemory';
 
 interface Props {
   onBack: () => void;
@@ -58,6 +59,11 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
     isJobFullyStaffed,
   } = useApp();
   const me = currentUser as Contractor | undefined;
+
+  const listRef = useRef<FlatList>(null);
+  const { onScroll, scrollEventThrottle, restoreOnce } = useRememberedScroll(
+    'contractor/applications-received'
+  );
 
   const capacityAlert = () =>
     Alert.alert('כל המקומות במשרה כבר אוישו.');
@@ -126,7 +132,7 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>בקשות שהתקבלו</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">בקשות שהתקבלו</Text>
       </View>
 
       <ScrollView
@@ -180,10 +186,16 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           style={styles.results}
           data={filtered}
           keyExtractor={(a) => a.id}
           contentContainerStyle={styles.list}
+          onScroll={onScroll}
+          scrollEventThrottle={scrollEventThrottle}
+          onContentSizeChange={() =>
+            restoreOnce((y) => listRef.current?.scrollToOffset({ offset: y, animated: false }))
+          }
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => {
             const worker = getUserById(item.workerId) as Worker | undefined;
@@ -352,11 +364,14 @@ const ApplicationRow: React.FC<{
         />
       </TouchableOpacity>
 
-      {app.message && (
-        <Text style={styles.message} numberOfLines={2}>
-          {app.message}
-        </Text>
-      )}
+      {app.message?.trim() ? (
+        <View style={styles.workerMessage}>
+          <Text style={styles.workerMessageLabel}>הודעת העובד</Text>
+          <Text style={styles.workerMessageText} numberOfLines={3}>
+            {app.message.trim()}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.timeline}>
         {applicationTimeline(app).map((line) => (
@@ -433,8 +448,11 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
 
+  // RTL horizontal filter row — mirrored ScrollView keeps the first chip
+  // ("הכל") flush at the right edge with no initial scroll; each chip is
+  // un-mirrored so its text reads normally. See WorkerInvitationsScreen.
   chipRow: {
-    flexDirection: 'row-reverse',
+    flexDirection: 'row',
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     gap: FC.gap,
@@ -449,6 +467,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    transform: [{ scaleX: -1 }],
   },
   chipText: {
     fontSize: FontSize.sm,
@@ -466,6 +485,7 @@ const styles = StyleSheet.create({
   filterScroll: {
     flexGrow: 0,
     flexShrink: 0,
+    transform: [{ scaleX: -1 }],
   },
 
   list: {
@@ -539,6 +559,26 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
     fontStyle: 'italic',
+  },
+  workerMessage: {
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radius.sm,
+    padding: 8,
+    gap: 2,
+  },
+  workerMessageLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  workerMessageText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 5,
   },
   timeline: {
     width: '100%',

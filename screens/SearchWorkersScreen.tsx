@@ -206,7 +206,7 @@ const SearchWorkersScreen: React.FC<Props> = ({
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>חיפוש עובדים</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">חיפוש עובדים</Text>
         <Text style={styles.headerSubtitle}>מצא את העובדים המתאימים לפרויקט שלך</Text>
       </View>
 

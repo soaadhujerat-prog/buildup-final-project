@@ -88,7 +88,7 @@ const MyAssignmentsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>השיבוצים שלי</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">השיבוצים שלי</Text>
       </View>
 
       {assignments.length === 0 ? (

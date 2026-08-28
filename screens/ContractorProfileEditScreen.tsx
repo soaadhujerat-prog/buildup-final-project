@@ -20,17 +20,17 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import ChipInput from '../components/ChipInput';
 import CityPickerField from '../components/CityPickerField';
-import HorizontalChipPicker from '../components/HorizontalChipPicker';
 import ContractorAvatar from '../components/ContractorAvatar';
 import { AREAS_ISRAEL } from '../data/mockData';
 import { Contractor } from '../types';
+import { isValidIsraeliPhone, normalizePhone } from '../utils/helpers';
+import { contractorAreas } from '../utils/normalize';
 
 interface Props {
   onBack: () => void;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_RE = /^0\d{8,9}$/;
 
 const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const insets = useSafeAreaInsets();
@@ -45,9 +45,13 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     me?.contractorRegistrationNumber ?? ''
   );
   const [city, setCity] = useState(me?.city ?? 'תל אביב');
-  const [areaOfOperation, setAreaOfOperation] = useState(
-    me?.areaOfOperation ?? AREAS_ISRAEL[0]
+  const [areasOfOperation, setAreasOfOperation] = useState<string[]>(
+    me ? contractorAreas(me) : []
   );
+  const toggleArea = (a: string) =>
+    setAreasOfOperation((prev) =>
+      prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]
+    );
   const [projectTypes, setProjectTypes] = useState<string[]>(
     me?.projectTypes ?? []
   );
@@ -142,7 +146,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     if (submitting) return;
     if (!fullName.trim()) return Alert.alert('שגיאה', 'שם מלא חובה');
     if (!companyName.trim()) return Alert.alert('שגיאה', 'שם החברה חובה');
-    if (!PHONE_RE.test(phone.trim()))
+    if (!isValidIsraeliPhone(phone))
       return Alert.alert('שגיאה', 'מספר טלפון לא תקין');
     if (!EMAIL_RE.test(email.trim()))
       return Alert.alert('שגיאה', 'כתובת אימייל לא תקינה');
@@ -150,6 +154,8 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
       return Alert.alert('שגיאה', 'מספר רישום קבלנים חובה');
     if (!licenseDetails.trim())
       return Alert.alert('שגיאה', 'פרטי רישיון חובה');
+    if (areasOfOperation.length === 0)
+      return Alert.alert('שגיאה', 'יש לבחור לפחות אזור פעילות אחד');
     if (projectTypes.length === 0)
       return Alert.alert('שגיאה', 'יש להוסיף לפחות סוג פרויקט אחד');
 
@@ -158,11 +164,12 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
       updateContractorProfile(me.id, {
         fullName: fullName.trim(),
         companyName: companyName.trim(),
-        phone: phone.trim(),
+        phone: normalizePhone(phone),
         email: email.trim(),
         contractorRegistrationNumber: regNumber.trim(),
         city,
-        areaOfOperation,
+        areasOfOperation,
+        areaOfOperation: areasOfOperation[0],
         projectTypes,
         licenseDetails: licenseDetails.trim(),
         bio: bio.trim(),
@@ -191,7 +198,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>עריכת פרופיל</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">עריכת פרופיל</Text>
       </View>
 
       <ScrollView
@@ -262,17 +269,30 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
           />
           <View style={styles.inputGroup}>
             <View style={styles.labelRow}>
-              <Text style={styles.label}>אזור פעילות</Text>
+              <Text style={styles.label}>אזורי פעילות (ניתן לבחור כמה)</Text>
             </View>
-            <HorizontalChipPicker
-              options={AREAS_ISRAEL}
-              value={areaOfOperation}
-              onChange={setAreaOfOperation}
-              chipStyle={styles.chip}
-              chipActiveStyle={styles.chipActive}
-              textStyle={styles.chipText}
-              textActiveStyle={styles.chipTextActive}
-            />
+            <View style={styles.chipRow}>
+              {AREAS_ISRAEL.map((a) => {
+                const active = areasOfOperation.includes(a);
+                return (
+                  <TouchableOpacity
+                    key={a}
+                    onPress={() => toggleArea(a)}
+                    style={[styles.chip, active && styles.chipActive]}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        active && styles.chipTextActive,
+                      ]}
+                    >
+                      {a}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
           <ChipInput
             label="סוגי פרויקטים"
@@ -587,7 +607,7 @@ const styles = StyleSheet.create({
   },
   textarea: { minHeight: 110, textAlignVertical: 'top' },
 
-  chipRow: { flexDirection: 'row-reverse', gap: 8 },
+  chipRow: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,

@@ -48,6 +48,9 @@ const Header: React.FC<HeaderProps> = ({
               onPress={onBack}
               style={styles.backBtn}
               activeOpacity={0.7}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel="חזרה"
             >
               <Ionicons
                 name="chevron-forward"
@@ -131,7 +134,7 @@ const styles = StyleSheet.create({
   },
 
   backSide: {
-    width: 40,
+    width: 44,
     alignItems: 'flex-end',
   },
 
@@ -142,16 +145,23 @@ const styles = StyleSheet.create({
   },
 
   actionSide: {
-    width: 40,
+    width: 44,
     alignItems: 'flex-start',
   },
 
+  // >= 44x44 touch target (was padding:4 → ~32px, easy to miss).
   backBtn: {
-    padding: 4,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   rightBtn: {
-    padding: 4,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
     position: 'relative',
   },
 

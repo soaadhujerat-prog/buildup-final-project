@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, FontSize } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { clearAllScrollMemory } from '../utils/scrollMemory';
 import {
   NotificationType,
 } from '../types';
@@ -271,6 +272,7 @@ const AppNavigator: React.FC = () => {
   );
 
   const handleLogout = useCallback(() => {
+    clearAllScrollMemory();
     logout();
     goWelcome();
   }, [logout, goWelcome]);

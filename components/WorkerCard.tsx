@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Worker } from '../types';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import { workerProfessions } from '../utils/normalize';
 import StatusBadge from './StatusBadge';
 import WorkerAvatar from './WorkerAvatar';
 
@@ -39,7 +40,7 @@ const WorkerCard: React.FC<WorkerCardProps> = ({
                 {worker.fullName}
               </Text>
               <Text style={styles.profession} numberOfLines={1}>
-                {worker.profession}
+                {workerProfessions(worker).join(' · ')}
               </Text>
             </View>
           </View>

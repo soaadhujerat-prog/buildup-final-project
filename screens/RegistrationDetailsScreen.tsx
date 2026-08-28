@@ -23,6 +23,11 @@ import {
   ContractorRegistrationData,
   WorkerRegistrationData,
 } from '../types';
+import {
+  workerProfessions,
+  contractorAreas,
+  certificationNames,
+} from '../utils/normalize';
 
 interface Props {
   registrationId: string;
@@ -127,7 +132,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>פרטי בקשת רישום</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">פרטי בקשת רישום</Text>
       </View>
 
       <ScrollView
@@ -252,7 +257,10 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         {wd && (
           <>
             <Section title="פרופיל מקצועי">
-              <FieldRow label="מקצוע" value={wd.profession} />
+              <FieldRow
+                label={workerProfessions(wd).length > 1 ? 'מקצועות' : 'מקצוע'}
+                value={workerProfessions(wd).join(', ')}
+              />
               <FieldRow label="תחום" value={wd.professionCategory} />
               <FieldRow
                 label="שנות ניסיון"
@@ -265,8 +273,8 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
               <FieldRow
                 label="תעודות והסמכות"
                 value={
-                  wd.certifications.length
-                    ? wd.certifications.join(', ')
+                  certificationNames(wd.certifications).length
+                    ? certificationNames(wd.certifications).join(', ')
                     : '—'
                 }
               />
@@ -297,7 +305,10 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
               mono
               ltr
             />
-            <FieldRow label="אזור פעילות" value={cd.areaOfOperation} />
+            <FieldRow
+              label="אזורי פעילות"
+              value={contractorAreas(cd).join(', ') || '—'}
+            />
             <FieldRow
               label="סוגי פרויקטים"
               value={cd.projectTypes.join(', ')}
