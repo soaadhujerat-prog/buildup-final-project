@@ -1,104 +1,201 @@
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  FlatList,
-  TextInput,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  Colors,
-  Spacing,
-  Radius,
-  FontSize,
-  Shadow,
-  FilterChip as FC,
-} from '../theme/colors';
+import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import StatusBadge from '../components/StatusBadge';
-import {
-  CITIES_ISRAEL,
-  PROFESSION_CATEGORIES,
-} from '../data/mockData';
-import { Contractor, JobPost, Worker } from '../types';
+import JobCard from '../components/JobCard';
+import { isOpenForApplications } from '../services/jobStatusService';
+import JobFilterBottomSheet, {
+  JobFilters,
+  DEFAULT_JOB_FILTERS,
+  filterJobs,
+  isJobFiltersActive,
+} from '../components/JobFilterBottomSheet';
+import JobSortBottomSheet, {
+  JobSortOption,
+  sortJobs,
+  getJobSortLabel,
+} from '../components/JobSortBottomSheet';
+import { Contractor, Worker } from '../types';
 
 interface Props {
   onBack: () => void;
   onOpenJobDetails: (jobId: string) => void;
+  onOpenFavoriteContractors?: () => void;
+}
+
+interface Chip {
+  key: string;
+  label: string;
+  onRemove: () => void;
+  variant?: 'sort';
 }
 
 const AvailableJobsScreen: React.FC<Props> = ({
   onBack,
   onOpenJobDetails,
+  onOpenFavoriteContractors,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, jobs, getUserById } = useApp();
+  const {
+    currentUser,
+    jobs,
+    getUserById,
+    getFavoriteContractorIds,
+    jobSearchState,
+    updateJobSearchState,
+  } = useApp();
   const me = currentUser as Worker | undefined;
+  const workerId = me?.role === 'worker' ? me.id : null;
 
-  const [search, setSearch] = useState('');
-  const [profCategory, setProfCategory] = useState(
-    me?.professionCategory ?? 'כל המקצועות'
+  // Search/filter/sort live in AppContext (jobSearchState), not local
+  // useState — this screen unmounts whenever a drilldown (e.g. JobDetails)
+  // is pushed on top of it, so local state would reset on every "back".
+  // Opening state is still filter-free the first time: no profession/city
+  // preselected from the worker's own profile, no chip active until the
+  // worker actually picks one (see DEFAULT_JOB_SEARCH_STATE).
+  const { query: search, filters, sort } = jobSearchState;
+  const setSearch = (query: string) => updateJobSearchState({ query });
+  const setFilters = (update: JobFilters | ((prev: JobFilters) => JobFilters)) => {
+    const next = typeof update === 'function' ? update(filters) : update;
+    updateJobSearchState({ filters: next });
+  };
+  const setSort = (next: JobSortOption) => updateJobSearchState({ sort: next });
+
+  const [filterSheetVisible, setFilterSheetVisible] = useState(false);
+  const [sortSheetVisible, setSortSheetVisible] = useState(false);
+
+  const favoriteContractorIds = useMemo(
+    () => (workerId ? getFavoriteContractorIds(workerId) : []),
+    [workerId, getFavoriteContractorIds]
   );
-  const [city, setCity] = useState('כל הערים');
-  const [urgentOnly, setUrgentOnly] = useState(false);
 
-  const hasActiveFilters =
-    profCategory !== 'כל המקצועות' ||
-    city !== 'כל הערים' ||
-    urgentOnly ||
-    search.trim().length > 0;
+  // Base pool = registration status source of truth (acceptingApplications),
+  // never job.status — those are two separate concepts (jobStatusService).
+  const openJobs = useMemo(() => jobs.filter(isOpenForApplications), [jobs]);
 
-  const clearFilters = () => {
-    setProfCategory('כל המקצועות');
-    setCity('כל הערים');
-    setUrgentOnly(false);
+  const contractorLabelById = useMemo(() => {
+    const map: Record<string, string> = {};
+    openJobs.forEach((j) => {
+      if (map[j.contractorId] !== undefined) return;
+      const c = getUserById(j.contractorId) as Contractor | undefined;
+      map[j.contractorId] = c?.companyName ?? c?.fullName ?? '';
+    });
+    return map;
+  }, [openJobs, getUserById]);
+
+  const filtered = useMemo(
+    () => filterJobs(openJobs, search, filters, contractorLabelById),
+    [openJobs, search, filters, contractorLabelById]
+  );
+  const filteredWithFavContractors = useMemo(
+    () =>
+      filters.favoriteContractorsOnly
+        ? filtered.filter((j) => favoriteContractorIds.includes(j.contractorId))
+        : filtered,
+    [filtered, filters.favoriteContractorsOnly, favoriteContractorIds]
+  );
+  const results = useMemo(
+    () => sortJobs(filteredWithFavContractors, sort),
+    [filteredWithFavContractors, sort]
+  );
+
+  const filtersActive = isJobFiltersActive(filters);
+
+  const clearEverything = () => {
+    setFilters(DEFAULT_JOB_FILTERS);
     setSearch('');
   };
 
-  const filtered = useMemo(() => {
-    return jobs
-      .filter((j) => j.status === 'open')
-      .filter((j) => {
-        if (
-          profCategory !== 'כל המקצועות' &&
-          j.professionCategory !== profCategory
-        )
-          return false;
-        if (city !== 'כל הערים' && j.city !== city) return false;
-        if (urgentOnly && !j.urgent) return false;
-        if (search.trim()) {
-          const q = search.trim().toLowerCase();
-          const fields = [
-            j.title,
-            j.description,
-            j.profession,
-            j.city,
-            j.requiredCertifications.join(' '),
-          ]
-            .join(' ')
-            .toLowerCase();
-          if (!fields.includes(q)) return false;
-        }
-        return true;
-      })
-      .sort(
-        (a, b) =>
-          new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
-      );
-  }, [jobs, profCategory, city, urgentOnly, search]);
+  const chips: Chip[] = useMemo(() => {
+    const list: Chip[] = [];
+
+    if (filters.favoriteContractorsOnly) {
+      list.push({
+        key: 'favoriteContractors',
+        label: 'קבלנים מועדפים',
+        onRemove: () => setFilters((f) => ({ ...f, favoriteContractorsOnly: false })),
+      });
+    }
+
+    if (filters.profession) {
+      list.push({
+        key: 'profession',
+        label: filters.profession,
+        onRemove: () =>
+          setFilters((f) => ({ ...f, professionCategory: '', profession: '' })),
+      });
+    } else if (filters.professionCategory) {
+      list.push({
+        key: 'professionCategory',
+        label: filters.professionCategory,
+        onRemove: () => setFilters((f) => ({ ...f, professionCategory: '' })),
+      });
+    }
+
+    if (filters.city) {
+      list.push({
+        key: 'city',
+        label: filters.city,
+        onRemove: () => setFilters((f) => ({ ...f, city: '' })),
+      });
+    }
+
+    if (filters.urgentOnly) {
+      list.push({
+        key: 'urgent',
+        label: 'דחוף',
+        onRemove: () => setFilters((f) => ({ ...f, urgentOnly: false })),
+      });
+    }
+
+    if (filters.minRate.trim() || filters.maxRate.trim()) {
+      let label: string;
+      if (filters.minRate.trim() && filters.maxRate.trim()) {
+        label = `${filters.minRate}-${filters.maxRate}₪`;
+      } else if (filters.minRate.trim()) {
+        label = `מ-${filters.minRate}₪`;
+      } else {
+        label = `עד ${filters.maxRate}₪`;
+      }
+      list.push({
+        key: 'rate',
+        label,
+        onRemove: () => setFilters((f) => ({ ...f, minRate: '', maxRate: '' })),
+      });
+    }
+
+    return list;
+  }, [filters]);
+
+  const sortLabel = getJobSortLabel(sort);
+  const activeChips: Chip[] = useMemo(() => {
+    if (!sortLabel) return chips;
+    return [
+      ...chips,
+      {
+        key: 'sort',
+        label: `מיון: ${sortLabel}`,
+        onRemove: () => setSort('default'),
+        variant: 'sort' as const,
+      },
+    ];
+  }, [chips, sortLabel]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+      <View style={styles.headerArea}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={styles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>חיפוש עבודות</Text>
+        <Text style={styles.headerSubtitle}>מצא את המשרה שמתאימה לך</Text>
       </View>
 
       <View style={styles.searchBox}>
@@ -107,207 +204,156 @@ const AvailableJobsScreen: React.FC<Props> = ({
           style={styles.searchInput}
           value={search}
           onChangeText={setSearch}
-          placeholder="חפש לפי כותרת, מקצוע, מיקום..."
+          placeholder="חפש לפי כותרת, מקצוע, חברה או מיקום..."
           placeholderTextColor={Colors.textMuted}
+          returnKeyType="search"
         />
+        {search.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setSearch('')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="נקה חיפוש"
+          >
+            <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+          </TouchableOpacity>
+        )}
       </View>
 
-      <ScrollView
-        horizontal
-        style={styles.filterScroll}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipRow}
-      >
-        {PROFESSION_CATEGORIES.map((c) => (
-          <Chip
-            key={c}
-            label={c}
-            active={c === profCategory}
-            onPress={() => setProfCategory(c)}
-          />
-        ))}
-      </ScrollView>
-
-      <ScrollView
-        horizontal
-        style={styles.filterScroll}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={[styles.chipRow, { paddingTop: 0 }]}
-      >
-        {CITIES_ISRAEL.map((c) => (
-          <Chip
-            key={c}
-            label={c}
-            active={c === city}
-            onPress={() => setCity(c)}
-          />
-        ))}
-      </ScrollView>
-
-      <View style={styles.toggleRow}>
+      <View style={styles.actionRow}>
         <TouchableOpacity
-          style={styles.toggleChip}
-          onPress={() => setUrgentOnly(!urgentOnly)}
+          style={[styles.actionBtn, filtersActive && styles.actionBtnActive]}
+          onPress={() => setFilterSheetVisible(true)}
           activeOpacity={0.85}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Ionicons
-            name={urgentOnly ? 'checkbox' : 'square-outline'}
+            name="options-outline"
             size={18}
-            color={urgentOnly ? Colors.danger : Colors.textMuted}
+            color={filtersActive ? Colors.white : Colors.text}
           />
-          <Text
-            style={[
-              styles.toggleText,
-              urgentOnly && { color: Colors.danger },
-            ]}
-          >
-            רק משרות דחופות
+          <Text style={[styles.actionBtnText, filtersActive && styles.actionBtnTextActive]}>
+            סינון
           </Text>
-        </TouchableOpacity>
-        <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 10 }}>
-          {hasActiveFilters && (
-            <TouchableOpacity
-              onPress={clearFilters}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={styles.clearFiltersText}>נקה סינון</Text>
-            </TouchableOpacity>
+          {filtersActive && (
+            <View style={styles.actionBadge}>
+              <Text style={styles.actionBadgeText}>{chips.length}</Text>
+            </View>
           )}
-          <Text style={styles.resultCount}>{filtered.length} משרות</Text>
-        </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => setSortSheetVisible(true)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="swap-vertical-outline" size={18} color={Colors.text} />
+          <Text style={styles.actionBtnText}>מיון</Text>
+        </TouchableOpacity>
+
+        {onOpenFavoriteContractors && (
+          <TouchableOpacity
+            style={styles.favoritesShortcut}
+            onPress={onOpenFavoriteContractors}
+            activeOpacity={0.85}
+            accessibilityLabel="קבלנים מועדפים"
+          >
+            <Ionicons name="heart-outline" size={20} color={Colors.text} />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {filtered.length === 0 ? (
+      {activeChips.length > 0 && (
+        <View style={styles.chipsWrap}>
+          {activeChips.map((chip) => (
+            <TouchableOpacity
+              key={chip.key}
+              style={[styles.activeChip, chip.variant === 'sort' && styles.sortChip]}
+              onPress={chip.onRemove}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="close"
+                size={14}
+                color={chip.variant === 'sort' ? Colors.secondary : Colors.primaryDark}
+              />
+              <Text
+                style={[styles.activeChipText, chip.variant === 'sort' && styles.sortChipText]}
+              >
+                {chip.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.resultsHeader}>
+        <Text style={styles.resultsSentence}>
+          {'מצאנו עבורך '}
+          <Text style={styles.resultsSentenceStrong}>{`${results.length} משרות`}</Text>
+          {' שמתאימות לחיפוש שלך'}
+        </Text>
+      </View>
+
+      {results.length === 0 ? (
         <View style={styles.emptyWrap}>
-          <Ionicons
-            name="search-outline"
-            size={56}
-            color={Colors.textMuted}
-          />
-          <Text style={styles.emptyTitle}>לא נמצאו משרות</Text>
-          <Text style={styles.emptySub}>נסה להרחיב את הסינון</Text>
+          <Ionicons name="search-outline" size={56} color={Colors.textMuted} />
+          <Text style={styles.emptyTitle}>לא מצאנו משרות שמתאימות לחיפוש</Text>
+          <Text style={styles.emptySub}>טיפ: נסה לשנות או לנקות חלק מהסינונים.</Text>
+          {(filtersActive || search.trim().length > 0) && (
+            <TouchableOpacity
+              onPress={clearEverything}
+              style={styles.emptyCta}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.emptyCtaText}>נקה סינון</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <FlatList
           style={styles.results}
-          data={filtered}
+          data={results}
           keyExtractor={(j) => j.id}
           contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => (
-            <View style={{ height: Spacing.sm }} />
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
+          renderItem={({ item }) => (
+            <JobCard
+              job={item}
+              contractorName={contractorLabelById[item.contractorId] || '—'}
+              onPress={() => onOpenJobDetails(item.id)}
+            />
           )}
-          renderItem={({ item }) => {
-            const contractor = getUserById(item.contractorId) as
-              | Contractor
-              | undefined;
-            return (
-              <JobCard
-                job={item}
-                contractorName={
-                  contractor?.companyName ?? contractor?.fullName ?? '—'
-                }
-                onPress={() => onOpenJobDetails(item.id)}
-              />
-            );
-          }}
         />
       )}
+
+      <JobFilterBottomSheet
+        visible={filterSheetVisible}
+        onClose={() => setFilterSheetVisible(false)}
+        jobs={openJobs}
+        searchQuery={search}
+        filters={filters}
+        onApply={setFilters}
+        contractorLabelById={contractorLabelById}
+        favoriteContractorIds={favoriteContractorIds}
+      />
+
+      <JobSortBottomSheet
+        visible={sortSheetVisible}
+        onClose={() => setSortSheetVisible(false)}
+        value={sort}
+        onChange={setSort}
+      />
     </View>
   );
 };
 
-const Chip: React.FC<{
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}> = ({ label, active, onPress }) => (
-  <TouchableOpacity
-    onPress={onPress}
-    style={[styles.chip, active && styles.chipActive]}
-    activeOpacity={0.85}
-  >
-    <Text style={[styles.chipText, active && styles.chipTextActive]}>
-      {label}
-    </Text>
-  </TouchableOpacity>
-);
-
-const JobCard: React.FC<{
-  job: JobPost;
-  contractorName: string;
-  onPress: () => void;
-}> = ({ job, contractorName, onPress }) => (
-  <TouchableOpacity
-    style={styles.card}
-    onPress={onPress}
-    activeOpacity={0.85}
-  >
-    <View style={styles.cardHead}>
-      {job.urgent && <StatusBadge label="דחוף" tone="danger" small />}
-      <Text style={styles.title} numberOfLines={1}>
-        {job.title}
-      </Text>
-    </View>
-
-    <Text style={styles.contractor} numberOfLines={1}>
-      <Ionicons name="business-outline" size={12} color={Colors.textMuted} />{' '}
-      {contractorName}
-    </Text>
-
-    <Text style={styles.desc} numberOfLines={2}>
-      {job.description}
-    </Text>
-
-    <View style={styles.metaRow}>
-      <View style={styles.metaItem}>
-        <Ionicons
-          name="briefcase-outline"
-          size={14}
-          color={Colors.textSecondary}
-        />
-        <Text style={styles.metaText}>{job.profession}</Text>
-      </View>
-      <View style={styles.metaItem}>
-        <Ionicons
-          name="location-outline"
-          size={14}
-          color={Colors.textSecondary}
-        />
-        <Text style={styles.metaText}>{job.city}</Text>
-      </View>
-      <View style={styles.metaItem}>
-        <Ionicons
-          name="time-outline"
-          size={14}
-          color={Colors.textSecondary}
-        />
-        <Text style={styles.metaText}>{job.duration}</Text>
-      </View>
-    </View>
-
-    <View style={styles.cardFooter}>
-      <Text style={styles.posted}>
-        פורסם {new Date(job.postedAt).toLocaleDateString('he-IL')}
-      </Text>
-      <View style={styles.rateBox}>
-        <Text style={styles.rateValue}>{job.dailyRate}₪</Text>
-        <Text style={styles.rateLabel}>ליום</Text>
-      </View>
-    </View>
-  </TouchableOpacity>
-);
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.screenTint },
 
-  headerBar: {
+  headerArea: {
     position: 'relative',
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
   backBtn: {
     position: 'absolute',
@@ -322,13 +368,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     writingDirection: 'rtl',
   },
+  headerSubtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginTop: 3,
+  },
 
   searchBox: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     backgroundColor: Colors.white,
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
+    marginTop: Spacing.sm,
     borderRadius: Radius.md,
     paddingHorizontal: 12,
     gap: 8,
@@ -344,158 +397,111 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
 
-  chipRow: {
+  actionRow: {
     flexDirection: 'row-reverse',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.sm,
-    gap: 8,
+    marginTop: Spacing.md,
   },
-  chip: {
-    height: FC.height,
-    paddingHorizontal: FC.paddingHorizontal,
-    justifyContent: 'center',
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
     alignItems: 'center',
-    borderRadius: FC.borderRadius,
-    borderWidth: FC.borderWidth,
-    borderColor: Colors.border,
+    justifyContent: 'center',
+    gap: 6,
     backgroundColor: Colors.white,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingVertical: 12,
   },
-  chipActive: {
+  actionBtnActive: {
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
   },
-  chipText: {
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-    writingDirection: 'rtl',
-  },
-  chipTextActive: { color: Colors.white },
-
-  toggleRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-  },
-  toggleChip: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-  },
-  toggleText: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-    writingDirection: 'rtl',
-  },
-  resultCount: {
-    fontSize: FontSize.sm,
-    color: Colors.textMuted,
-    fontWeight: '600',
-  },
-  clearFiltersText: {
-    fontSize: FontSize.sm,
-    color: Colors.primary,
-    fontWeight: '700',
-    writingDirection: 'rtl',
-  },
-
-  results: {
-    flex: 1,
-  },
-
-  filterScroll: {
-    flexGrow: 0,
-    flexShrink: 0,
-  },
-
-  list: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-    paddingBottom: 40,
-  },
-
-  card: {
-    backgroundColor: Colors.white,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    gap: 6,
-    ...Shadow.medium,
-  },
-  cardHead: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 8,
-  },
-  title: {
-    flex: 1,
+  actionBtnText: {
     fontSize: FontSize.md,
-    fontWeight: '800',
+    fontWeight: '700',
     color: Colors.text,
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
-  contractor: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-    textAlign: 'right',
-    writingDirection: 'rtl',
+  actionBtnTextActive: { color: Colors.white },
+  actionBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  desc: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    lineHeight: 20,
+  actionBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: Colors.primary,
   },
-  metaRow: {
+  favoritesShortcut: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.white,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+  },
+
+  chipsWrap: {
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
-    gap: Spacing.md,
-    marginTop: 4,
+    gap: 8,
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
   },
-  metaItem: {
+  activeChip: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 4,
-  },
-  metaText: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
-  cardFooter: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 6,
-    paddingTop: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
-  },
-  posted: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-  },
-  rateBox: {
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
     backgroundColor: Colors.primaryFaint,
-    borderRadius: Radius.sm,
+    borderWidth: 1,
+    borderColor: Colors.primaryLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
-  rateValue: {
+  activeChipText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+    writingDirection: 'rtl',
+  },
+  sortChip: {
+    backgroundColor: '#DBEAFE',
+    borderColor: '#BFDBFE',
+  },
+  sortChipText: { color: Colors.secondary },
+
+  resultsHeader: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.sm,
+  },
+  resultsSentence: {
     fontSize: FontSize.md,
-    fontWeight: '800',
-    color: Colors.primary,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.md + 6,
   },
-  rateLabel: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    fontWeight: '600',
+  resultsSentenceStrong: {
+    fontWeight: '800',
+    color: Colors.text,
+  },
+
+  results: { flex: 1 },
+  list: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: 0,
+    paddingBottom: 40,
   },
 
   emptyWrap: {
@@ -509,12 +515,27 @@ const styles = StyleSheet.create({
     fontSize: FontSize.lg,
     fontWeight: '800',
     color: Colors.text,
+    textAlign: 'center',
     writingDirection: 'rtl',
   },
   emptySub: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
     textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  emptyCta: {
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  emptyCtaText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
     writingDirection: 'rtl',
   },
 });

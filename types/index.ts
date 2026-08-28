@@ -176,16 +176,33 @@ export interface JobPost {
   professionCategory: ProfessionCategory;
   city: string;
   address: string;
+  // Structured as discrete city/address fields on purpose (not one free-text
+  // "location" string) so a future latitude/longitude/placeId (Google
+  // Places) addition can slot in alongside them without reshaping the model.
   startDate: string;
   endDate?: string;
   duration: string;
-  dailyRate: number;
+  /** Two separate, independent rate fields — never a single `rate` +
+   *  `rateType` pair. A job must have at least one of the two; both may be
+   *  set at once (e.g. hourly for short call-outs, daily for the main
+   *  scope). Kept optional (not defaulted to 0) so "not set" is never
+   *  confused with "free". */
+  hourlyRate?: number;
+  dailyRate?: number;
   workersNeeded: number;
   requiredCertifications: string[];
   requirements: string[];
   status: JobStatus;
   urgent: boolean;
   postedAt: string;
+  /** Set only once the job has actually been edited after its original
+   *  posting — undefined means "never edited". postedAt itself never
+   *  changes after creation. */
+  updatedAt?: string;
+  /** Local file URIs for now (picked via expo-image-picker) — a future
+   *  Supabase Storage migration swaps these for storage paths/URLs without
+   *  changing how any screen reads this field. Max 5, enforced in the UI. */
+  worksiteImages?: string[];
   /** When false, workers cannot submit new applications.
    *  Controlled by the contractor from JobDetails. Defaults to true on creation. */
   acceptingApplications: boolean;
@@ -239,6 +256,18 @@ export interface ContractorFavoriteWorker {
   id: string;
   contractorId: string;
   workerId: string;
+  createdAt: string;
+}
+
+/** The mirror relationship: a worker bookmarking a contractor they'd like
+ *  to work with again / follow. Personal to each worker — never a property
+ *  of Contractor (no `contractor.isFavorite`). Shaped to drop straight into
+ *  a future Supabase table: worker_favorite_contractors(worker_id,
+ *  contractor_id, created_at). */
+export interface WorkerFavoriteContractor {
+  id: string;
+  workerId: string;
+  contractorId: string;
   createdAt: string;
 }
 

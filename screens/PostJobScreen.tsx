@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,225 +14,412 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  Colors,
-  Spacing,
-  Radius,
-  FontSize,
-  Shadow,
-  FilterChip as FC,
-} from '../theme/colors';
+import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import DatePickerField from '../components/DatePickerField';
-import {
-  CITIES_ISRAEL,
-  PROFESSIONS_BY_CATEGORY,
-  PROFESSION_CATEGORIES,
-} from '../data/mockData';
+import CityPickerField from '../components/CityPickerField';
+import ProfessionSelectorModal from '../components/ProfessionSelectorModal';
+import WorksiteImagesField from '../components/WorksiteImagesField';
+import { formatRatePerUnit } from '../utils/helpers';
 import { Contractor, ProfessionCategory } from '../types';
 
 interface Props {
   onBack: () => void;
+  /** Create mode success. */
   onPosted: (jobId: string) => void;
+  /** Edit mode success. Falls back to onBack if not supplied. */
+  onSaved?: (jobId: string) => void;
+  /** Presence of jobId switches the whole screen into edit mode. */
+  jobId?: string;
 }
 
-const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
+interface FormErrors {
+  title?: string;
+  description?: string;
+  profession?: string;
+  city?: string;
+  address?: string;
+  startDate?: string;
+  duration?: string;
+  payment?: string;
+  workersNeeded?: string;
+}
+
+// DD/MM/YYYY (DatePickerField's stored format) → Date, local-safe.
+const parseDDMMYYYY = (value: string): Date | null => {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+  return isNaN(d.getTime()) ? null : d;
+};
+
+const isPastDate = (value: string): boolean => {
+  const d = parseDDMMYYYY(value);
+  if (!d) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() < today.getTime();
+};
+
+const formatPostedAt = (iso: string): string => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
+
+const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, postJob } = useApp();
+  const { currentUser, postJob, updateJob, getJobById } = useApp();
   const me = currentUser as Contractor | undefined;
+  const scrollRef = useRef<ScrollView>(null);
 
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [profCategory, setProfCategory] =
-    useState<ProfessionCategory>('בנייה');
-  const [profession, setProfession] = useState('בנאי');
-  const [city, setCity] = useState(me?.city ?? 'תל אביב');
-  const [address, setAddress] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [duration, setDuration] = useState('');
-  const [dailyRate, setDailyRate] = useState('');
-  const [workersNeeded, setWorkersNeeded] = useState('1');
-  const [requiredCerts, setRequiredCerts] = useState('');
-  const [requirements, setRequirements] = useState('');
-  const [urgent, setUrgent] = useState(false);
+  const isEditMode = !!jobId;
+  const existingJob = jobId ? getJobById(jobId) : undefined;
+  const canEdit = !isEditMode || (!!existingJob && existingJob.contractorId === me?.id);
 
+  const [title, setTitle] = useState(existingJob?.title ?? '');
+  const [description, setDescription] = useState(existingJob?.description ?? '');
+  const [profCategory, setProfCategory] = useState<ProfessionCategory | ''>(
+    existingJob?.professionCategory ?? ''
+  );
+  const [profession, setProfession] = useState(existingJob?.profession ?? '');
+  const [city, setCity] = useState(existingJob?.city ?? '');
+  const [address, setAddress] = useState(existingJob?.address ?? '');
+  const [startDate, setStartDate] = useState(existingJob?.startDate ?? '');
+  const [duration, setDuration] = useState(existingJob?.duration ?? '');
+  const [hourlyRate, setHourlyRate] = useState(
+    existingJob?.hourlyRate ? String(existingJob.hourlyRate) : ''
+  );
+  const [dailyRate, setDailyRate] = useState(
+    existingJob?.dailyRate ? String(existingJob.dailyRate) : ''
+  );
+  const [workersNeeded, setWorkersNeeded] = useState(
+    existingJob ? String(existingJob.workersNeeded) : '1'
+  );
+  const [requiredCerts, setRequiredCerts] = useState(
+    existingJob?.requiredCertifications.join(', ') ?? ''
+  );
+  const [requirements, setRequirements] = useState(
+    existingJob?.requirements.join('\n') ?? ''
+  );
+  const [urgent, setUrgent] = useState(existingJob?.urgent ?? false);
+  const [worksiteImages, setWorksiteImages] = useState<string[]>(
+    existingJob?.worksiteImages ?? []
+  );
+
+  const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  const [professionModalVisible, setProfessionModalVisible] = useState(false);
 
-  const profCategories = useMemo(
-    () => PROFESSION_CATEGORIES.filter((c) => c !== 'כל המקצועות'),
-    []
-  );
-  const cityChoices = useMemo(
-    () => CITIES_ISRAEL.filter((c) => c !== 'כל הערים'),
-    []
-  );
-  const professionChoices = PROFESSIONS_BY_CATEGORY[profCategory] ?? [];
+  // Edit-mode dirty check — a snapshot of everything editable, taken once
+  // from the job as it was loaded. Only used to gate the "unsaved changes"
+  // prompt on Back; never re-computed after mount.
+  const initialSnapshot = useRef(
+    JSON.stringify({
+      title: existingJob?.title ?? '',
+      description: existingJob?.description ?? '',
+      profCategory: existingJob?.professionCategory ?? '',
+      profession: existingJob?.profession ?? '',
+      city: existingJob?.city ?? '',
+      address: existingJob?.address ?? '',
+      startDate: existingJob?.startDate ?? '',
+      duration: existingJob?.duration ?? '',
+      hourlyRate: existingJob?.hourlyRate ? String(existingJob.hourlyRate) : '',
+      dailyRate: existingJob?.dailyRate ? String(existingJob.dailyRate) : '',
+      workersNeeded: existingJob ? String(existingJob.workersNeeded) : '1',
+      requiredCerts: existingJob?.requiredCertifications.join(', ') ?? '',
+      requirements: existingJob?.requirements.join('\n') ?? '',
+      urgent: existingJob?.urgent ?? false,
+      worksiteImages: existingJob?.worksiteImages ?? [],
+    })
+  ).current;
 
-  const validate = (): string | null => {
-    if (!title.trim() || title.trim().length < 4)
-      return 'כותרת המשרה חובה (לפחות 4 תווים)';
-    if (!description.trim() || description.trim().length < 20)
-      return 'תיאור המשרה חובה (לפחות 20 תווים)';
-    if (!profession.trim()) return 'יש לבחור מקצוע';
-    if (!city.trim()) return 'יש לבחור עיר';
-    if (!address.trim()) return 'כתובת המשרה חובה';
-    if (!startDate.trim()) return 'תאריך התחלה חובה';
-    if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(startDate.trim()))
-      return 'תאריך התחלה חייב להיות בפורמט DD/MM/YYYY';
-    if (!duration.trim()) return 'משך הפרויקט חובה';
-    if (!dailyRate || isNaN(Number(dailyRate)) || Number(dailyRate) <= 0)
-      return 'תעריף יומי חייב להיות מספר חיובי';
-    if (
-      !workersNeeded ||
-      isNaN(Number(workersNeeded)) ||
-      Number(workersNeeded) <= 0
-    )
-      return 'מספר העובדים הדרוש חייב להיות מספר חיובי';
-    if (!me) return 'לא ניתן ליצור משרה — אין משתמש מחובר';
-    return null;
+  const isDirty =
+    isEditMode &&
+    JSON.stringify({
+      title,
+      description,
+      profCategory,
+      profession,
+      city,
+      address,
+      startDate,
+      duration,
+      hourlyRate,
+      dailyRate,
+      workersNeeded,
+      requiredCerts,
+      requirements,
+      urgent,
+      worksiteImages,
+    }) !== initialSnapshot;
+
+  const professionLabel = profession || profCategory || '';
+
+  const handleBackPress = () => {
+    if (isDirty) {
+      Alert.alert('יש שינויים שלא נשמרו', 'להמשיך לערוך או לצאת ללא שמירה?', [
+        { text: 'המשך עריכה', style: 'cancel' },
+        { text: 'צא ללא שמירה', style: 'destructive', onPress: onBack },
+      ]);
+      return;
+    }
+    onBack();
+  };
+
+  const validate = (): FormErrors => {
+    const next: FormErrors = {};
+    if (!title.trim() || title.trim().length < 4) {
+      next.title = 'כותרת המשרה חובה (לפחות 4 תווים)';
+    }
+    if (!description.trim() || description.trim().length < 20) {
+      next.description = 'תיאור המשרה חובה (לפחות 20 תווים)';
+    }
+    if (!profCategory || !profession.trim()) {
+      next.profession = 'יש לבחור תחום ומקצוע';
+    }
+    if (!city.trim()) {
+      next.city = 'יש לבחור עיר';
+    }
+    if (!address.trim()) {
+      next.address = 'כתובת מדויקת חובה';
+    }
+    if (!startDate.trim()) {
+      next.startDate = 'תאריך התחלה חובה';
+    } else if (isPastDate(startDate)) {
+      next.startDate = 'תאריך ההתחלה לא יכול להיות בעבר';
+    }
+    if (!duration.trim()) {
+      next.duration = 'משך העבודה המשוער חובה';
+    }
+    const hourlyTrim = hourlyRate.trim();
+    const dailyTrim = dailyRate.trim();
+    if (!hourlyTrim && !dailyTrim) {
+      next.payment = 'יש להזין לפחות תעריף שעתי או תעריף יומי';
+    } else {
+      if (hourlyTrim && (isNaN(Number(hourlyTrim)) || Number(hourlyTrim) <= 0)) {
+        next.payment = 'תעריף שעתי חייב להיות מספר גדול מ-0';
+      }
+      if (dailyTrim && (isNaN(Number(dailyTrim)) || Number(dailyTrim) <= 0)) {
+        next.payment = 'תעריף יומי חייב להיות מספר גדול מ-0';
+      }
+    }
+    if (!workersNeeded.trim() || isNaN(Number(workersNeeded)) || Number(workersNeeded) < 1) {
+      next.workersNeeded = 'מספר העובדים הדרוש חייב להיות 1 ומעלה';
+    }
+    return next;
   };
 
   const handleSubmit = () => {
-    const err = validate();
-    if (err) {
-      Alert.alert('בדוק את הפרטים', err);
+    if (!me) {
+      Alert.alert('שגיאה', 'לא ניתן לפרסם משרה — אין משתמש מחובר');
       return;
     }
+    const foundErrors = validate();
+    setErrors(foundErrors);
+    if (Object.keys(foundErrors).length > 0) {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      return;
+    }
+
+    const payload = {
+      title: title.trim(),
+      description: description.trim(),
+      profession,
+      professionCategory: profCategory as ProfessionCategory,
+      city,
+      address: address.trim(),
+      startDate: startDate.trim(),
+      duration: duration.trim(),
+      hourlyRate: hourlyRate.trim() ? Number(hourlyRate) : undefined,
+      dailyRate: dailyRate.trim() ? Number(dailyRate) : undefined,
+      workersNeeded: Number(workersNeeded),
+      requiredCertifications: requiredCerts
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      requirements: requirements
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      urgent,
+      worksiteImages,
+    };
+
     setSubmitting(true);
     setTimeout(() => {
-      const newJob = postJob({
-        contractorId: me!.id,
-        title: title.trim(),
-        description: description.trim(),
-        profession,
-        professionCategory: profCategory,
-        city,
-        address: address.trim(),
-        startDate: startDate.trim(),
-        duration: duration.trim(),
-        dailyRate: Number(dailyRate),
-        workersNeeded: Number(workersNeeded),
-        requiredCertifications: requiredCerts
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        requirements: requirements
-          .split('\n')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        urgent,
-      });
-      setSubmitting(false);
-      onPosted(newJob.id);
-    }, 700);
+      if (isEditMode && jobId) {
+        // This save is a real content edit — and only here, not for any
+        // technical/operational change — so updatedAt is stamped explicitly.
+        updateJob(jobId, { ...payload, updatedAt: new Date().toISOString() });
+        setSubmitting(false);
+        (onSaved ?? onBack)(jobId);
+      } else {
+        const newJob = postJob({ ...payload, contractorId: me.id });
+        setSubmitting(false);
+        onPosted(newJob.id);
+      }
+    }, 500);
   };
+
+  if (isEditMode && !canEdit) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+        <Text style={styles.notFound}>אין הרשאה לערוך משרה זו</Text>
+        <TouchableOpacity onPress={onBack} style={styles.backLink}>
+          <Text style={styles.backLinkText}>חזרה</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { paddingTop: insets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={[styles.headerBar, { paddingTop: insets.top + Spacing.sm }]}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+      <View style={styles.headerArea}>
+        <TouchableOpacity
+          onPress={handleBackPress}
+          style={styles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>פרסם משרה חדשה</Text>
+        <Text style={styles.headerTitle}>
+          {isEditMode ? 'עריכת משרה' : 'פרסם משרה חדשה'}
+        </Text>
+        <Text style={styles.headerSubtitle}>
+          {isEditMode
+            ? 'עדכן את פרטי המשרה — המועמדויות והשיבוצים הקיימים נשארים'
+            : 'כמה פרטים ברורים עוזרים לעובדים הנכונים למצוא אותך'}
+        </Text>
       </View>
 
       <ScrollView
-        contentContainerStyle={{
-          padding: Spacing.lg,
-          paddingBottom: 60,
-        }}
+        ref={scrollRef}
+        contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 60 }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Section title="פרטי המשרה">
+        {isEditMode && existingJob && (
+          <View style={styles.metaCard}>
+            <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
+            <Text style={styles.metaCardText}>
+              פורסם ב-{formatPostedAt(existingJob.postedAt)}
+              {existingJob.updatedAt
+                ? ` · עודכן לאחרונה ב-${formatPostedAt(existingJob.updatedAt)}`
+                : ''}
+            </Text>
+          </View>
+        )}
+
+        <Section title="פרטי העבודה" icon="briefcase-outline">
           <Field
             label="כותרת המשרה"
             value={title}
             onChange={setTitle}
             placeholder="למשל: עבודות גמר בדירה 4 חדרים"
+            error={errors.title}
           />
           <View style={styles.inputGroup}>
             <View style={styles.labelRow}>
               <Text style={styles.label}>תיאור מפורט</Text>
             </View>
             <TextInput
-              style={[styles.input, styles.textarea]}
+              style={[styles.input, styles.textarea, errors.description && styles.inputError]}
               value={description}
               onChangeText={setDescription}
               placeholder="פרט את היקף העבודה, האזור, חומרים, ולוח הזמנים."
               placeholderTextColor={Colors.textMuted}
               multiline
             />
+            {!!errors.description && <Text style={styles.errorText}>{errors.description}</Text>}
+          </View>
+
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>תחום מקצועי</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.selectorRow, errors.profession && styles.inputError]}
+              onPress={() => setProfessionModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="hammer-outline" size={20} color={Colors.textSecondary} />
+              <Text
+                style={[styles.selectorValue, !professionLabel && styles.placeholder]}
+                numberOfLines={1}
+              >
+                {professionLabel || 'בחר תחום ומקצוע ספציפי'}
+              </Text>
+              <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
+            {!!errors.profession && <Text style={styles.errorText}>{errors.profession}</Text>}
           </View>
         </Section>
 
-        <Section title="סיווג מקצועי">
-          <Picker
-            label="תחום מקצועי"
-            value={profCategory}
-            options={profCategories}
-            onChange={(v) => {
-              setProfCategory(v as ProfessionCategory);
-              const list = PROFESSIONS_BY_CATEGORY[v] ?? [];
-              if (list.length > 0) setProfession(list[0]);
-            }}
-          />
-          <Picker
-            label="מקצוע ספציפי"
-            value={profession}
-            options={professionChoices}
-            onChange={setProfession}
-          />
-        </Section>
-
-        <Section title="מיקום">
-          <Picker
+        <Section title="מיקום וזמן" icon="location-outline">
+          <CityPickerField
             label="עיר"
             value={city}
-            options={cityChoices}
             onChange={setCity}
+            placeholder="בחר עיר"
+            error={errors.city}
           />
           <Field
             label="כתובת מדויקת"
             value={address}
             onChange={setAddress}
-            placeholder="רחוב הרצל 25"
+            placeholder="למשל: רוטשילד 25, תל אביב"
+            error={errors.address}
           />
-        </Section>
-
-        <Section title="תקופה ותגמול">
           <DatePickerField
             label="תאריך התחלה"
             value={startDate}
             onChange={setStartDate}
             minimumDate={new Date()}
+            error={errors.startDate}
           />
           <Field
-            label="משך משוער"
+            label="משך עבודה משוער"
             value={duration}
             onChange={setDuration}
-            placeholder="למשל: שבועיים, חודש"
-          />
-          <Field
-            label="תעריף יומי לעובד (₪)"
-            value={dailyRate}
-            onChange={setDailyRate}
-            placeholder="850"
-            keyboardType="numeric"
-          />
-          <Field
-            label="מספר עובדים דרוש"
-            value={workersNeeded}
-            onChange={setWorkersNeeded}
-            placeholder="1"
-            keyboardType="numeric"
+            placeholder="למשל: 3 שבועות"
+            error={errors.duration}
           />
         </Section>
 
-        <Section title="דרישות והסמכות">
+        <Section title="תשלום וכוח אדם" icon="cash-outline">
+          <View style={styles.paymentGroup}>
+            <Field
+              label="תעריף לשעה (₪)"
+              value={hourlyRate}
+              onChange={(v) => setHourlyRate(v.replace(/[^0-9]/g, ''))}
+              placeholder="למשל: 65"
+              keyboardType="numeric"
+            />
+            <Field
+              label="תעריף ליום (₪)"
+              value={dailyRate}
+              onChange={(v) => setDailyRate(v.replace(/[^0-9]/g, ''))}
+              placeholder="למשל: 850"
+              keyboardType="numeric"
+            />
+            {!!errors.payment && <Text style={styles.errorText}>{errors.payment}</Text>}
+          </View>
+          <Field
+            label="מספר עובדים דרוש"
+            value={workersNeeded}
+            onChange={(v) => setWorkersNeeded(v.replace(/[^0-9]/g, ''))}
+            placeholder="1"
+            keyboardType="numeric"
+            error={errors.workersNeeded}
+          />
+        </Section>
+
+        <Section title="דרישות" icon="checkmark-done-outline">
           <Field
             label="הסמכות נדרשות (מופרד בפסיקים)"
             value={requiredCerts}
@@ -253,32 +440,72 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
             />
           </View>
 
-          <View style={styles.switchRow}>
-            <Switch
-              value={urgent}
-              onValueChange={setUrgent}
-              trackColor={{ false: Colors.border, true: Colors.danger }}
-            />
-            <TouchableOpacity
-              onPress={() => setUrgent(!urgent)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.switchLabel}>משרה דחופה</Text>
-            </TouchableOpacity>
+          <View style={styles.urgentRow}>
+            <View style={styles.switchRow}>
+              <Switch
+                value={urgent}
+                onValueChange={setUrgent}
+                trackColor={{ false: Colors.border, true: Colors.danger }}
+              />
+              <TouchableOpacity
+                onPress={() => setUrgent(!urgent)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.switchLabel}>משרה דחופה</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.urgentHint}>
+              המשרה תסומן כמשרה דחופה לעובדים רלוונטיים.
+            </Text>
           </View>
         </Section>
 
-        <View style={styles.infoBox}>
-          <Ionicons
-            name="information-circle"
-            size={18}
-            color={Colors.secondary}
+        <Section title="תמונות מקום העבודה" icon="images-outline">
+          <WorksiteImagesField
+            images={worksiteImages}
+            onChange={setWorksiteImages}
+            max={5}
+            label="ניתן להוסיף עד 5 תמונות"
           />
-          <Text style={styles.infoText}>
-            המשרה תפורסם מיד לעובדים מתאימים. תוכל לראות מועמדויות במסך פרטי
-            המשרה.
+        </Section>
+
+        {/* Preview / summary */}
+        <View style={styles.previewCard}>
+          <View style={styles.previewHead}>
+            <Ionicons name="eye-outline" size={16} color={Colors.primary} />
+            <Text style={styles.previewTitle}>תצוגה מקדימה</Text>
+          </View>
+          <Text style={styles.previewJobTitle} numberOfLines={1}>
+            {title.trim() || 'כותרת המשרה'}
           </Text>
+          <View style={styles.previewRow}>
+            {!!professionLabel && <PreviewChip icon="briefcase-outline" text={professionLabel} />}
+            {!!city && <PreviewChip icon="location-outline" text={city} />}
+            {!!startDate && <PreviewChip icon="calendar-outline" text={startDate} />}
+            {urgent && <PreviewChip icon="flash" text="דחוף" tone="danger" />}
+          </View>
+          <View style={styles.previewRow}>
+            {!!hourlyRate.trim() && (
+              <PreviewChip icon="cash-outline" text={formatRatePerUnit(Number(hourlyRate), 'שעה')} />
+            )}
+            {!!dailyRate.trim() && (
+              <PreviewChip icon="cash-outline" text={formatRatePerUnit(Number(dailyRate), 'יום')} />
+            )}
+            <PreviewChip icon="people-outline" text={`${workersNeeded || 0} עובדים`} />
+            {worksiteImages.length > 0 && (
+              <PreviewChip icon="image-outline" text={`${worksiteImages.length} תמונות`} />
+            )}
+          </View>
         </View>
+
+        {!isEditMode && (
+          <View style={styles.infoBox}>
+            <Ionicons name="information-circle" size={18} color={Colors.secondary} />
+            <Text style={styles.infoText}>
+              המשרה תפורסם מיד לעובדים מתאימים. תוכל לראות מועמדויות במסך פרטי המשרה.
+            </Text>
+          </View>
+        )}
 
         <TouchableOpacity
           style={[styles.submitBtn, submitting && { opacity: 0.7 }]}
@@ -287,23 +514,42 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted }) => {
           activeOpacity={0.85}
         >
           <Text style={styles.submitText}>
-            {submitting ? 'מפרסם...' : 'פרסם משרה'}
+            {submitting
+              ? isEditMode
+                ? 'שומר...'
+                : 'מפרסם...'
+              : isEditMode
+              ? 'שמור שינויים'
+              : 'פרסם משרה'}
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <ProfessionSelectorModal
+        visible={professionModalVisible}
+        onClose={() => setProfessionModalVisible(false)}
+        professionCategory={profCategory}
+        profession={profession}
+        onChange={(nextCategory, nextProfession) => {
+          setProfCategory(nextCategory as ProfessionCategory | '');
+          setProfession(nextProfession);
+        }}
+      />
     </KeyboardAvoidingView>
   );
 };
 
 // ---------- subcomponents ----------
 
-const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
-  title,
-  children,
-}) => (
+const Section: React.FC<{
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  children: React.ReactNode;
+}> = ({ title, icon, children }) => (
   <View style={styles.section}>
     <View style={styles.sectionHead}>
       <Text style={styles.sectionTitle}>{title}</Text>
+      <Ionicons name={icon} size={18} color={Colors.primary} />
     </View>
     <View style={styles.sectionBody}>{children}</View>
   </View>
@@ -314,77 +560,53 @@ const Field: React.FC<{
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-  keyboardType?:
-    | 'default'
-    | 'numeric'
-    | 'phone-pad'
-    | 'email-address'
-    | 'numbers-and-punctuation';
-}> = ({ label, value, onChange, placeholder, keyboardType = 'default' }) => (
+  keyboardType?: 'default' | 'numeric' | 'phone-pad' | 'email-address';
+  error?: string;
+}> = ({ label, value, onChange, placeholder, keyboardType = 'default', error }) => (
   <View style={styles.inputGroup}>
     <View style={styles.labelRow}>
       <Text style={styles.label}>{label}</Text>
     </View>
     <TextInput
-      style={styles.input}
+      style={[styles.input, error && styles.inputError]}
       value={value}
       onChangeText={onChange}
       placeholder={placeholder}
       placeholderTextColor={Colors.textMuted}
       keyboardType={keyboardType}
     />
+    {!!error && <Text style={styles.errorText}>{error}</Text>}
   </View>
 );
 
-const Picker: React.FC<{
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}> = ({ label, value, options, onChange }) => (
-  <View style={styles.inputGroup}>
-    <View style={styles.labelRow}>
-      <Text style={styles.label}>{label}</Text>
-    </View>
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.chipRow}
-    >
-      {options.map((o) => {
-        const active = o === value;
-        return (
-          <TouchableOpacity
-            key={o}
-            onPress={() => onChange(o)}
-            style={[styles.chip, active && styles.chipActive]}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>
-              {o}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
+const PreviewChip: React.FC<{
+  icon: keyof typeof Ionicons.glyphMap;
+  text: string;
+  tone?: 'danger';
+}> = ({ icon, text, tone }) => (
+  <View style={[styles.previewChip, tone === 'danger' && styles.previewChipDanger]}>
+    <Ionicons name={icon} size={12} color={tone === 'danger' ? Colors.danger : Colors.primary} />
+    <Text style={[styles.previewChipText, tone === 'danger' && { color: Colors.danger }]}>
+      {text}
+    </Text>
   </View>
 );
+
+// ---------- styles ----------
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: Colors.screenTint },
 
-  headerBar: {
+  headerArea: {
     position: 'relative',
     paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
-    backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
   backBtn: {
     position: 'absolute',
     right: Spacing.lg,
-    bottom: Spacing.md,
+    top: Spacing.md,
     padding: 4,
   },
   headerTitle: {
@@ -394,19 +616,59 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     writingDirection: 'rtl',
   },
+  headerSubtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginTop: 3,
+  },
+
+  notFound: {
+    fontSize: FontSize.lg,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginTop: 60,
+  },
+  backLink: { alignItems: 'center', marginTop: 12 },
+  backLinkText: { color: Colors.primary, fontWeight: '700' },
+
+  metaCard: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    marginBottom: Spacing.md,
+  },
+  metaCardText: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    writingDirection: 'rtl',
+  },
 
   section: {
     backgroundColor: Colors.white,
-    borderRadius: Radius.md,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
     padding: Spacing.md,
     marginBottom: Spacing.md,
     ...Shadow.small,
   },
-  sectionHead: { width: '100%', alignItems: 'flex-end', marginBottom: 8 },
+  sectionHead: {
+    flexDirection: 'row-reverse',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
   sectionTitle: {
     fontSize: FontSize.md,
     fontWeight: '800',
-    color: Colors.primary,
+    color: Colors.text,
     writingDirection: 'rtl',
   },
   sectionBody: { gap: Spacing.md },
@@ -430,31 +692,38 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
   },
+  inputError: { borderColor: Colors.danger },
+  errorText: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    writingDirection: 'rtl',
+    textAlign: 'right',
+  },
   textarea: { minHeight: 110, textAlignVertical: 'top' },
 
-  chipRow: { flexDirection: 'row-reverse', gap: 8 },
-  chip: {
-    height: FC.height,
-    justifyContent: 'center',
+  selectorRow: {
+    flexDirection: 'row-reverse',
     alignItems: 'center',
-    paddingHorizontal: FC.paddingHorizontal,
-    borderRadius: FC.borderRadius,
-    borderWidth: FC.borderWidth,
-    borderColor: Colors.textMuted,
-    backgroundColor: Colors.white,
+    gap: Spacing.sm,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.gray50,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 14,
   },
-  chipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  chipText: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.textSecondary,
+  selectorValue: {
+    flex: 1,
+    fontSize: FontSize.md,
+    color: Colors.text,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
-  chipTextActive: { color: Colors.white },
+  placeholder: { color: Colors.textMuted },
 
+  paymentGroup: { gap: Spacing.md },
+
+  urgentRow: { gap: 4 },
   switchRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -465,6 +734,61 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     fontWeight: '600',
     color: Colors.text,
+    writingDirection: 'rtl',
+  },
+  urgentHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+
+  previewCard: {
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.primaryLight,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  previewHead: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+  },
+  previewTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: '800',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+  previewJobTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  previewRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  previewChip: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.white,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  previewChipDanger: { backgroundColor: '#FEE2E2' },
+  previewChipText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.primary,
     writingDirection: 'rtl',
   },
 

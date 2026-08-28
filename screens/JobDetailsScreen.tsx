@@ -5,6 +5,8 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Image,
+  Modal,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,8 +28,15 @@ interface Props {
   onOpenSmartMatchForJob: (jobId: string) => void;
   onOpenSentInvitations?: () => void; // contractor only
   onOpenStaffing?: (jobId: string) => void; // contractor only
+  onOpenEditJob?: (jobId: string) => void; // contractor owner only
   onOpenChatWithContractor?: (contractorId: string) => void; // worker only
 }
+
+const formatDateHe = (dateLike: string): string => {
+  const d = new Date(dateLike);
+  if (isNaN(d.getTime())) return dateLike;
+  return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
 
 const JobDetailsScreen: React.FC<Props> = ({
   jobId,
@@ -36,6 +45,7 @@ const JobDetailsScreen: React.FC<Props> = ({
   onOpenSmartMatchForJob,
   onOpenSentInvitations,
   onOpenStaffing,
+  onOpenEditJob,
   onOpenChatWithContractor,
 }) => {
   const insets = useSafeAreaInsets();
@@ -49,10 +59,13 @@ const JobDetailsScreen: React.FC<Props> = ({
     applyToJob,
     respondToApplication,
     setJobAcceptingApplications,
+    isFavoriteContractor,
+    toggleFavoriteContractor,
   } = useApp();
 
   const job = getJobById(jobId);
   const [applying, setApplying] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   if (!job) {
     return (
@@ -72,6 +85,15 @@ const JobDetailsScreen: React.FC<Props> = ({
   const isContractorOwner =
     role === 'contractor' && currentUser?.id === job.contractorId;
   const isWorker = role === 'worker';
+
+  const isContractorFavorite =
+    isWorker && currentUser && contractor
+      ? isFavoriteContractor(currentUser.id, contractor.id)
+      : false;
+  const handleToggleFavoriteContractor = () => {
+    if (!isWorker || !currentUser || !contractor) return;
+    toggleFavoriteContractor(currentUser.id, contractor.id);
+  };
 
   // For worker mode: did I already apply?
   const myExistingApplication = useMemo(() => {
@@ -183,6 +205,10 @@ const JobDetailsScreen: React.FC<Props> = ({
               <Text style={styles.heroMetaText}>{job.city}</Text>
             </View>
           </View>
+          <Text style={styles.postedAtText}>
+            פורסם ב-{formatDateHe(job.postedAt)}
+            {job.updatedAt ? ` · עודכן לאחרונה ב-${formatDateHe(job.updatedAt)}` : ''}
+          </Text>
         </View>
 
         {/* Posted by — visible to worker */}
@@ -207,6 +233,23 @@ const JobDetailsScreen: React.FC<Props> = ({
                   {contractor.city} · {contractor.areaOfOperation}
                 </Text>
               </View>
+              {isWorker && (
+                <TouchableOpacity
+                  style={styles.contractorFavoriteBtn}
+                  onPress={handleToggleFavoriteContractor}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityLabel={
+                    isContractorFavorite ? 'הסר קבלן מהמועדפים' : 'הוסף קבלן למועדפים'
+                  }
+                >
+                  <Ionicons
+                    name={isContractorFavorite ? 'heart' : 'heart-outline'}
+                    size={22}
+                    color={isContractorFavorite ? '#E0245E' : Colors.textMuted}
+                  />
+                </TouchableOpacity>
+              )}
             </View>
             {currentUser?.role === 'worker' && (
               <View style={styles.contactRow}>
@@ -251,6 +294,31 @@ const JobDetailsScreen: React.FC<Props> = ({
           <Text style={styles.body}>{job.description}</Text>
         </View>
 
+        {/* Worksite images gallery — only when the job actually has any */}
+        {!!job.worksiteImages && job.worksiteImages.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>תמונות ממקום העבודה</Text>
+            </View>
+            {/* Wrapped grid, not a horizontal scroller — a horizontal
+                ScrollView always starts at its left edge regardless of
+                row-reverse, which would show the images starting from the
+                wrong (last-read) side in RTL. flexWrap has no such issue:
+                the first image reliably renders at the right. */}
+            <View style={styles.galleryRow}>
+              {job.worksiteImages.map((uri) => (
+                <TouchableOpacity
+                  key={uri}
+                  onPress={() => setViewerUri(uri)}
+                  activeOpacity={0.85}
+                >
+                  <Image source={{ uri }} style={styles.galleryThumb} resizeMode="cover" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Practical info */}
         <View style={styles.section}>
           <View style={styles.sectionHead}>
@@ -259,7 +327,12 @@ const JobDetailsScreen: React.FC<Props> = ({
           <FieldRow label="כתובת" value={job.address} />
           <FieldRow label="תאריך התחלה" value={job.startDate} ltr />
           <FieldRow label="משך" value={job.duration} />
-          <FieldRow label="תעריף יומי" value={`${job.dailyRate} ₪`} ltr />
+          {!!job.hourlyRate && (
+            <FieldRow label="תעריף לשעה" value={`${job.hourlyRate} ₪`} ltr />
+          )}
+          {!!job.dailyRate && (
+            <FieldRow label="תעריף ליום" value={`${job.dailyRate} ₪`} ltr />
+          )}
           <FieldRow
             label="עובדים דרושים"
             value={`${job.workersNeeded}`}
@@ -309,6 +382,17 @@ const JobDetailsScreen: React.FC<Props> = ({
         {/* === CONTRACTOR MODE: Management hub === */}
         {isContractorOwner && (
           <>
+            {onOpenEditJob && (
+              <TouchableOpacity
+                style={styles.editJobBtn}
+                onPress={() => onOpenEditJob(job.id)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="pencil" size={18} color={Colors.primary} />
+                <Text style={styles.editJobText}>עריכת משרה</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Staffing summary */}
             <View style={styles.section}>
               <View style={styles.sectionHead}>
@@ -596,6 +680,28 @@ const JobDetailsScreen: React.FC<Props> = ({
           )}
         </View>
       )}
+
+      {/* Worksite image full-screen preview */}
+      <Modal
+        visible={!!viewerUri}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewerUri(null)}
+      >
+        <View style={styles.viewerBackdrop}>
+          <TouchableOpacity
+            style={styles.viewerCloseBtn}
+            onPress={() => setViewerUri(null)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="סגור"
+          >
+            <Ionicons name="close" size={28} color={Colors.white} />
+          </TouchableOpacity>
+          {!!viewerUri && (
+            <Image source={{ uri: viewerUri }} style={styles.viewerImage} resizeMode="contain" />
+          )}
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -685,6 +791,59 @@ const styles = StyleSheet.create({
   heroMetaText: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
+    writingDirection: 'rtl',
+  },
+  postedAtText: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 4,
+    lineHeight: FontSize.xs + 6,
+  },
+
+  galleryRow: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  galleryThumb: {
+    width: 96,
+    height: 96,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.gray100,
+  },
+  viewerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerCloseBtn: {
+    position: 'absolute',
+    top: 50,
+    right: Spacing.lg,
+    zIndex: 1,
+    padding: 6,
+  },
+  viewerImage: { width: '100%', height: '80%' },
+
+  editJobBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.white,
+    marginBottom: Spacing.md,
+  },
+  editJobText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
     writingDirection: 'rtl',
   },
 
@@ -855,6 +1014,12 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  contractorFavoriteBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyHint: {
     fontSize: FontSize.sm,

@@ -1,56 +1,54 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import WorkerCard from '../components/WorkerCard';
-import InlineToast from '../components/InlineToast';
+import ContractorCard from '../components/ContractorCard';
+import { isOpenForApplications } from '../services/jobStatusService';
+import { Contractor } from '../types';
 
 interface Props {
   onBack: () => void;
-  onOpenWorkerProfile: (workerId: string) => void;
-  onOpenSearchWorkers: () => void;
+  onOpenAvailableJobs: () => void;
 }
 
-/** "עובדים מועדפים" — the workers the current contractor has bookmarked.
- *  Reuses the exact same WorkerCard as SearchWorkersScreen; no separate
- *  card design. Favorites are personal to this contractor (see
- *  ContractorFavoriteWorker in types/index.ts) — this screen never shows
- *  another contractor's list. */
-const FavoriteWorkersScreen: React.FC<Props> = ({
-  onBack,
-  onOpenWorkerProfile,
-  onOpenSearchWorkers,
-}) => {
+/** "קבלנים מועדפים" — the contractors the current worker has bookmarked.
+ *  Favorites are personal to this worker (see WorkerFavoriteContractor in
+ *  types/index.ts) — this screen never shows another worker's list. */
+const FavoriteContractorsScreen: React.FC<Props> = ({ onBack, onOpenAvailableJobs }) => {
   const insets = useSafeAreaInsets();
-  const { workers, currentUser, getFavoriteWorkerIds, toggleFavoriteWorker } = useApp();
-  const contractorId = currentUser?.role === 'contractor' ? currentUser.id : null;
+  const { currentUser, contractors, jobs, getFavoriteContractorIds, toggleFavoriteContractor } =
+    useApp();
+  const workerId = currentUser?.role === 'worker' ? currentUser.id : null;
 
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!toastMessage) return;
-    const t = setTimeout(() => setToastMessage(null), 1600);
-    return () => clearTimeout(t);
-  }, [toastMessage]);
-
-  const favoriteWorkerIds = useMemo(
-    () => (contractorId ? getFavoriteWorkerIds(contractorId) : []),
-    [contractorId, getFavoriteWorkerIds]
+  const favoriteContractorIds = useMemo(
+    () => (workerId ? getFavoriteContractorIds(workerId) : []),
+    [workerId, getFavoriteContractorIds]
   );
 
-  const favoriteWorkers = useMemo(
+  const favoriteContractorsList = useMemo(
     () =>
-      workers.filter((w) => w.status === 'approved' && favoriteWorkerIds.includes(w.id)),
-    [workers, favoriteWorkerIds]
+      contractors.filter(
+        (c) => c.status === 'approved' && favoriteContractorIds.includes(c.id)
+      ),
+    [contractors, favoriteContractorIds]
   );
 
-  const handleToggleFavorite = (workerId: string) => {
-    if (!contractorId) return;
-    toggleFavoriteWorker(contractorId, workerId);
-    setToastMessage('הוסר מהמועדפים');
+  const openJobsCountByContractor = useMemo(() => {
+    const counts: Record<string, number> = {};
+    jobs.forEach((j) => {
+      if (isOpenForApplications(j)) {
+        counts[j.contractorId] = (counts[j.contractorId] ?? 0) + 1;
+      }
+    });
+    return counts;
+  }, [jobs]);
+
+  const handleToggleFavorite = (contractorId: string) => {
+    if (!workerId) return;
+    toggleFavoriteContractor(workerId, contractorId);
   };
 
   return (
@@ -63,49 +61,47 @@ const FavoriteWorkersScreen: React.FC<Props> = ({
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>עובדים מועדפים</Text>
-        <Text style={styles.headerSubtitle}>העובדים ששמרת לגישה מהירה</Text>
+        <Text style={styles.headerTitle}>קבלנים מועדפים</Text>
+        <Text style={styles.headerSubtitle}>הקבלנים ששמרת לגישה מהירה</Text>
       </View>
 
-      {favoriteWorkers.length === 0 ? (
+      {favoriteContractorsList.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="heart-outline" size={56} color={Colors.textMuted} />
-          <Text style={styles.emptyTitle}>עדיין אין עובדים מועדפים</Text>
+          <Text style={styles.emptyTitle}>עדיין אין קבלנים מועדפים</Text>
           <Text style={styles.emptySub}>
-            שמור עובדים שתרצה לעבוד איתם שוב כדי למצוא אותם במהירות.
+            שמור קבלנים שתרצה לעקוב אחר המשרות שלהם כדי למצוא אותם במהירות.
           </Text>
           <TouchableOpacity
-            onPress={onOpenSearchWorkers}
+            onPress={onOpenAvailableJobs}
             style={styles.emptyCta}
             activeOpacity={0.85}
           >
-            <Text style={styles.emptyCtaText}>חפש עובדים</Text>
+            <Text style={styles.emptyCtaText}>חפש עבודות</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <>
           <View style={styles.resultsHeader}>
-            <Text style={styles.resultsCount}>{favoriteWorkers.length} עובדים</Text>
+            <Text style={styles.resultsCount}>{favoriteContractorsList.length} קבלנים</Text>
           </View>
           <FlatList
             style={styles.results}
-            data={favoriteWorkers}
-            keyExtractor={(w) => w.id}
+            data={favoriteContractorsList}
+            keyExtractor={(c) => c.id}
             contentContainerStyle={styles.list}
             ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-            renderItem={({ item }) => (
-              <WorkerCard
-                worker={item}
-                onPress={() => onOpenWorkerProfile(item.id)}
+            renderItem={({ item }: { item: Contractor }) => (
+              <ContractorCard
+                contractor={item}
                 isFavorite
                 onToggleFavorite={() => handleToggleFavorite(item.id)}
+                openJobsCount={openJobsCountByContractor[item.id] ?? 0}
               />
             )}
           />
         </>
       )}
-
-      <InlineToast message={toastMessage} />
     </View>
   );
 };
@@ -115,7 +111,7 @@ const styles = StyleSheet.create({
 
   // No white box / border here on purpose — the header reads as part of
   // the same flowing background as the rest of the screen, matching
-  // SearchWorkersScreen/AvailableJobsScreen.
+  // AvailableJobsScreen/SearchWorkersScreen.
   headerArea: {
     position: 'relative',
     paddingHorizontal: Spacing.lg,
@@ -197,4 +193,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default FavoriteWorkersScreen;
+export default FavoriteContractorsScreen;

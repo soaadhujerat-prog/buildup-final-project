@@ -45,6 +45,7 @@ import BlockedAccountScreen from '../screens/BlockedAccountScreen';
 // Worker
 import WorkerDashboard from '../screens/WorkerDashboard';
 import AvailableJobsScreen from '../screens/AvailableJobsScreen';
+import FavoriteContractorsScreen from '../screens/FavoriteContractorsScreen';
 import MyApplicationsScreen from '../screens/MyApplicationsScreen';
 import WorkerInvitationsScreen from '../screens/WorkerInvitationsScreen';
 import MyAssignmentsScreen from '../screens/MyAssignmentsScreen';
@@ -103,12 +104,13 @@ type Route =
   | { name: 'BlockedAccount'; userOrRegistrationId: string }
   // Worker drilldowns (Tab is implicit via WorkerTab state)
   | { name: 'WorkerJobDetails'; jobId: string }
+  | { name: 'WorkerFavoriteContractors' }
   | { name: 'WorkerInvitations' }
   | { name: 'WorkerMyAssignments' }
   | { name: 'WorkerAvailability' }
   | { name: 'WorkerProfileEdit' }
   // Contractor drilldowns
-  | { name: 'ContractorPostJob' }
+  | { name: 'ContractorPostJob'; jobId?: string }
   | { name: 'ContractorJobDetails'; jobId: string }
   | { name: 'ContractorSearchWorkers' }
   | { name: 'ContractorFavoriteWorkers' }
@@ -466,6 +468,16 @@ const AppNavigator: React.FC = () => {
             }
           />
         );
+      case 'WorkerFavoriteContractors':
+        return (
+          <FavoriteContractorsScreen
+            onBack={goBack}
+            onOpenAvailableJobs={() => {
+              goBack();
+              setWorkerTab('available-jobs');
+            }}
+          />
+        );
       case 'WorkerInvitations':
         return (
           <WorkerInvitationsScreen
@@ -494,8 +506,12 @@ const AppNavigator: React.FC = () => {
       case 'ContractorPostJob':
         return (
           <PostJobScreen
+            jobId={route.jobId}
             onBack={goBack}
             onPosted={(jobId) =>
+              replaceTop({ name: 'ContractorJobDetails', jobId })
+            }
+            onSaved={(jobId) =>
               replaceTop({ name: 'ContractorJobDetails', jobId })
             }
           />
@@ -516,6 +532,9 @@ const AppNavigator: React.FC = () => {
             }
             onOpenStaffing={(jobId) =>
               push({ name: 'ContractorJobStaffing', jobId })
+            }
+            onOpenEditJob={(jobId) =>
+              push({ name: 'ContractorPostJob', jobId })
             }
           />
         );
@@ -733,6 +752,9 @@ const WorkerHome: React.FC<{
           <WorkerDashboard
             onOpenProProfile={() => setTab('profile')}
             onOpenAvailableJobs={() => setTab('available-jobs')}
+            onOpenFavoriteContractors={() =>
+              navigate({ name: 'WorkerFavoriteContractors' })
+            }
             onOpenMyApplications={(initialFilter) => {
               // dashboard sometimes preselects a filter, but the tab body
               // creates its own MyApplicationsScreen — for cross-cuts we
@@ -758,6 +780,9 @@ const WorkerHome: React.FC<{
             onBack={() => setTab('dashboard')}
             onOpenJobDetails={(jobId) =>
               navigate({ name: 'WorkerJobDetails', jobId })
+            }
+            onOpenFavoriteContractors={() =>
+              navigate({ name: 'WorkerFavoriteContractors' })
             }
           />
         );

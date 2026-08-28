@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow, FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import { formatJobRateCompact } from '../utils/helpers';
 import {
   Application,
   ApplicationStatus,
@@ -140,7 +141,7 @@ const MyApplicationsScreen: React.FC<Props> = ({
                 app={item}
                 jobTitle={job?.title ?? '—'}
                 jobCity={job?.city ?? ''}
-                jobDailyRate={job?.dailyRate ?? 0}
+                jobRateLabel={job ? formatJobRateCompact(job) : ''}
                 contractorName={
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }
@@ -190,14 +191,14 @@ const ApplicationRow: React.FC<{
   app: Application;
   jobTitle: string;
   jobCity: string;
-  jobDailyRate: number;
+  jobRateLabel: string;
   contractorName: string;
   onPress: () => void;
 }> = ({
   app,
   jobTitle,
   jobCity,
-  jobDailyRate,
+  jobRateLabel,
   contractorName,
   onPress,
 }) => {
@@ -255,7 +256,7 @@ const ApplicationRow: React.FC<{
             size={14}
             color={Colors.textSecondary}
           />
-          <Text style={styles.metaText}>{jobDailyRate}₪/יום</Text>
+          <Text style={styles.metaText}>{jobRateLabel}</Text>
         </View>
       </View>
 

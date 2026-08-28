@@ -37,6 +37,7 @@ import {
   SupportTicketType,
   ProfessionCategory,
   ContractorFavoriteWorker,
+  WorkerFavoriteContractor,
 } from '../types';
 
 import {
@@ -68,6 +69,9 @@ import {
   dedupeConversations,
 } from '../services/conversationService';
 
+import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
+import { JobSortOption } from '../components/JobSortBottomSheet';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -81,6 +85,23 @@ export interface LoginResult {
   registration?: RegistrationRecord;
   reason?: 'not_found' | 'wrong_password' | 'pending' | 'rejected' | 'blocked';
 }
+
+/** The worker job-search screen's search/filter/sort — lifted up here
+ *  (instead of local useState in AvailableJobsScreen) because the
+ *  drilldown route stack unmounts the whole tab shell whenever a screen
+ *  like JobDetails is pushed on top of it. Local state would reset on
+ *  every "back"; this survives for as long as the app session does. */
+export interface JobSearchState {
+  query: string;
+  filters: JobFilters;
+  sort: JobSortOption;
+}
+
+export const DEFAULT_JOB_SEARCH_STATE: JobSearchState = {
+  query: '',
+  filters: DEFAULT_JOB_FILTERS,
+  sort: 'default',
+};
 
 interface AppState {
   // Session
@@ -97,10 +118,15 @@ interface AppState {
   invitations: Invitation[];
   assignments: Assignment[];
   favoriteWorkers: ContractorFavoriteWorker[];
+  favoriteContractors: WorkerFavoriteContractor[];
 
   conversations: Conversation[];
   notifications: AppNotification[];
   supportTickets: SupportTicket[];
+
+  // Worker job-search state — persists across navigation (see JobSearchState).
+  jobSearchState: JobSearchState;
+  updateJobSearchState: (patch: Partial<JobSearchState>) => void;
 
   // Auth
   loginAsCustomer: (identifier: string, password: string) => LoginResult;
@@ -131,6 +157,17 @@ interface AppState {
     }
   ) => JobPost;
   setJobAcceptingApplications: (jobId: string, accepting: boolean) => void;
+  /** Edits an existing job in place — same id, same contractorId, same
+   *  postedAt (none of those three are patchable, by type). A plain merge —
+   *  does NOT stamp updatedAt itself; pass it explicitly in `patch` when
+   *  the call represents a real content edit (see PostJobScreen). A
+   *  technical/operational change (e.g. setJobAcceptingApplications) should
+   *  never bump it. Applications/Invitations/Assignments are keyed by
+   *  jobId, not embedded in the job object, so they're untouched. */
+  updateJob: (
+    jobId: string,
+    patch: Partial<Omit<JobPost, 'id' | 'contractorId' | 'postedAt'>>
+  ) => void;
 
   // Applications (worker -> job)
   applyToJob: (jobId: string, workerId: string, message?: string) => Application;
@@ -157,6 +194,12 @@ interface AppState {
   toggleFavoriteWorker: (contractorId: string, workerId: string) => void;
   isFavoriteWorker: (contractorId: string, workerId: string) => boolean;
   getFavoriteWorkerIds: (contractorId: string) => string[];
+
+  // Favorite contractors — the mirror relationship, personal to each
+  // worker. See WorkerFavoriteContractor in types/index.ts.
+  toggleFavoriteContractor: (workerId: string, contractorId: string) => void;
+  isFavoriteContractor: (workerId: string, contractorId: string) => boolean;
+  getFavoriteContractorIds: (workerId: string) => string[];
 
   // Worker profile edits
   setWorkerAvailability: (workerId: string, isAvailable: boolean) => void;
@@ -232,6 +275,14 @@ const passwordOk = (pwd: string) => pwd.trim().length > 0;
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<SessionUser>(null);
+  const [jobSearchState, setJobSearchState] = useState<JobSearchState>(
+    DEFAULT_JOB_SEARCH_STATE
+  );
+
+  const updateJobSearchState = useCallback<AppState['updateJobSearchState']>(
+    (patch) => setJobSearchState((prev) => ({ ...prev, ...patch })),
+    []
+  );
 
   const [admins] = useState<Admin[]>(MOCK_ADMINS);
   const [workers, setWorkers] = useState<Worker[]>(MOCK_WORKERS);
@@ -282,6 +333,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // themselves at runtime. Shaped 1:1 with the future
   // contractor_favorite_workers Supabase table (see types/index.ts).
   const [favoriteWorkers, setFavoriteWorkers] = useState<ContractorFavoriteWorker[]>([]);
+  const [favoriteContractors, setFavoriteContractors] = useState<
+    WorkerFavoriteContractor[]
+  >([]);
 
   // ---------------------------------------------------------------------
   // Notification helpers
@@ -377,7 +431,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     [admins]
   );
 
-  const logout = useCallback(() => setCurrentUser(null), []);
+  // Logging out also clears the job-search state — otherwise a different
+  // worker logging in on the same device/session would inherit whatever
+  // search/filter/sort the previous one left behind.
+  const logout = useCallback(() => {
+    setCurrentUser(null);
+    setJobSearchState(DEFAULT_JOB_SEARCH_STATE);
+  }, []);
 
   // ---------------------------------------------------------------------
   // Registration submission
@@ -655,6 +715,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return job;
   }, []);
 
+  // Plain merge — does NOT stamp updatedAt itself. "עודכן לאחרונה" must only
+  // reflect a real content edit, never a technical/operational change, so
+  // the decision of whether this call counts as one belongs to the caller
+  // (PostJobScreen's save passes updatedAt explicitly; a future
+  // technical-only caller simply wouldn't).
+  const updateJob = useCallback<AppState['updateJob']>((jobId, patch) => {
+    setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, ...patch } : j)));
+  }, []);
+
   const setJobAcceptingApplications = useCallback<
     AppState['setJobAcceptingApplications']
   >((jobId, accepting) => {
@@ -845,6 +914,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     },
     []
   );
+
+  // ---------------------------------------------------------------------
+  // Favorite contractors (mirror of favorite workers, above)
+  // ---------------------------------------------------------------------
+
+  const isFavoriteContractor = useCallback<AppState['isFavoriteContractor']>(
+    (workerId, contractorId) =>
+      favoriteContractors.some(
+        (f) => f.workerId === workerId && f.contractorId === contractorId
+      ),
+    [favoriteContractors]
+  );
+
+  const getFavoriteContractorIds = useCallback<
+    AppState['getFavoriteContractorIds']
+  >(
+    (workerId) =>
+      favoriteContractors
+        .filter((f) => f.workerId === workerId)
+        .map((f) => f.contractorId),
+    [favoriteContractors]
+  );
+
+  const toggleFavoriteContractor = useCallback<
+    AppState['toggleFavoriteContractor']
+  >((workerId, contractorId) => {
+    setFavoriteContractors((prev) => {
+      const exists = prev.some(
+        (f) => f.workerId === workerId && f.contractorId === contractorId
+      );
+      if (exists) {
+        return prev.filter(
+          (f) => !(f.workerId === workerId && f.contractorId === contractorId)
+        );
+      }
+      return [
+        ...prev,
+        { id: newId('favc'), workerId, contractorId, createdAt: nowIso() },
+      ];
+    });
+  }, []);
 
   // ---------------------------------------------------------------------
   // Worker / Contractor profile mutations
@@ -1108,6 +1218,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const value = useMemo<AppState>(
     () => ({
       currentUser,
+      jobSearchState,
+      updateJobSearchState,
       admins,
       workers,
       contractors,
@@ -1117,6 +1229,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       invitations,
       assignments,
       favoriteWorkers,
+      favoriteContractors,
       conversations,
       notifications,
       supportTickets,
@@ -1135,6 +1248,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       unblockUser,
 
       postJob,
+      updateJob,
       setJobAcceptingApplications,
       applyToJob,
       respondToApplication,
@@ -1144,6 +1258,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       toggleFavoriteWorker,
       isFavoriteWorker,
       getFavoriteWorkerIds,
+
+      toggleFavoriteContractor,
+      isFavoriteContractor,
+      getFavoriteContractorIds,
 
       setWorkerAvailability,
       updateWorkerProfile,
@@ -1173,6 +1291,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }),
     [
       currentUser,
+      jobSearchState,
+      updateJobSearchState,
       admins,
       workers,
       contractors,
@@ -1182,6 +1302,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       invitations,
       assignments,
       favoriteWorkers,
+      favoriteContractors,
       conversations,
       notifications,
       supportTickets,
@@ -1196,6 +1317,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       blockUser,
       unblockUser,
       postJob,
+      updateJob,
       setJobAcceptingApplications,
       applyToJob,
       respondToApplication,
@@ -1204,6 +1326,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       toggleFavoriteWorker,
       isFavoriteWorker,
       getFavoriteWorkerIds,
+      toggleFavoriteContractor,
+      isFavoriteContractor,
+      getFavoriteContractorIds,
       setWorkerAvailability,
       updateWorkerProfile,
       updateContractorProfile,

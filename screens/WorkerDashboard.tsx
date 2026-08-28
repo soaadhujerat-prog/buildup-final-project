@@ -15,11 +15,13 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
+import { formatJobRateCompact } from '../utils/helpers';
 import { Worker, ApplicationStatus } from '../types';
 
 interface Props {
   onOpenProProfile: () => void;
   onOpenAvailableJobs: () => void;
+  onOpenFavoriteContractors: () => void;
   onOpenMyApplications: (initialFilter?: 'all' | ApplicationStatus) => void;
   onOpenInvitations: () => void;
   onOpenAvailability: () => void;
@@ -33,6 +35,7 @@ interface Props {
 const WorkerDashboard: React.FC<Props> = ({
   onOpenProProfile,
   onOpenAvailableJobs,
+  onOpenFavoriteContractors,
   onOpenMyApplications,
   onOpenInvitations,
   onOpenAvailability,
@@ -239,6 +242,11 @@ const WorkerDashboard: React.FC<Props> = ({
             primary
           />
           <QuickAction
+            icon="heart-outline"
+            label="קבלנים מועדפים"
+            onPress={onOpenFavoriteContractors}
+          />
+          <QuickAction
             icon="calendar-outline"
             label="ניהול זמינות"
             onPress={onOpenAvailability}
@@ -297,7 +305,7 @@ const WorkerDashboard: React.FC<Props> = ({
                 <Text style={styles.rowSub}>
                   {job.profession} · {job.city} ·{' '}
                   <Text style={{ writingDirection: 'ltr' }}>
-                    {job.dailyRate}₪/יום
+                    {formatJobRateCompact(job)}
                   </Text>
                 </Text>
               </View>

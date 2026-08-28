@@ -47,6 +47,26 @@ export const formatCurrency = (amount: number): string => {
   return `${amount.toLocaleString('he-IL')} ₪`;
 };
 
+/** Single formatter for "X ₪/unit" — the one consistent way a job rate is
+ *  ever rendered, everywhere in the app (JobCard, JobDetails preview chips,
+ *  compact list rows). Always a space before ₪. */
+export const formatRatePerUnit = (amount: number, unit: 'שעה' | 'יום'): string =>
+  `${amount} ₪/${unit}`;
+
+/** Compact "X ₪/שעה • Y ₪/יום" for a job's rate(s) — used anywhere space is
+ *  tight (list rows). Handles either field being unset; a job is only ever
+ *  missing both if it's badly-formed data (PostJobScreen requires at least
+ *  one), so this never needs a "no rate" fallback. */
+export const formatJobRateCompact = (job: {
+  hourlyRate?: number;
+  dailyRate?: number;
+}): string => {
+  const parts: string[] = [];
+  if (job.hourlyRate) parts.push(formatRatePerUnit(job.hourlyRate, 'שעה'));
+  if (job.dailyRate) parts.push(formatRatePerUnit(job.dailyRate, 'יום'));
+  return parts.join(' • ');
+};
+
 export const getInitials = (name: string): string => {
   const parts = name.split(' ');
   if (parts.length >= 2) {

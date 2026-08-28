@@ -1,174 +1,97 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Job } from '../types';
+import { JobPost } from '../types';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
-import { formatCurrency, formatShortDate } from '../utils/helpers';
-import { getRegistrationStatus } from '../services/jobStatusService';
+import { formatRatePerUnit } from '../utils/helpers';
+import StatusBadge from './StatusBadge';
 
 interface JobCardProps {
-  job: Job;
-  /** Number of applications submitted for this job. Derived from the
-   *  Application collection (see AppContext.getApplicationsForJob), not a
-   *  static field on JobPost. */
-  applicantsCount: number;
-  onPress?: () => void;
-  showActions?: boolean;
-  onEdit?: () => void;
-  onViewRequests?: () => void;
-  isWorkerView?: boolean;
-  onApply?: () => void;
+  job: JobPost;
+  contractorName: string;
+  onPress: () => void;
 }
 
-const JobCard: React.FC<JobCardProps> = ({
-  job,
-  applicantsCount,
-  onPress,
-  showActions = false,
-  onEdit,
-  onViewRequests,
-  isWorkerView = false,
-  onApply,
-}) => {
-  const registrationStatus = getRegistrationStatus(job);
-  const statusColor =
-    registrationStatus.tone === 'success' ? Colors.success : Colors.info;
-  const statusLabel = registrationStatus.label;
+const pad = (n: number) => String(n).padStart(2, '0');
 
+/** Short "27.08" form — deliberately not a relative "לפני X ימים" count,
+ *  per the explicit preference for a plain, unambiguous date over a
+ *  computed one. */
+const formatShortPostedDate = (iso: string): string => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}`;
+};
+
+/** The shared job result card for the worker-facing job search. Compact,
+ *  whole-card tappable, with an explicit "צפה בפרטי המשרה" affordance so
+ *  it's clear it leads somewhere. No AI/recommendation labels — Smart
+ *  Match scoring is a future backend feature, not simulated here. */
+const JobCard: React.FC<JobCardProps> = ({ job, contractorName, onPress }) => {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
-      {job.urgent && (
-        <View style={styles.urgentBanner}>
-          <Ionicons name="flash" size={12} color={Colors.white} />
-          <Text style={styles.urgentText}>דחוף</Text>
-        </View>
-      )}
-
-      <View style={[styles.topRow, job.urgent && styles.topRowWithUrgent]}>
-        <View style={styles.professionTag}>
-          <Text style={styles.professionText}>{job.profession}</Text>
-        </View>
-
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: statusColor + '20' },
-          ]}
-        >
-          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-          <Text style={[styles.statusText, { color: statusColor }]}>
-            {statusLabel}
-          </Text>
-        </View>
+      <View style={styles.headRow}>
+        <Text style={styles.title} numberOfLines={1}>
+          {job.title}
+        </Text>
+        {job.urgent && <StatusBadge label="דחוף" tone="danger" small />}
       </View>
 
-      <Text style={styles.title}>{job.title}</Text>
+      <Text style={styles.contractor} numberOfLines={1}>
+        <Ionicons name="business-outline" size={12} color={Colors.textMuted} /> {contractorName}
+        {'  ·  פורסם ב-'}
+        {formatShortPostedDate(job.postedAt)}
+      </Text>
 
-      <Text style={styles.description} numberOfLines={2}>
+      <Text style={styles.desc} numberOfLines={2}>
         {job.description}
       </Text>
 
-      <View style={styles.detailsGrid}>
-        <View style={styles.detailItem}>
-          <Ionicons
-            name="location-outline"
-            size={14}
-            color={Colors.textSecondary}
-          />
-          <Text style={styles.detailText}>{job.city}</Text>
+      <View style={styles.metaRow}>
+        <View style={styles.metaGroup}>
+          <View style={styles.metaItem}>
+            <Ionicons name="briefcase-outline" size={14} color={Colors.textSecondary} />
+            <Text style={styles.metaText} numberOfLines={1}>
+              {job.profession}
+            </Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Ionicons name="location-outline" size={14} color={Colors.textSecondary} />
+            <Text style={styles.metaText} numberOfLines={1}>
+              {job.city}
+            </Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Ionicons name="time-outline" size={14} color={Colors.textSecondary} />
+            <Text style={styles.metaText} numberOfLines={1}>
+              {job.duration}
+            </Text>
+          </View>
         </View>
-
-        <View style={styles.detailItem}>
-          <Ionicons
-            name="calendar-outline"
-            size={14}
-            color={Colors.textSecondary}
-          />
-          <Text style={[styles.detailText, { writingDirection: 'ltr' }]}>
-            {formatShortDate(job.startDate)}
-          </Text>
-        </View>
-
-        <View style={styles.detailItem}>
-          <Ionicons
-            name="time-outline"
-            size={14}
-            color={Colors.textSecondary}
-          />
-          <Text style={styles.detailText}>{job.duration}</Text>
+        <View style={styles.rateBadge}>
+          {!!job.hourlyRate && <RateLine amount={job.hourlyRate} unit="שעה" />}
+          {!!job.dailyRate && <RateLine amount={job.dailyRate} unit="יום" />}
         </View>
       </View>
 
-      <View style={styles.metaBlock}>
-        <View style={styles.metaItem}>
-          <Ionicons
-            name="people-outline"
-            size={15}
-            color={Colors.textSecondary}
-          />
-          <Text style={styles.metaText}>{job.workersNeeded} עובדים</Text>
-        </View>
-
-        <View style={styles.metaItem}>
-          <Ionicons
-            name="person-outline"
-            size={15}
-            color={Colors.textSecondary}
-          />
-          <Text style={styles.metaText}>{applicantsCount} מועמדים</Text>
-        </View>
+      <View style={styles.viewDetailsRow}>
+        <Ionicons name="chevron-back" size={16} color={Colors.primary} />
+        <Text style={styles.viewDetailsText}>צפה בפרטי המשרה</Text>
       </View>
-
-      <View style={styles.footerDivider} />
-
-      <View style={styles.footerRow}>
-        <View style={styles.rateWrap}>
-          <Text style={styles.rate}>{formatCurrency(job.dailyRate)}</Text>
-          <Text style={styles.rateLabel}>/יום</Text>
-        </View>
-      </View>
-
-      {showActions && (
-        <View style={styles.actions}>
-          {onEdit && (
-            <TouchableOpacity
-              style={styles.editBtn}
-              onPress={onEdit}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name="create-outline"
-                size={16}
-                color={Colors.textSecondary}
-              />
-            </TouchableOpacity>
-          )}
-
-          {onViewRequests && (
-            <TouchableOpacity
-              style={styles.requestsBtn}
-              onPress={onViewRequests}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.requestsBtnText}>
-                בקשות ({applicantsCount})
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {isWorkerView && onApply && (
-        <TouchableOpacity
-          style={styles.applyBtn}
-          onPress={onApply}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="paper-plane" size={16} color={Colors.white} />
-          <Text style={styles.applyBtnText}>הגש מועמדות</Text>
-        </TouchableOpacity>
-      )}
     </TouchableOpacity>
+  );
+};
+
+/** One line of the rate badge — built from the single shared
+ *  formatRatePerUnit formatter, just split for the two-tone styling
+ *  (amount+₪ bold, /unit muted). */
+const RateLine: React.FC<{ amount: number; unit: 'שעה' | 'יום' }> = ({ amount, unit }) => {
+  const [main, unitPart] = formatRatePerUnit(amount, unit).split('/');
+  return (
+    <Text style={styles.rateLine} numberOfLines={1}>
+      {main}
+      <Text style={styles.rateUnit}>/{unitPart}</Text>
+    </Text>
   );
 };
 
@@ -176,141 +99,60 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.white,
     borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
     padding: Spacing.lg,
-    marginHorizontal: Spacing.lg,
-    marginVertical: Spacing.sm,
-    overflow: 'hidden',
-    ...Shadow.medium,
+    gap: Spacing.sm,
+    ...Shadow.small,
   },
 
-  urgentBanner: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    backgroundColor: Colors.danger,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 4,
-    borderBottomLeftRadius: Radius.md,
+  headRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 4,
+    gap: Spacing.sm,
   },
-
-  urgentText: {
-    color: Colors.white,
-    fontSize: FontSize.xs,
-    fontWeight: '700',
-    writingDirection: 'rtl',
-  },
-
-  topRow: {
-    width: '100%',
-    minHeight: 30,
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.sm,
-  },
-
-  topRowWithUrgent: {
-    marginTop: Spacing.lg,
-  },
-
-  professionTag: {
-    backgroundColor: Colors.primaryFaint,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-    borderRadius: Radius.full,
-  },
-
-  professionText: {
-    color: Colors.primary,
-    fontSize: FontSize.xs,
-    fontWeight: '600',
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-    borderRadius: Radius.full,
-  },
-
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-
-  statusText: {
-    fontSize: FontSize.xs,
-    fontWeight: '600',
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-
   title: {
-    width: '100%',
-    fontSize: FontSize.lg,
-    fontWeight: '700',
+    flex: 1,
+    fontSize: FontSize.md,
+    fontWeight: '800',
     color: Colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
-    marginBottom: Spacing.xs,
   },
 
-  description: {
-    width: '100%',
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    lineHeight: 20,
+  contractor: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
     textAlign: 'right',
     writingDirection: 'rtl',
-    marginBottom: Spacing.md,
   },
 
-  detailsGrid: {
-    width: '100%',
+  desc: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+
+  metaRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  metaGroup: {
+    flex: 1,
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
+    alignItems: 'center',
+    gap: Spacing.md,
   },
-
-  detailItem: {
-    flexDirection: 'row',
+  metaItem: {
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: Colors.gray50,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: Radius.sm,
+    maxWidth: '100%',
   },
-
-  detailText: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-
-  metaBlock: {
-    width: '100%',
-    alignItems: 'flex-end',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-
   metaText: {
     fontSize: FontSize.sm,
     color: Colors.textSecondary,
@@ -318,87 +160,40 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
 
-  footerDivider: {
-    height: 1,
-    backgroundColor: Colors.border,
-    marginBottom: Spacing.md,
-  },
-
-  footerRow: {
-    width: '100%',
+  rateBadge: {
+    flexShrink: 0,
     alignItems: 'flex-end',
-  },
-
-  rateWrap: {
-    flexDirection: 'row-reverse',
-    alignItems: 'baseline',
+    justifyContent: 'center',
     gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radius.sm,
   },
-
-  rate: {
-    fontSize: FontSize.xl,
+  rateLine: {
+    fontSize: FontSize.sm,
     fontWeight: '800',
     color: Colors.primary,
-    textAlign: 'right',
     writingDirection: 'ltr',
   },
-
-  rateLabel: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'right',
-    writingDirection: 'rtl',
+  rateUnit: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: Colors.textMuted,
   },
 
-  actions: {
-    flexDirection: 'row-reverse',
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
-  },
-
-  requestsBtn: {
-    flex: 1,
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  requestsBtnText: {
-    color: Colors.white,
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    textAlign: 'center',
-    writingDirection: 'rtl',
-  },
-
-  editBtn: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  applyBtn: {
+  viewDetailsRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.md,
-    paddingVertical: 12,
-    marginTop: Spacing.md,
+    gap: 4,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.gray100,
   },
-
-  applyBtnText: {
-    color: Colors.white,
-    fontSize: FontSize.md,
+  viewDetailsText: {
+    fontSize: FontSize.sm,
     fontWeight: '700',
-    textAlign: 'center',
+    color: Colors.primary,
     writingDirection: 'rtl',
   },
 });
