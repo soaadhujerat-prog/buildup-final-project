@@ -15,7 +15,9 @@ import { AppNotification, NotificationType } from '../types';
 
 interface Props {
   onBack: () => void;
-  onNavigate: (type: NotificationType, relatedId?: string) => void;
+  /** Hand the whole notification to the navigator's single deep-link
+   *  resolver — it reads `type` + `relatedId` and figures out the target. */
+  onNavigate: (notification: AppNotification) => void;
 }
 
 const iconForType = (
@@ -77,6 +79,7 @@ const iconForType = (
         bg: '#FEF3C7',
       };
     case 'license_update_approved':
+    case 'contractor_registration_number_updated':
       return {
         name: 'shield-checkmark-outline',
         tint: Colors.success,
@@ -126,7 +129,7 @@ const NotificationsScreen: React.FC<Props> = ({ onBack, onNavigate }) => {
 
   const handleTap = (n: AppNotification) => {
     if (!n.isRead) markNotificationRead(n.id);
-    onNavigate(n.type, n.relatedId);
+    onNavigate(n);
   };
 
   const handleMarkAll = () => {

@@ -17,6 +17,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   BackHandler,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,7 +26,7 @@ import { Colors, FontSize } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { clearAllScrollMemory } from '../utils/scrollMemory';
 import {
-  NotificationType,
+  AppNotification,
 } from '../types';
 import { LoginResult } from '../context/AppContext';
 
@@ -172,7 +173,17 @@ type AdminTab =
 // =============================================================================
 
 const AppNavigator: React.FC = () => {
-  const { currentUser, logout, getOrCreateConversation } = useApp();
+  const {
+    currentUser,
+    logout,
+    getOrCreateConversation,
+    getJobById,
+    getUserById,
+    applications,
+    conversations,
+    supportTickets,
+    registrations,
+  } = useApp();
 
   // History stack for the post-login drilldown area — the last entry is the
   // active screen; popping it (goBack) reveals whatever the user actually
@@ -346,98 +357,184 @@ const AppNavigator: React.FC = () => {
     // the navigator's blocked guard takes over from here (no route needed).
   };
 
-  // Notification deep-linking: route based on type + relatedId
+  // -------------------------------------------------------------------------
+  // Notification deep-linking — the SINGLE place a notification tap turns into
+  // navigation. Every branch routes off stable entity IDs only (never a
+  // title, a person's name, or the body text). `notification.relatedId` holds
+  // the PRIMARY entity id for its type; any secondary id the target screen
+  // needs (e.g. an application's jobId) is resolved here from the live
+  // collections, so we always hand a screen the exact id it looks up.
+  //
+  // Resolution has two failure modes, kept distinct:
+  //   • target is a list / tab  -> just go there (nothing to "not find").
+  //   • target needs one entity that no longer exists -> `entityGone()`:
+  //     a calm message, and we stay on the notifications list. This never
+  //     masks a wrong-id bug, because every id below is resolved, not
+  //     assumed.
+  // -------------------------------------------------------------------------
   const navigateFromNotification = useCallback(
-    (type: NotificationType, relatedId?: string) => {
+    (notification: AppNotification) => {
       const role = currentUser?.role;
       if (!role) return;
-      switch (type) {
+      const relatedId = notification.relatedId;
+
+      const entityGone = () =>
+        Alert.alert('לא זמין', 'הפריט שאליו ההתראה מפנה אינו זמין עוד.');
+
+      switch (notification.type) {
+        // Worker applied to a job → contractor opens THAT job (its details
+        // screen lists the candidates). relatedId = application id.
         case 'job_application':
-        case 'job_request':
-          // Contractor: open the job (its details show candidates)
-          if (role === 'contractor' && relatedId)
-            push({ name: 'ContractorJobDetails', jobId: relatedId });
+        case 'job_request': {
+          if (role !== 'contractor') break;
+          const app = relatedId
+            ? applications.find((a) => a.id === relatedId)
+            : undefined;
+          const job = app ? getJobById(app.jobId) : undefined;
+          if (job) push({ name: 'ContractorJobDetails', jobId: job.id });
+          else entityGone();
           break;
+        }
+
+        // A decision landed on the worker's application → worker opens THAT
+        // job, where their application row shows the new status.
+        // relatedId = application id.
         case 'application_accepted':
         case 'application_rejected':
         case 'job_accepted':
-        case 'job_rejected':
-          // Worker: open MyApplications (relatedId = applicationId, not used directly)
-          if (role === 'worker') setWorkerTab('my-applications');
-          resetTo(null);
+        case 'job_rejected': {
+          if (role !== 'worker') break;
+          const app = relatedId
+            ? applications.find((a) => a.id === relatedId)
+            : undefined;
+          const job = app ? getJobById(app.jobId) : undefined;
+          if (job) {
+            push({ name: 'WorkerJobDetails', jobId: job.id });
+          } else {
+            // Job/application no longer around — the applications list is a
+            // real screen, so land there rather than nag.
+            setWorkerTab('my-applications');
+            resetTo(null);
+          }
           break;
+        }
+
+        // Invitation lifecycle → the relevant list for each side. No
+        // per-invitation detail screen exists, so a missing row is harmless.
         case 'invitation_received':
         case 'invitation_cancelled':
-          // Worker: open invitations list
           if (role === 'worker') push({ name: 'WorkerInvitations' });
           break;
         case 'invitation_accepted':
         case 'invitation_declined':
-          // Contractor: open sent invitations
           if (role === 'contractor')
             push({ name: 'ContractorSentInvitations' });
           break;
-        case 'assignment_cancelled':
-          // relatedId = jobId. Worker -> their assignments list;
-          // contractor -> that job's staffing screen.
+
+        // A staffed worker left / was removed. relatedId = job id.
+        case 'assignment_cancelled': {
           if (role === 'worker') {
             push({ name: 'WorkerMyAssignments' });
-          } else if (role === 'contractor' && relatedId) {
-            push({ name: 'ContractorJobStaffing', jobId: relatedId });
+          } else if (role === 'contractor') {
+            const job = relatedId ? getJobById(relatedId) : undefined;
+            if (job) push({ name: 'ContractorJobStaffing', jobId: job.id });
+            else entityGone();
           }
           break;
-        case 'new_message':
-          push({ name: 'Messages' });
+        }
+
+        // New chat message. relatedId = conversation id → open that thread;
+        // fall back to the inbox if the id can't be matched.
+        case 'new_message': {
+          const conv = relatedId
+            ? conversations.find((c) => c.id === relatedId)
+            : undefined;
+          if (conv) push({ name: 'Chat', conversationId: conv.id });
+          else push({ name: 'Messages' });
           break;
-        case 'support_response':
-          if (relatedId)
-            push({ name: 'SupportTicketDetails', ticketId: relatedId });
-          else push({ name: 'SupportTickets' });
+        }
+
+        // Support-ticket activity (reply / status change / closed / reopened),
+        // for the requester OR an admin. relatedId = ticket id.
+        case 'support_response': {
+          const ticket = relatedId
+            ? supportTickets.find((t) => t.id === relatedId)
+            : undefined;
+          if (ticket)
+            push({ name: 'SupportTicketDetails', ticketId: ticket.id });
+          else entityGone();
           break;
-        case 'new_pending_registration':
-          if (role === 'admin' && relatedId) {
-            push({
-              name: 'AdminRegistrationDetails',
-              registrationId: relatedId,
-            });
-          } else if (role === 'admin') {
-            setAdminTab('pending-registrations');
-            resetTo(null);
-          }
-          break;
-        case 'new_support_ticket':
-          if (role === 'admin' && relatedId) {
-            push({ name: 'SupportTicketDetails', ticketId: relatedId });
-          } else if (role === 'admin') {
+        }
+
+        // Admin: a new ticket was opened. relatedId = ticket id.
+        case 'new_support_ticket': {
+          if (role !== 'admin') break;
+          const ticket = relatedId
+            ? supportTickets.find((t) => t.id === relatedId)
+            : undefined;
+          if (ticket) {
+            push({ name: 'SupportTicketDetails', ticketId: ticket.id });
+          } else {
             setAdminTab('support-tickets');
             resetTo(null);
           }
           break;
-        case 'license_update_submitted':
-        case 'license_attention':
-          // relatedId = contractorId → open that contractor's admin card
-          // (its licence / "בקשת עדכון רישיון" section).
-          if (role === 'admin' && relatedId) {
-            push({ name: 'AdminUserDetails', userId: relatedId });
+        }
+
+        // Admin: a registration is waiting for review. relatedId =
+        // registration id (records are never deleted, only re-statused).
+        case 'new_pending_registration': {
+          if (role !== 'admin') break;
+          const reg = relatedId
+            ? registrations.find((r) => r.id === relatedId)
+            : undefined;
+          if (reg) {
+            push({
+              name: 'AdminRegistrationDetails',
+              registrationId: reg.id,
+            });
+          } else {
+            setAdminTab('pending-registrations');
+            resetTo(null);
           }
           break;
+        }
+
+        // Admin: contractor licence needs attention / an update was
+        // submitted. relatedId = the contractor's user id.
+        case 'license_update_submitted':
+        case 'license_attention': {
+          if (role !== 'admin') break;
+          const contractor = relatedId ? getUserById(relatedId) : undefined;
+          if (contractor && relatedId)
+            push({ name: 'AdminUserDetails', userId: relatedId });
+          else entityGone();
+          break;
+        }
+
+        // Contractor: the outcome of their licence-update request, or an admin
+        // manually editing their registration number — their own profile
+        // (licence area) shows the updated details.
         case 'license_update_approved':
         case 'license_update_rejected':
-          // Contractor: land on their own profile, where the licence section
-          // reflects the outcome.
+        case 'contractor_registration_number_updated':
           if (role === 'contractor') {
             setContractorTab('profile');
             resetTo(null);
           }
           break;
+
+        // Contractor: asked to upload a renewed licence — straight into the
+        // profile-edit screen's licence section.
         case 'license_renewal_requested':
-          // Contractor: straight into the profile-edit screen, where the
-          // "עדכון רישיון קבלן" area lets them upload the renewed licence.
           if (role === 'contractor') {
             setContractorTab('profile');
             push({ name: 'ContractorProfileEdit' });
           }
           break;
+
+        // Informational only — nothing to open. Dismiss the notifications
+        // screen back to wherever the user was.
         case 'registration_approved':
         case 'registration_rejected':
         case 'account_blocked':
@@ -445,12 +542,21 @@ const AppNavigator: React.FC = () => {
         case 'review':
         case 'system':
         default:
-          // Default: just dismiss the notifications screen
           resetTo(null);
           break;
       }
     },
-    [currentUser, push, resetTo]
+    [
+      currentUser,
+      push,
+      resetTo,
+      applications,
+      conversations,
+      supportTickets,
+      registrations,
+      getJobById,
+      getUserById,
+    ]
   );
 
   // ---- Auth/status screens --------------------------------------------------

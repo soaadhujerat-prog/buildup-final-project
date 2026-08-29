@@ -289,6 +289,18 @@ interface AppState {
     contractorId: string,
     patch: Partial<Contractor>
   ) => void;
+  /** Admin edits the contractor's registration number from the user card.
+   *  Persists it on the same Contractor object and notifies the contractor —
+   *  but ONLY when the value really changes (identical value, empty value, or
+   *  an unknown contractor -> nothing happens, no notification). This is the
+   *  manual-edit path only; changing the number as part of approving a
+   *  ContractorLicenseUpdateRequest keeps its own single "licence updated"
+   *  notification and does not go through here. */
+  updateContractorRegistrationNumber: (
+    contractorId: string,
+    registrationNumber: string,
+    adminId: string
+  ) => void;
 
   // Messaging — one conversation per pair of users, WhatsApp-style (no job
   // scoping: the same two people always share a single thread).
@@ -1651,6 +1663,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
   }, []);
 
+  const updateContractorRegistrationNumber = useCallback<
+    AppState['updateContractorRegistrationNumber']
+  >(
+    (contractorId, registrationNumber, _adminId) => {
+      const next = registrationNumber.trim();
+      const existing = contractors.find((c) => c.id === contractorId);
+      // No real change (or nothing to change) -> persist nothing and,
+      // critically, send NO notification.
+      if (
+        !existing ||
+        !next ||
+        next === existing.contractorRegistrationNumber
+      ) {
+        return;
+      }
+
+      setContractors((prev) =>
+        prev.map((c) =>
+          c.id === contractorId
+            ? { ...c, contractorRegistrationNumber: next }
+            : c
+        )
+      );
+      setCurrentUser((cu) =>
+        cu && cu.role === 'contractor' && cu.id === contractorId
+          ? { ...cu, contractorRegistrationNumber: next }
+          : cu
+      );
+
+      // The update is saved at this point — now tell the contractor. This is
+      // the manual-edit path only, so it never doubles up with the
+      // "בקשת עדכון הרישיון אושרה" notification from reviewContractorLicenseUpdate.
+      pushNotification({
+        userId: contractorId,
+        type: 'contractor_registration_number_updated',
+        title: 'מספר רישום הקבלן עודכן',
+        body: 'מספר רישום הקבלן בחשבונך עודכן על ידי מנהל המערכת. ניתן לצפות בפרטים המעודכנים בפרופיל שלך.',
+        relatedId: contractorId,
+      });
+    },
+    [contractors, pushNotification]
+  );
+
   // ---------------------------------------------------------------------
   // Messaging
   // ---------------------------------------------------------------------
@@ -2267,6 +2322,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setWorkerAvailability,
       updateWorkerProfile,
       updateContractorProfile,
+      updateContractorRegistrationNumber,
 
       getOrCreateConversation,
       sendMessage,
@@ -2348,6 +2404,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setWorkerAvailability,
       updateWorkerProfile,
       updateContractorProfile,
+      updateContractorRegistrationNumber,
       getOrCreateConversation,
       sendMessage,
       openSupportTicket,

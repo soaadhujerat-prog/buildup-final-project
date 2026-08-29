@@ -573,6 +573,9 @@ export type NotificationType =
   | 'license_update_rejected'
   | 'license_attention'
   | 'license_renewal_requested'
+  // Admin manually edited the contractor's registration number from the
+  // user card — separate from the licence-update-request flow.
+  | 'contractor_registration_number_updated'
   | 'system'
   // legacy values (back-compat with old mock data)
   | 'job_request'

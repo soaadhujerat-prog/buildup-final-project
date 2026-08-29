@@ -60,7 +60,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
     supportTickets,
     blockUser,
     unblockUser,
-    updateContractorProfile,
+    updateContractorRegistrationNumber,
     getPendingLicenseRequestForContractor,
     reviewContractorLicenseUpdate,
     verifyContractorLicense,
@@ -188,8 +188,13 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
     try {
       // Updates the ONE Contractor object in AppContext — same id, no new
       // user, every other field untouched. All screens read this object, so
-      // the change shows everywhere immediately.
-      updateContractorProfile(c.id, { contractorRegistrationNumber: next });
+      // the change shows everywhere immediately. This path also notifies the
+      // contractor that their registration number was changed.
+      updateContractorRegistrationNumber(
+        c.id,
+        next,
+        currentUser?.id ?? 'adm1'
+      );
       setRegEditVisible(false);
       Alert.alert('עודכן', 'מספר רישום הקבלנים עודכן.');
     } catch {
