@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -50,6 +50,32 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
 
   const scrollRef = useRef<ScrollView>(null);
   const [reply, setReply] = useState('');
+  // True only while the reply TextInput holds focus — so the keyboard
+  // listener below scrolls the compose area up only when the user is
+  // actually writing, never on an unrelated keyboard event.
+  const replyFocusedRef = useRef(false);
+  // Real measured header height → the correct keyboardVerticalOffset for the
+  // KeyboardAvoidingView (which starts BELOW the header), instead of a guess.
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  const scrollComposeIntoView = () => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  };
+
+  // iOS: scrollToEnd fired from onFocus runs BEFORE the keyboard finishes
+  // opening, so the available height hasn't shrunk yet and the compose stays
+  // hidden. Re-run the scroll on keyboardDidShow (fires after the height has
+  // actually changed) while the reply field is focused. Works the same for
+  // admin / worker / contractor — the compose block is identical for all.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (replyFocusedRef.current) {
+        // one more frame so the ScrollView has re-laid-out at the new height
+        requestAnimationFrame(scrollComposeIntoView);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // One chronological thread: the original ticket text first, then every
   // reply that was appended after it (admin or requester). Nothing is ever
@@ -130,7 +156,10 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.headerBar}>
+      <View
+        style={styles.headerBar}
+        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
@@ -140,17 +169,19 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + 56}
+        // The KAV starts BELOW the header, so its offset from the top of the
+        // screen is the notch inset + the real (measured) header height.
+        keyboardVerticalOffset={insets.top + (headerHeight || 56)}
       >
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={{
-            padding: Spacing.lg,
-            paddingBottom: 40,
-          }}
+          style={styles.flex}
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
+          keyboardDismissMode={
+            Platform.OS === 'ios' ? 'interactive' : 'on-drag'
+          }
         >
           {/* Ticket header */}
           <View style={styles.heroCard}>
@@ -339,11 +370,16 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
               }
               placeholderTextColor={Colors.textMuted}
               multiline
-              onFocus={() =>
-                requestAnimationFrame(() =>
-                  scrollRef.current?.scrollToEnd({ animated: true })
-                )
-              }
+              onFocus={() => {
+                replyFocusedRef.current = true;
+                // Fallback for when the keyboard is ALREADY open (re-focus /
+                // switching from another field) so keyboardDidShow won't fire
+                // again — a short delay lets layout settle first.
+                setTimeout(scrollComposeIntoView, 150);
+              }}
+              onBlur={() => {
+                replyFocusedRef.current = false;
+              }}
             />
             <TouchableOpacity
               style={styles.submitBtn}
@@ -363,6 +399,14 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   flex: { flex: 1 },
+  // flexGrow keeps short threads filling the viewport (stable layout for
+  // scrollToEnd); paddingBottom is a small margin so the "שלח תגובה" button
+  // clears the keyboard edge once scrolled — NOT a large fixed gap.
+  scrollContent: {
+    padding: Spacing.lg,
+    paddingBottom: Spacing.xl,
+    flexGrow: 1,
+  },
 
   headerBar: {
     position: 'relative',

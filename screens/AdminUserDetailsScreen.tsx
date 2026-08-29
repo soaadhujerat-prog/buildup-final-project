@@ -22,20 +22,27 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
+import AttachedDocument from '../components/AttachedDocument';
 import { Contractor, Worker } from '../types';
 import {
   workerProfessions,
   workerPrimaryProfession,
   contractorAreas,
-  certificationNames,
+  normalizeCertifications,
 } from '../utils/normalize';
 
 interface Props {
   userId: string;
   onBack: () => void;
+  /** Admin-only drilldown into every job a contractor posted (read-only). */
+  onOpenContractorJobs?: (contractorId: string) => void;
 }
 
-const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
+const AdminUserDetailsScreen: React.FC<Props> = ({
+  userId,
+  onBack,
+  onOpenContractorJobs,
+}) => {
   const insets = useSafeAreaInsets();
   const {
     currentUser,
@@ -43,6 +50,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
     jobs,
     applications,
     invitations,
+    assignments,
     supportTickets,
     blockUser,
     unblockUser,
@@ -56,39 +64,66 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
   const [regEditValue, setRegEditValue] = useState('');
   const [regEditSubmitting, setRegEditSubmitting] = useState(false);
 
+  // Every KPI is derived LIVE from the source arrays in AppContext — no
+  // stored counters anywhere. sendInvitation / applyToJob / an Assignment
+  // being created / openSupportTicket all mutate one of these arrays, so the
+  // numbers here update the moment that happens.
   const activity = useMemo(() => {
     if (!user) return null;
     if (user.role === 'worker') {
-      const apps = applications.filter((a) => a.workerId === user.id);
-      const invs = invitations.filter((i) => i.workerId === user.id);
-      const tix = supportTickets.filter((t) => t.userId === user.id);
+      // "הגיש מועמדויות" — every Application this worker ever filed.
+      const applicationsCount = applications.filter(
+        (a) => a.workerId === user.id
+      ).length;
+      // "הזמנות שקיבל" — historical count of Invitation records sent to this
+      // worker (any later status still counts; the record isn't a duplicate).
+      const invitationsCount = invitations.filter(
+        (i) => i.workerId === user.id
+      ).length;
+      // "שיפוצים ששובץ אליהם" — unique jobs with a real Assignment for this
+      // worker. Never derived from applications/invitations. De-duped by jobId.
+      const assignedJobsCount = new Set(
+        assignments
+          .filter((a) => a.workerId === user.id)
+          .map((a) => a.jobId)
+      ).size;
+      const ticketsCount = supportTickets.filter(
+        (t) => t.userId === user.id
+      ).length;
       return {
-        applicationsCount: apps.length,
-        completedCount: apps.filter(
-          (a) =>
-            a.status === 'accepted' &&
-            jobs.find((j) => j.id === a.jobId)?.status === 'completed'
-        ).length,
-        invitationsCount: invs.length,
-        ticketsCount: tix.length,
+        applicationsCount,
+        invitationsCount,
+        assignedJobsCount,
+        ticketsCount,
       };
     }
     if (user.role === 'contractor') {
       const myJobs = jobs.filter((j) => j.contractorId === user.id);
-      const myJobIds = myJobs.map((j) => j.id);
-      const apps = applications.filter((a) => myJobIds.includes(a.jobId));
-      const invs = invitations.filter((i) => i.contractorId === user.id);
-      const tix = supportTickets.filter((t) => t.userId === user.id);
+      const myJobIds = new Set(myJobs.map((j) => j.id));
+      // "מועמדויות שקיבל" — Applications filed to any of this contractor's jobs.
+      const applicationsCount = applications.filter((a) =>
+        myJobIds.has(a.jobId)
+      ).length;
+      // "עובדים ששובצו" — unique worker+job pairs among this contractor's
+      // Assignment records (de-duped so the same worker on the same job is
+      // counted once).
+      const assignedWorkersCount = new Set(
+        assignments
+          .filter((a) => a.contractorId === user.id)
+          .map((a) => `${a.workerId}:${a.jobId}`)
+      ).size;
+      const ticketsCount = supportTickets.filter(
+        (t) => t.userId === user.id
+      ).length;
       return {
         jobsCount: myJobs.length,
-        completedJobs: myJobs.filter((j) => j.status === 'completed').length,
-        applicationsCount: apps.length,
-        invitationsSent: invs.length,
-        ticketsCount: tix.length,
+        applicationsCount,
+        assignedWorkersCount,
+        ticketsCount,
       };
     }
     return null;
-  }, [user, applications, invitations, supportTickets, jobs]);
+  }, [user, applications, invitations, assignments, supportTickets, jobs]);
 
   if (!user || user.role === 'admin') {
     return (
@@ -213,7 +248,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
           </View>
         </View>
 
-        {/* Activity stats — derived from real source data */}
+        {/* Activity KPIs — every number derived live from AppContext arrays */}
         {activity && (
           <View style={styles.statsRow}>
             {isWorker ? (
@@ -227,6 +262,10 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
                   value={(activity as any).invitationsCount}
                 />
                 <StatChip
+                  label="שיפוצים ששובץ אליהם"
+                  value={(activity as any).assignedJobsCount}
+                />
+                <StatChip
                   label="פניות תמיכה"
                   value={(activity as any).ticketsCount}
                 />
@@ -236,14 +275,23 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
                 <StatChip
                   label="משרות שפרסם"
                   value={(activity as any).jobsCount}
+                  onPress={
+                    c && onOpenContractorJobs
+                      ? () => onOpenContractorJobs(c.id)
+                      : undefined
+                  }
                 />
                 <StatChip
-                  label="הזמנות ששלח"
-                  value={(activity as any).invitationsSent}
-                />
-                <StatChip
-                  label="מועמדים שקיבל"
+                  label="מועמדויות שקיבל"
                   value={(activity as any).applicationsCount}
+                />
+                <StatChip
+                  label="עובדים ששובצו"
+                  value={(activity as any).assignedWorkersCount}
+                />
+                <StatChip
+                  label="פניות תמיכה"
+                  value={(activity as any).ticketsCount}
                 />
               </>
             )}
@@ -269,7 +317,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
           <FieldRow label="עיר" value={user.city} />
         </Section>
 
-        {/* Worker-only */}
+        {/* Worker-only — current profile straight off the live Worker object */}
         {w && (
           <>
             <Section title="פרופיל מקצועי">
@@ -287,19 +335,38 @@ const AdminUserDetailsScreen: React.FC<Props> = ({ userId, onBack }) => {
                 value={w.skills.length ? w.skills.join(', ') : '—'}
               />
               <FieldRow
-                label="תעודות"
-                value={
-                  certificationNames(w.certifications).length
-                    ? certificationNames(w.certifications).join(', ')
-                    : '—'
-                }
+                label="אזורים מועדפים"
+                value={w.preferredAreas.length ? w.preferredAreas.join(', ') : '—'}
               />
-              <FieldRow
-                label="זמין"
-                value={w.isAvailable ? 'כן' : 'לא'}
-              />
+            </Section>
+
+            <Section title="זמינות ותעריפים">
+              <FieldRow label="זמין" value={w.isAvailable ? 'כן' : 'לא'} />
+              {!!w.availableFrom && (
+                <FieldRow
+                  label="זמין החל מ-"
+                  value={new Date(w.availableFrom).toLocaleDateString('he-IL')}
+                  ltr
+                />
+              )}
               <FieldRow label="תעריף שעתי" value={`${w.hourlyRate} ₪`} ltr />
               <FieldRow label="תעריף יומי" value={`${w.dailyRate} ₪`} ltr />
+            </Section>
+
+            <Section title="תעודות והסמכות">
+              {normalizeCertifications(w.certifications).length === 0 ? (
+                <Text style={styles.emptyLine}>לא הוזנו תעודות</Text>
+              ) : (
+                normalizeCertifications(w.certifications).map((cert, i) => (
+                  <View
+                    key={cert.id ?? `${i}-${cert.name}`}
+                    style={styles.certRow}
+                  >
+                    <Text style={styles.certName}>{cert.name}</Text>
+                    <AttachedDocument doc={cert.document} />
+                  </View>
+                ))
+              )}
             </Section>
           </>
         )}
@@ -581,15 +648,37 @@ const FieldRow: React.FC<{
   </View>
 );
 
-const StatChip: React.FC<{ label: string; value: number }> = ({
-  label,
-  value,
-}) => (
-  <View style={styles.statChip}>
-    <Text style={styles.statChipValue}>{value}</Text>
-    <Text style={styles.statChipLabel}>{label}</Text>
-  </View>
-);
+const StatChip: React.FC<{
+  label: string;
+  value: number;
+  onPress?: () => void;
+}> = ({ label, value, onPress }) => {
+  const body = (
+    <>
+      <Text style={styles.statChipValue}>{value}</Text>
+      <Text style={styles.statChipLabel}>{label}</Text>
+      {onPress && (
+        <Ionicons
+          name="chevron-back"
+          size={13}
+          color={Colors.textMuted}
+          style={styles.statChipChevron}
+        />
+      )}
+    </>
+  );
+  return onPress ? (
+    <TouchableOpacity
+      style={[styles.statChip, styles.statChipPressable]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      {body}
+    </TouchableOpacity>
+  ) : (
+    <View style={styles.statChip}>{body}</View>
+  );
+};
 
 // ---------- styles ----------
 
@@ -681,6 +770,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     ...Shadow.small,
   },
+  statChipPressable: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  statChipChevron: {
+    position: 'absolute',
+    left: Spacing.md,
+    top: Spacing.md,
+  },
   statChipValue: {
     fontSize: FontSize.xl,
     fontWeight: '800',
@@ -740,6 +838,28 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     textAlign: 'right',
     lineHeight: 22,
+  },
+
+  emptyLine: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    fontStyle: 'italic',
+  },
+  certRow: {
+    width: '100%',
+    gap: 6,
+    paddingVertical: 8,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  certName: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
 
   blockedBox: {

@@ -23,6 +23,7 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
+import AttachedDocument from '../components/AttachedDocument';
 import { isImageDocument, formatFileSize } from '../components/DocumentUploadField';
 import { formatDateTime } from '../utils/helpers';
 import {
@@ -32,22 +33,33 @@ import {
 import {
   workerProfessions,
   contractorAreas,
-  certificationNames,
+  normalizeCertifications,
 } from '../utils/normalize';
+
+type RegStatusFilter = 'pending' | 'approved' | 'rejected';
 
 interface Props {
   registrationId: string;
   onBack: () => void;
+  /** Called after approve / reject / undo — tells the navigator which status
+   *  tab of "בקשות רישום" to land on. Falls back to onBack when absent. */
+  onResolved?: (status: RegStatusFilter) => void;
+  /** Admin-only: open the live user card of the user this registration
+   *  created (only meaningful once approved). */
+  onOpenUser?: (userId: string) => void;
 }
 
 const RegistrationDetailsScreen: React.FC<Props> = ({
   registrationId,
   onBack,
+  onResolved,
+  onOpenUser,
 }) => {
   const insets = useSafeAreaInsets();
   const {
     currentUser,
     getRegistration,
+    getUserById,
     approveRegistration,
     rejectRegistration,
     revertRegistrationRejection,
@@ -76,10 +88,19 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   const wd = isWorker ? (data as WorkerRegistrationData) : null;
   const cd = !isWorker ? (data as ContractorRegistrationData) : null;
 
+  // The live user this registration created (only once approved). This is a
+  // real foreign-key lookup — never a duplicated user object.
+  const linkedUser = reg.createdUserId
+    ? getUserById(reg.createdUserId)
+    : undefined;
+
   const openApproveModal = () => {
     setApproveMessage('');
     setApproveModalVisible(true);
   };
+
+  const done = (status: RegStatusFilter) =>
+    onResolved ? onResolved(status) : onBack();
 
   const submitApprove = () => {
     approveRegistration(
@@ -89,7 +110,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
     );
     setApproveModalVisible(false);
     Alert.alert('הרישום אושר', `${data.fullName} אושר/ה בהצלחה.`, [
-      { text: 'אישור', onPress: onBack },
+      { text: 'אישור', onPress: () => done('approved') },
     ]);
   };
 
@@ -107,7 +128,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
             Alert.alert(
               'הבקשה הוחזרה',
               'הבקשה חזרה לרשימת "ממתינות" לבדיקה מחודשת.',
-              [{ text: 'אישור', onPress: onBack }]
+              [{ text: 'אישור', onPress: () => done('pending') }]
             );
           },
         },
@@ -146,7 +167,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
             );
             setRejectModalVisible(false);
             Alert.alert('הרישום נדחה', `הרישום של ${data.fullName} נדחה.`, [
-              { text: 'אישור', onPress: onBack },
+              { text: 'אישור', onPress: () => done('rejected') },
             ]);
           },
         },
@@ -209,6 +230,30 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
                 {reg.rejectionReason ?? 'הסיבה לא צוינה.'}
               </Text>
             </View>
+          </Section>
+        )}
+
+        {/* Approved summary — the original registration record is kept even
+            though a live user now exists. These are the details AS SUBMITTED
+            at sign-up (a historical snapshot); the user's up-to-date profile
+            lives in "פרטי משתמש". */}
+        {reg.status === 'approved' && (
+          <Section title="סטטוס הבקשה">
+            <Text style={styles.approvedLine}>
+              הבקשה אושרה ב־
+              <Text style={{ writingDirection: 'ltr' }}>
+                {formatDateTime(reg.approvedAt ?? reg.processedAt)}
+              </Text>
+            </Text>
+            {reg.approvalMessage ? (
+              <Text style={styles.approvedNote}>
+                הודעה למשתמש: {reg.approvalMessage}
+              </Text>
+            ) : null}
+            <Text style={styles.snapshotNote}>
+              הפרטים שבמסך זה הם צילום מצב של מה שנמסר בעת ההרשמה. הפרופיל
+              המעודכן של המשתמש נמצא ב"פרטי משתמש".
+            </Text>
           </Section>
         )}
 
@@ -332,14 +377,19 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
                 label="מיומנויות"
                 value={wd.skills.length ? wd.skills.join(', ') : '—'}
               />
-              <FieldRow
-                label="תעודות והסמכות"
-                value={
-                  certificationNames(wd.certifications).length
-                    ? certificationNames(wd.certifications).join(', ')
-                    : '—'
-                }
-              />
+            </Section>
+
+            <Section title="תעודות והסמכות">
+              {normalizeCertifications(wd.certifications).length === 0 ? (
+                <Text style={styles.emptyLine}>לא הוזנו תעודות בהרשמה</Text>
+              ) : (
+                normalizeCertifications(wd.certifications).map((cert, i) => (
+                  <View key={cert.id ?? `${i}-${cert.name}`} style={styles.certRow}>
+                    <Text style={styles.certName}>{cert.name}</Text>
+                    <AttachedDocument doc={cert.document} />
+                  </View>
+                ))
+              )}
             </Section>
 
             <Section title="זמינות ותעריפים">
@@ -423,6 +473,22 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           >
             <Ionicons name="refresh-circle" size={20} color={Colors.white} />
             <Text style={styles.approveText}>בטל דחייה והחזר לבדיקה</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {reg.status === 'approved' && linkedUser && onOpenUser && (
+        <View style={[styles.actionBar, { paddingBottom: insets.bottom + 12 }]}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.viewUserBtn]}
+            onPress={() => onOpenUser(linkedUser.id)}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name="person-circle-outline"
+              size={20}
+              color={Colors.white}
+            />
+            <Text style={styles.approveText}>צפה בפרטי המשתמש</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -975,6 +1041,55 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  approvedLine: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  approvedNote: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  snapshotNote: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 18,
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
+  emptyLine: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    fontStyle: 'italic',
+  },
+  certRow: {
+    width: '100%',
+    gap: 6,
+    paddingVertical: 8,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  certName: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  viewUserBtn: {
+    backgroundColor: Colors.primary,
+    ...Shadow.small,
   },
   reasonCard: {
     backgroundColor: '#FEF2F2',

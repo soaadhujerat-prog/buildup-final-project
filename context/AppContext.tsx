@@ -718,6 +718,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       const ts = nowIso();
       const note = message?.trim() || undefined;
+      // The id of the user we're about to materialise — decided up front so
+      // the registration record can carry a reliable link to it.
+      const newUserId = newId(reg.role === 'worker' ? 'w' : 'c');
       const event: RegistrationStatusEvent = {
         id: newId('rse'),
         registrationId,
@@ -739,6 +742,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 processedBy: adminId,
                 approvedAt: ts,
                 approvalMessage: note,
+                createdUserId: newUserId,
                 statusHistory: [...(r.statusHistory ?? []), event],
               }
             : r
@@ -749,7 +753,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (reg.role === 'worker') {
         const d = reg.data as WorkerRegistrationData;
         const worker: Worker = {
-          id: newId('w'),
+          id: newUserId,
           idNumber: d.idNumber,
           fullName: d.fullName,
           phone: d.phone,
@@ -784,7 +788,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       } else {
         const d = reg.data as ContractorRegistrationData;
         const contractor: Contractor = {
-          id: newId('c'),
+          id: newUserId,
           idNumber: d.idNumber,
           fullName: d.fullName,
           phone: d.phone,

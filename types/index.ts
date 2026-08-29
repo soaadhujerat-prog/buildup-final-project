@@ -208,6 +208,11 @@ export interface RegistrationRecord {
   /** Optional free-text note the admin attached when approving — shown to the
    *  new user in their "registration approved" notification. */
   approvalMessage?: string;
+  /** The id of the Worker/Contractor that was materialised from this
+   *  registration on approval. The one reliable link between a historical
+   *  registration snapshot and the live user object — never a duplicated
+   *  user, just a foreign key. Undefined until (and unless) approved. */
+  createdUserId?: string;
   /** Append-only audit trail — see RegistrationStatusEvent. */
   statusHistory?: RegistrationStatusEvent[];
   externalChecks: {

@@ -74,6 +74,7 @@ import PendingRegistrationsScreen from '../screens/PendingRegistrationsScreen';
 import RegistrationDetailsScreen from '../screens/RegistrationDetailsScreen';
 import UserManagementScreen from '../screens/UserManagementScreen';
 import AdminUserDetailsScreen from '../screens/AdminUserDetailsScreen';
+import AdminContractorJobsScreen from '../screens/AdminContractorJobsScreen';
 
 // Shared (role-aware)
 import JobDetailsScreen from '../screens/JobDetailsScreen';
@@ -123,6 +124,7 @@ type Route =
   // Admin drilldowns
   | { name: 'AdminRegistrationDetails'; registrationId: string }
   | { name: 'AdminUserDetails'; userId: string }
+  | { name: 'AdminContractorJobs'; contractorId: string }
   // Shared (any role)
   | { name: 'Messages' }
   | { name: 'Chat'; conversationId: string }
@@ -174,6 +176,13 @@ const AppNavigator: React.FC = () => {
   const [contractorTab, setContractorTab] =
     useState<ContractorTab>('dashboard');
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
+  // Which status tab "בקשות רישום" opens on — the navigator points this at
+  // the tab that matches the last admin decision (approve → 'approved',
+  // reject → 'rejected', undo → 'pending') so the just-processed request is
+  // right there when the screen re-appears. No timeout hacks.
+  const [adminRegStatus, setAdminRegStatus] = useState<
+    'pending' | 'approved' | 'rejected'
+  >('pending');
 
   // ---- Route-stack helpers ----------------------------------------------------
 
@@ -663,6 +672,14 @@ const AppNavigator: React.FC = () => {
           <RegistrationDetailsScreen
             registrationId={route.registrationId}
             onBack={goBack}
+            onResolved={(status) => {
+              setAdminRegStatus(status);
+              setAdminTab('pending-registrations');
+              resetTo(null);
+            }}
+            onOpenUser={(userId) =>
+              push({ name: 'AdminUserDetails', userId })
+            }
           />
         );
       case 'AdminUserDetails':
@@ -670,6 +687,19 @@ const AppNavigator: React.FC = () => {
           <AdminUserDetailsScreen
             userId={route.userId}
             onBack={goBack}
+            onOpenContractorJobs={(contractorId) =>
+              push({ name: 'AdminContractorJobs', contractorId })
+            }
+          />
+        );
+      case 'AdminContractorJobs':
+        return (
+          <AdminContractorJobsScreen
+            contractorId={route.contractorId}
+            onBack={goBack}
+            onOpenUser={(userId) =>
+              push({ name: 'AdminUserDetails', userId })
+            }
           />
         );
 
@@ -776,6 +806,7 @@ const AppNavigator: React.FC = () => {
         setTab={setAdminTab}
         navigate={push}
         onLogout={handleLogout}
+        regInitialStatus={adminRegStatus}
       />
     );
   }
@@ -1010,7 +1041,8 @@ const AdminHome: React.FC<{
   setTab: (t: AdminTab) => void;
   navigate: (r: Route) => void;
   onLogout: () => void;
-}> = ({ tab, setTab, navigate, onLogout }) => {
+  regInitialStatus: 'pending' | 'approved' | 'rejected';
+}> = ({ tab, setTab, navigate, onLogout, regInitialStatus }) => {
   const body = useMemo(() => {
     switch (tab) {
       case 'dashboard':
@@ -1039,6 +1071,7 @@ const AdminHome: React.FC<{
       case 'pending-registrations':
         return (
           <PendingRegistrationsScreen
+            initialStatus={regInitialStatus}
             onBack={() => setTab('dashboard')}
             onOpenRegistration={(registrationId) =>
               navigate({
@@ -1067,7 +1100,7 @@ const AdminHome: React.FC<{
           />
         );
     }
-  }, [tab, setTab, navigate, onLogout]);
+  }, [tab, setTab, navigate, onLogout, regInitialStatus]);
 
   return (
     <View style={styles.shell}>

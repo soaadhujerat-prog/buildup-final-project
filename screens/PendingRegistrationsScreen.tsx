@@ -20,29 +20,35 @@ import {
   WorkerRegistrationData,
 } from '../types';
 
+// Two independent filter axes that work together (e.g. "נדחו" + "עובדים").
+type StatusTab = 'pending' | 'approved' | 'rejected';
+type RoleFilter = 'all' | 'worker' | 'contractor';
+
 interface Props {
   onBack: () => void;
   onOpenRegistration: (registrationId: string) => void;
+  /** Which status tab to open on mount — the navigator sets this to the
+   *  tab that matches the action just taken (approve → 'approved', etc). */
+  initialStatus?: StatusTab;
 }
-
-// Two independent filter axes that work together (e.g. "נדחו" + "עובדים").
-type StatusTab = 'pending' | 'rejected';
-type RoleFilter = 'all' | 'worker' | 'contractor';
 
 const PendingRegistrationsScreen: React.FC<Props> = ({
   onBack,
   onOpenRegistration,
+  initialStatus = 'pending',
 }) => {
   const insets = useSafeAreaInsets();
   const { registrations } = useApp();
-  const [statusTab, setStatusTab] = useState<StatusTab>('pending');
+  const [statusTab, setStatusTab] = useState<StatusTab>(initialStatus);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
 
   // Live counts from the registration source of truth — one number per
-  // (status, role) combination the UI can show.
+  // (status, role) combination the UI can show. Approved registrations are
+  // NEVER removed: the record stays here even though a live user now exists.
   const byStatus = useMemo(
     () => ({
       pending: registrations.filter((r) => r.status === 'pending'),
+      approved: registrations.filter((r) => r.status === 'approved'),
       rejected: registrations.filter((r) => r.status === 'rejected'),
     }),
     [registrations]
@@ -74,6 +80,13 @@ const PendingRegistrationsScreen: React.FC<Props> = ({
           title: 'אין בקשות ממתינות',
           sub: 'כל הבקשות בתור עברו טיפול. כל בקשה חדשה תופיע כאן אוטומטית.',
         }
+      : statusTab === 'approved'
+      ? {
+          icon: 'people-outline' as const,
+          color: Colors.textMuted,
+          title: 'אין בקשות שאושרו',
+          sub: 'בקשות שאושרו יישמרו כאן. המשתמשים שנוצרו מהן מופיעים ב"ניהול משתמשים".',
+        }
       : {
           icon: 'file-tray-outline' as const,
           color: Colors.textMuted,
@@ -96,6 +109,11 @@ const PendingRegistrationsScreen: React.FC<Props> = ({
           label={`ממתינות (${byStatus.pending.length})`}
           active={statusTab === 'pending'}
           onPress={() => setStatusTab('pending')}
+        />
+        <Tab
+          label={`אושרו (${byStatus.approved.length})`}
+          active={statusTab === 'approved'}
+          onPress={() => setStatusTab('approved')}
         />
         <Tab
           label={`נדחו (${byStatus.rejected.length})`}
@@ -162,7 +180,12 @@ const Tab: React.FC<{
     style={[styles.tab, active && styles.tabActive]}
     activeOpacity={0.85}
   >
-    <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+    <Text
+      style={[styles.tabText, active && styles.tabTextActive]}
+      numberOfLines={1}
+    >
+      {label}
+    </Text>
   </TouchableOpacity>
 );
 
@@ -189,10 +212,20 @@ const RegistrationRow: React.FC<{
   const isWorker = record.role === 'worker';
   const data = record.data as WorkerRegistrationData | ContractorRegistrationData;
   const isRejected = record.status === 'rejected';
+  const isApproved = record.status === 'approved';
 
   const subtitle = isWorker
     ? `${(data as WorkerRegistrationData).profession} · ${(data as WorkerRegistrationData).experienceYears} שנות ניסיון`
     : `${(data as ContractorRegistrationData).companyName} · רישום ${(data as ContractorRegistrationData).contractorRegistrationNumber}`;
+
+  const badgeLabel = isRejected
+    ? 'נדחה'
+    : isApproved
+    ? 'אושר'
+    : isWorker
+    ? 'עובד'
+    : 'קבלן';
+  const badgeTone = isRejected ? 'danger' : isApproved ? 'success' : 'info';
 
   return (
     <TouchableOpacity
@@ -213,11 +246,7 @@ const RegistrationRow: React.FC<{
       )}
       <View style={{ flex: 1 }}>
         <View style={styles.rowTopline}>
-          <StatusBadge
-            label={isRejected ? 'נדחה' : isWorker ? 'עובד' : 'קבלן'}
-            tone={isRejected ? 'danger' : 'info'}
-            small
-          />
+          <StatusBadge label={badgeLabel} tone={badgeTone} small />
           <Text style={styles.rowName}>{data.fullName}</Text>
         </View>
         <Text style={styles.rowSub}>{subtitle}</Text>
@@ -228,6 +257,15 @@ const RegistrationRow: React.FC<{
               {new Date(record.rejectedAt ?? record.processedAt ?? record.submittedAt).toLocaleDateString('he-IL')}
             </Text>
             {record.rejectionReason ? ` · ${record.rejectionReason}` : ''}
+          </Text>
+        ) : isApproved ? (
+          <Text style={styles.rowMeta}>
+            אושר:{' '}
+            <Text style={{ writingDirection: 'ltr' }}>
+              {new Date(record.approvedAt ?? record.processedAt ?? record.submittedAt).toLocaleDateString('he-IL')}
+            </Text>
+            {' · ת.ז '}
+            <Text style={{ writingDirection: 'ltr' }}>{data.idNumber}</Text>
           </Text>
         ) : (
           <Text style={styles.rowMeta}>
@@ -280,13 +318,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 4,
   },
   tabActive: {
     backgroundColor: Colors.adminPrimary,
     borderColor: Colors.adminPrimary,
   },
   tabText: {
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     fontWeight: '800',
     color: Colors.textSecondary,
     writingDirection: 'rtl',
