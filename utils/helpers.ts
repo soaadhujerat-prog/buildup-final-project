@@ -220,6 +220,36 @@ export const supportTicketDisplay = (
 export const isSupportTicketOpen = (status: SupportTicketStatus): boolean =>
   supportTicketDisplay(status).state !== 'done';
 
+/** The one wording for "when was this support ticket received", shared by the
+ *  list card and the details screen. Full "DD.MM.YYYY בשעה HH:mm" when the
+ *  source timestamp carries a time-of-day; date-only (no invented "בשעה
+ *  00:00") when it's a legacy date-only mock value. */
+export const supportTicketReceivedLine = (createdAt?: string): string => {
+  if (!createdAt) return '';
+  const date = new Date(createdAt);
+  if (isNaN(date.getTime())) return '';
+  const hasTime = /T\d{2}:\d{2}/.test(createdAt);
+  if (hasTime) return `הפנייה התקבלה ב־${formatDateTime(createdAt)}`;
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  return `הפנייה התקבלה ב־${dd}.${mm}.${date.getFullYear()}`;
+};
+
+/** Who wrote a support-ticket message, as shown above each bubble. */
+export const supportSenderLabel = (
+  senderRole: 'admin' | 'worker' | 'contractor'
+): string => {
+  switch (senderRole) {
+    case 'admin':
+      return 'מנהל המערכת';
+    case 'contractor':
+      return 'הקבלן';
+    case 'worker':
+    default:
+      return 'העובד';
+  }
+};
+
 /** Human timeline sentences for an application, every one a full
  *  "<what happened> ב־DD.MM.YYYY בשעה HH:mm" line. Line 1 is always the
  *  "sent" line; a second line is added for the terminal states that carry

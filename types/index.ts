@@ -175,6 +175,23 @@ export interface ContractorRegistrationData {
 
 export type RegistrationData = WorkerRegistrationData | ContractorRegistrationData;
 
+/** One immutable entry in a registration's status audit trail. A registration
+ *  is NEVER deleted and its status is NEVER silently overwritten — every
+ *  admin decision (approve / reject / re-open a rejected request) appends one
+ *  of these, so the full history "pending → rejected → pending → approved"
+ *  stays visible. `reason` carries the rejection text, `message` the optional
+ *  approval note. */
+export interface RegistrationStatusEvent {
+  id: string;
+  registrationId: string;
+  fromStatus: CustomerStatus;
+  toStatus: CustomerStatus;
+  reason?: string;
+  message?: string;
+  createdAt: string;
+  actorId?: string;
+}
+
 export interface RegistrationRecord {
   id: string;
   role: 'worker' | 'contractor';
@@ -183,6 +200,16 @@ export interface RegistrationRecord {
   processedAt?: string;
   processedBy?: string;
   rejectionReason?: string;
+  /** Stamped when the request was last moved to 'rejected'. Mirror of the
+   *  matching statusHistory entry's createdAt — kept for quick display. */
+  rejectedAt?: string;
+  /** Stamped when the request was moved to 'approved'. */
+  approvedAt?: string;
+  /** Optional free-text note the admin attached when approving — shown to the
+   *  new user in their "registration approved" notification. */
+  approvalMessage?: string;
+  /** Append-only audit trail — see RegistrationStatusEvent. */
+  statusHistory?: RegistrationStatusEvent[];
   externalChecks: {
     idValid?: boolean;
     contractorRegistrationValid?: boolean;
@@ -496,6 +523,23 @@ export type Notification = AppNotification;
 export type SupportTicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
 export type SupportTicketType = 'complaint' | 'claim' | 'question' | 'technical';
 
+export type SupportMessageSenderRole = 'admin' | 'worker' | 'contractor';
+
+/** One message in a support ticket's conversation. A ticket is a thread, not
+ *  a single question + single answer: the requester and the admin can go
+ *  back and forth any number of times, and every turn APPENDS one of these —
+ *  a reply is never overwritten. The original ticket text lives on
+ *  `SupportTicket.description`; this array holds every reply after it, in
+ *  chronological order. */
+export interface SupportTicketMessage {
+  id: string;
+  ticketId: string;
+  senderId: string;
+  senderRole: SupportMessageSenderRole;
+  message: string;
+  createdAt: string;
+}
+
 export interface SupportTicket {
   id: string;
   userId: string;
@@ -507,8 +551,16 @@ export interface SupportTicket {
   createdAt: string;
   updatedAt: string;
   assignedAdminId?: string;
+  /** @deprecated Legacy single-answer field. Source of truth for the
+   *  conversation is `messages`. Kept as a mirror of the most recent admin
+   *  reply so old records and notification bodies still resolve; every
+   *  historical reply is preserved in `messages`, never here. */
   adminResponse?: string;
   resolvedAt?: string;
+  /** Full conversation, oldest first. Always present after normalization in
+   *  AppContext (a legacy `adminResponse` is migrated into a message at load
+   *  time). */
+  messages?: SupportTicketMessage[];
 }
 
 // ---------------------------------------------------------------------------

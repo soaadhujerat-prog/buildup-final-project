@@ -11,6 +11,9 @@ import {
   Image,
   Alert,
   Linking,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +21,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
+import ContractorAvatar from '../components/ContractorAvatar';
 import { isImageDocument, formatFileSize } from '../components/DocumentUploadField';
+import { formatDateTime } from '../utils/helpers';
 import {
   ContractorRegistrationData,
   WorkerRegistrationData,
@@ -44,11 +50,14 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
     getRegistration,
     approveRegistration,
     rejectRegistration,
+    revertRegistrationRejection,
   } = useApp();
 
   const reg = getRegistration(registrationId);
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [approveModalVisible, setApproveModalVisible] = useState(false);
+  const [approveMessage, setApproveMessage] = useState('');
   const [idImageViewerVisible, setIdImageViewerVisible] = useState(false);
 
   if (!reg) {
@@ -67,20 +76,39 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   const wd = isWorker ? (data as WorkerRegistrationData) : null;
   const cd = !isWorker ? (data as ContractorRegistrationData) : null;
 
-  const handleApprove = () => {
+  const openApproveModal = () => {
+    setApproveMessage('');
+    setApproveModalVisible(true);
+  };
+
+  const submitApprove = () => {
+    approveRegistration(
+      reg.id,
+      currentUser?.id ?? 'adm1',
+      approveMessage.trim() || undefined
+    );
+    setApproveModalVisible(false);
+    Alert.alert('הרישום אושר', `${data.fullName} אושר/ה בהצלחה.`, [
+      { text: 'אישור', onPress: onBack },
+    ]);
+  };
+
+  const handleRevertRejection = () => {
     Alert.alert(
-      'אישור רישום',
-      `האם לאשר את הרישום של ${data.fullName}?`,
+      'ביטול דחייה',
+      `להחזיר את הבקשה של ${data.fullName} לרשימת הבקשות הממתינות לבדיקה מחודשת? הבקשה לא תאושר אוטומטית, והיסטוריית הדחייה תישמר.`,
       [
         { text: 'ביטול', style: 'cancel' },
         {
-          text: 'אשר',
+          text: 'החזר לבדיקה',
           style: 'default',
           onPress: () => {
-            approveRegistration(reg.id, currentUser?.id ?? 'adm1');
-            Alert.alert('הרישום אושר', `${data.fullName} אושר/ה בהצלחה.`, [
-              { text: 'אישור', onPress: onBack },
-            ]);
+            revertRegistrationRejection(reg.id, currentUser?.id ?? 'adm1');
+            Alert.alert(
+              'הבקשה הוחזרה',
+              'הבקשה חזרה לרשימת "ממתינות" לבדיקה מחודשת.',
+              [{ text: 'אישור', onPress: onBack }]
+            );
           },
         },
       ]
@@ -141,20 +169,14 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
       >
         {/* Status / role / id summary */}
         <View style={styles.heroCard}>
-          <View
-            style={[
-              styles.heroIcon,
-              {
-                backgroundColor: isWorker ? Colors.primaryFaint : '#DBEAFE',
-              },
-            ]}
-          >
-            <Ionicons
-              name={isWorker ? 'hammer' : 'business'}
-              size={26}
-              color={isWorker ? Colors.primary : Colors.secondary}
+          {isWorker ? (
+            <WorkerAvatar
+              worker={{ id: reg.id, fullName: data.fullName }}
+              size={60}
             />
-          </View>
+          ) : (
+            <ContractorAvatar contractor={null} size={60} />
+          )}
           <View style={{ flex: 1 }}>
             <Text style={styles.heroName}>{data.fullName}</Text>
             <Text style={styles.heroRole}>
@@ -169,6 +191,46 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
             </View>
           </View>
         </View>
+
+        {/* Rejected summary — this record is NOT deleted; the reason and the
+            time it was rejected stay visible, and the admin can send it back
+            to review from the action bar below. */}
+        {reg.status === 'rejected' && (
+          <Section title="סטטוס הבקשה">
+            <Text style={styles.rejectedLine}>
+              הבקשה נדחתה ב־
+              <Text style={{ writingDirection: 'ltr' }}>
+                {formatDateTime(reg.rejectedAt ?? reg.processedAt)}
+              </Text>
+            </Text>
+            <View style={styles.reasonCard}>
+              <Text style={styles.reasonCardLabel}>סיבת הדחייה</Text>
+              <Text style={styles.reasonCardText}>
+                {reg.rejectionReason ?? 'הסיבה לא צוינה.'}
+              </Text>
+            </View>
+          </Section>
+        )}
+
+        {/* Full status audit trail — appended, never overwritten */}
+        {reg.statusHistory && reg.statusHistory.length > 0 && (
+          <Section title="היסטוריית סטטוס">
+            {reg.statusHistory.map((e) => (
+              <View key={e.id} style={styles.historyRow}>
+                <Text style={styles.historyDate}>
+                  <Text style={{ writingDirection: 'ltr' }}>
+                    {formatDateTime(e.createdAt)}
+                  </Text>
+                </Text>
+                <Text style={styles.historyText}>
+                  {statusLabel(e.fromStatus)} ← {statusLabel(e.toStatus)}
+                  {e.reason ? ` · ${e.reason}` : ''}
+                  {e.message ? ` · ${e.message}` : ''}
+                </Text>
+              </View>
+            ))}
+          </Section>
+        )}
 
         {/* External checks — there is no access to an authorized government
             API to call, so these are always shown as pending external
@@ -331,7 +393,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         </Text>
       </ScrollView>
 
-      {/* Action bar (only for pending) */}
+      {/* Action bar — pending: approve / reject; rejected: send back to review */}
       {reg.status === 'pending' && (
         <View style={[styles.actionBar, { paddingBottom: insets.bottom + 12 }]}>
           <TouchableOpacity
@@ -344,7 +406,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionBtn, styles.approveBtn]}
-            onPress={handleApprove}
+            onPress={openApproveModal}
             activeOpacity={0.85}
           >
             <Ionicons name="checkmark-circle" size={20} color={Colors.white} />
@@ -352,52 +414,128 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           </TouchableOpacity>
         </View>
       )}
+      {reg.status === 'rejected' && (
+        <View style={[styles.actionBar, { paddingBottom: insets.bottom + 12 }]}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.approveBtn]}
+            onPress={handleRevertRejection}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="refresh-circle" size={20} color={Colors.white} />
+            <Text style={styles.approveText}>בטל דחייה והחזר לבדיקה</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-      {/* Reject modal */}
+      {/* Reject modal — tap any empty area (backdrop or inside the sheet
+          outside the input) dismisses the keyboard only; the sheet stays
+          open and the typed reason is kept. */}
       <Modal
         visible={rejectModalVisible}
         transparent
         animationType="slide"
         onRequestClose={() => setRejectModalVisible(false)}
       >
-        <TouchableWithoutFeedback
-          onPress={() => setRejectModalVisible(false)}
-        >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.modalBackdrop}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.modalCard}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>דחיית רישום</Text>
+            <KeyboardAvoidingView
+              style={styles.modalKav}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <TouchableWithoutFeedback
+                onPress={Keyboard.dismiss}
+                accessible={false}
+              >
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>דחיית רישום</Text>
+                  </View>
+                  <Text style={styles.modalSub}>
+                    ציין סיבה ברורה. הסיבה תוצג למבקש במסך הסטטוס שלו.
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={rejectReason}
+                    onChangeText={setRejectReason}
+                    placeholder="לדוגמה: תעודת הזהות לא אומתה"
+                    placeholderTextColor={Colors.textMuted}
+                    multiline
+                  />
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnCancel]}
+                      onPress={() => setRejectModalVisible(false)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnCancelText}>ביטול</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnConfirm]}
+                      onPress={handleReject}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnConfirmText}>שלח דחייה</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <Text style={styles.modalSub}>
-                  ציין סיבה ברורה. הסיבה תוצג למבקש במסך הסטטוס שלו.
-                </Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={rejectReason}
-                  onChangeText={setRejectReason}
-                  placeholder="לדוגמה: תעודת הזהות לא אומתה"
-                  placeholderTextColor={Colors.textMuted}
-                  multiline
-                />
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={[styles.modalBtn, styles.modalBtnCancel]}
-                    onPress={() => setRejectModalVisible(false)}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.modalBtnCancelText}>ביטול</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalBtn, styles.modalBtnConfirm]}
-                    onPress={handleReject}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.modalBtnConfirmText}>שלח דחייה</Text>
-                  </TouchableOpacity>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Approve modal — optional message to the user; same keyboard UX */}
+      <Modal
+        visible={approveModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setApproveModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.modalBackdrop}>
+            <KeyboardAvoidingView
+              style={styles.modalKav}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <TouchableWithoutFeedback
+                onPress={Keyboard.dismiss}
+                accessible={false}
+              >
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>אישור רישום</Text>
+                  </View>
+                  <Text style={styles.modalSub}>
+                    האם לאשר את הרישום של {data.fullName}?
+                  </Text>
+                  <Text style={styles.fieldLabel}>הודעה למשתמש (אופציונלי)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={approveMessage}
+                    onChangeText={setApproveMessage}
+                    placeholder="שמחים לצרף אותך ל-BuildUp!"
+                    placeholderTextColor={Colors.textMuted}
+                    multiline
+                  />
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnCancel]}
+                      onPress={() => setApproveModalVisible(false)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnCancelText}>ביטול</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnApprove]}
+                      onPress={submitApprove}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnConfirmText}>אשר רישום</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            </TouchableWithoutFeedback>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
@@ -831,11 +969,72 @@ const styles = StyleSheet.create({
   },
   rejectText: { color: Colors.danger, fontSize: FontSize.md, fontWeight: '700' },
 
+  rejectedLine: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  reasonCard: {
+    backgroundColor: '#FEF2F2',
+    borderColor: Colors.danger,
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginTop: 8,
+    gap: 4,
+  },
+  reasonCardLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.danger,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  reasonCardText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  historyRow: {
+    width: '100%',
+    alignItems: 'flex-end',
+    gap: 2,
+    paddingVertical: 6,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  historyDate: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    writingDirection: 'ltr',
+  },
+  historyText: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+
+  fieldLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+
   modalBackdrop: {
     flex: 1,
     backgroundColor: Colors.overlay,
     justifyContent: 'flex-end',
   },
+  modalKav: { width: '100%' },
+  modalBtnApprove: { backgroundColor: Colors.success },
   modalCard: {
     backgroundColor: Colors.white,
     borderTopLeftRadius: 20,

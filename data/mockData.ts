@@ -818,9 +818,30 @@ export const MOCK_SUPPORT_TICKETS: SupportTicket[] = [
     subject: 'לא מקבל תשלום',
     description:
       'עבדתי בפרויקט של קבלן שלא מופיע במערכת, ואני לא מקבל את התשלום המגיע לי מזה חודש.',
-    status: 'open',
+    status: 'in_progress',
     createdAt: '2024-07-06T10:00:00',
-    updatedAt: '2024-07-06T10:00:00',
+    updatedAt: '2024-07-07T08:30:00',
+    assignedAdminId: 'adm1',
+    // A full back-and-forth thread — not one response. Oldest first.
+    messages: [
+      {
+        id: 'stm1',
+        ticketId: 'tkt1',
+        senderId: 'adm1',
+        senderRole: 'admin',
+        message:
+          'קיבלנו את הפנייה. ניצור קשר עם הקבלן ונעדכן אותך בהקדם.',
+        createdAt: '2024-07-06T11:15:00',
+      },
+      {
+        id: 'stm2',
+        ticketId: 'tkt1',
+        senderId: 'w2',
+        senderRole: 'worker',
+        message: 'תודה. עדיין לא קיבלתי תשלום, אשמח לעדכון.',
+        createdAt: '2024-07-07T08:30:00',
+      },
+    ],
   },
   {
     id: 'tkt2',
@@ -833,6 +854,17 @@ export const MOCK_SUPPORT_TICKETS: SupportTicket[] = [
     createdAt: '2024-07-05T13:00:00',
     updatedAt: '2024-07-06T09:00:00',
     assignedAdminId: 'adm1',
+    messages: [
+      {
+        id: 'stm3',
+        ticketId: 'tkt2',
+        senderId: 'adm1',
+        senderRole: 'admin',
+        message:
+          'אפשר להקפיא משרה ממסך המשרה בלחיצה על "סגור משרה להרשמה". לביטול מלא יש להשתמש ב"מחק משרה".',
+        createdAt: '2024-07-06T09:00:00',
+      },
+    ],
   },
   {
     id: 'tkt3',

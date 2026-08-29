@@ -13,6 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
+import ContractorAvatar from '../components/ContractorAvatar';
 import { isSupportTicketOpen, supportTicketDisplay } from '../utils/helpers';
 
 interface Props {
@@ -204,13 +206,14 @@ const AdminDashboardScreen: React.FC<Props> = ({
               activeOpacity={0.85}
               onPress={() => onOpenRegistrationDetails(reg.id)}
             >
-              <View style={styles.rowIcon}>
-                <Ionicons
-                  name={reg.role === 'worker' ? 'hammer' : 'business'}
-                  size={20}
-                  color={Colors.secondary}
+              {reg.role === 'worker' ? (
+                <WorkerAvatar
+                  worker={{ id: reg.id, fullName: reg.data.fullName }}
+                  size={40}
                 />
-              </View>
+              ) : (
+                <ContractorAvatar contractor={null} size={40} />
+              )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowTitle}>{reg.data.fullName}</Text>
                 <Text style={styles.rowSub}>

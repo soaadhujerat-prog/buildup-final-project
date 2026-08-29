@@ -716,6 +716,11 @@ const AppNavigator: React.FC = () => {
           <SupportTicketDetailsScreen
             ticketId={route.ticketId}
             onBack={goBack}
+            onOpenUser={
+              currentUser.role === 'admin'
+                ? (userId) => push({ name: 'AdminUserDetails', userId })
+                : undefined
+            }
           />
         );
       case 'OpenSupportTicket':

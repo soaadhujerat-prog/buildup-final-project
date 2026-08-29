@@ -15,6 +15,7 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import {
   supportTicketDisplay,
+  supportTicketReceivedLine,
   SUPPORT_DISPLAY_FILTERS,
   SupportDisplayState,
 } from '../utils/helpers';
@@ -219,10 +220,9 @@ const TicketRow: React.FC<{
         <Text style={styles.meta}>
           {typeLabel(ticket.type)}
           {isAdmin ? ` · ${userName}` : ''}
-          {' · '}
-          <Text style={{ writingDirection: 'ltr' }}>
-            {new Date(ticket.updatedAt).toLocaleDateString('he-IL')}
-          </Text>
+        </Text>
+        <Text style={styles.meta}>
+          {supportTicketReceivedLine(ticket.createdAt)}
         </Text>
       </View>
       <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />

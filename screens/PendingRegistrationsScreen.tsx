@@ -12,6 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow, FilterChip as FC } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
+import WorkerAvatar from '../components/WorkerAvatar';
+import ContractorAvatar from '../components/ContractorAvatar';
 import {
   ContractorRegistrationData,
   RegistrationRecord,
@@ -23,7 +25,9 @@ interface Props {
   onOpenRegistration: (registrationId: string) => void;
 }
 
-type Filter = 'all' | 'worker' | 'contractor';
+// Two independent filter axes that work together (e.g. "נדחו" + "עובדים").
+type StatusTab = 'pending' | 'rejected';
+type RoleFilter = 'all' | 'worker' | 'contractor';
 
 const PendingRegistrationsScreen: React.FC<Props> = ({
   onBack,
@@ -31,16 +35,51 @@ const PendingRegistrationsScreen: React.FC<Props> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { registrations } = useApp();
-  const [filter, setFilter] = useState<Filter>('all');
+  const [statusTab, setStatusTab] = useState<StatusTab>('pending');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
 
-  const pending = useMemo(
-    () => registrations.filter((r) => r.status === 'pending'),
+  // Live counts from the registration source of truth — one number per
+  // (status, role) combination the UI can show.
+  const byStatus = useMemo(
+    () => ({
+      pending: registrations.filter((r) => r.status === 'pending'),
+      rejected: registrations.filter((r) => r.status === 'rejected'),
+    }),
     [registrations]
   );
-  const filtered = useMemo(
-    () => (filter === 'all' ? pending : pending.filter((r) => r.role === filter)),
-    [pending, filter]
+
+  const scoped = byStatus[statusTab];
+  const roleCounts = useMemo(
+    () => ({
+      all: scoped.length,
+      worker: scoped.filter((r) => r.role === 'worker').length,
+      contractor: scoped.filter((r) => r.role === 'contractor').length,
+    }),
+    [scoped]
   );
+
+  const filtered = useMemo(
+    () =>
+      roleFilter === 'all'
+        ? scoped
+        : scoped.filter((r) => r.role === roleFilter),
+    [scoped, roleFilter]
+  );
+
+  const emptyCopy =
+    statusTab === 'pending'
+      ? {
+          icon: 'checkmark-circle-outline' as const,
+          color: Colors.success,
+          title: 'אין בקשות ממתינות',
+          sub: 'כל הבקשות בתור עברו טיפול. כל בקשה חדשה תופיע כאן אוטומטית.',
+        }
+      : {
+          icon: 'file-tray-outline' as const,
+          color: Colors.textMuted,
+          title: 'אין בקשות שנדחו',
+          sub: 'בקשות שיידחו יישמרו כאן — הן לא נמחקות מהמערכת.',
+        };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -48,38 +87,47 @@ const PendingRegistrationsScreen: React.FC<Props> = ({
         <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>בקשות רישום ממתינות</Text>
+        <Text style={styles.title}>בקשות רישום</Text>
       </View>
 
+      {/* Status axis */}
+      <View style={styles.tabRow}>
+        <Tab
+          label={`ממתינות (${byStatus.pending.length})`}
+          active={statusTab === 'pending'}
+          onPress={() => setStatusTab('pending')}
+        />
+        <Tab
+          label={`נדחו (${byStatus.rejected.length})`}
+          active={statusTab === 'rejected'}
+          onPress={() => setStatusTab('rejected')}
+        />
+      </View>
+
+      {/* Role axis — works together with the status tab above */}
       <View style={styles.filterRow}>
         <FilterChip
-          label={`הכל (${pending.length})`}
-          active={filter === 'all'}
-          onPress={() => setFilter('all')}
+          label={`הכל (${roleCounts.all})`}
+          active={roleFilter === 'all'}
+          onPress={() => setRoleFilter('all')}
         />
         <FilterChip
-          label={`עובדים (${pending.filter((r) => r.role === 'worker').length})`}
-          active={filter === 'worker'}
-          onPress={() => setFilter('worker')}
+          label={`עובדים (${roleCounts.worker})`}
+          active={roleFilter === 'worker'}
+          onPress={() => setRoleFilter('worker')}
         />
         <FilterChip
-          label={`קבלנים (${pending.filter((r) => r.role === 'contractor').length})`}
-          active={filter === 'contractor'}
-          onPress={() => setFilter('contractor')}
+          label={`קבלנים (${roleCounts.contractor})`}
+          active={roleFilter === 'contractor'}
+          onPress={() => setRoleFilter('contractor')}
         />
       </View>
 
       {filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
-          <Ionicons
-            name="checkmark-circle-outline"
-            size={64}
-            color={Colors.success}
-          />
-          <Text style={styles.emptyTitle}>אין בקשות ממתינות</Text>
-          <Text style={styles.emptySub}>
-            כל הבקשות בתור עברו טיפול. כל בקשה חדשה תופיע כאן אוטומטית.
-          </Text>
+          <Ionicons name={emptyCopy.icon} size={64} color={emptyCopy.color} />
+          <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
+          <Text style={styles.emptySub}>{emptyCopy.sub}</Text>
         </View>
       ) : (
         <FlatList
@@ -104,6 +152,20 @@ const PendingRegistrationsScreen: React.FC<Props> = ({
   );
 };
 
+const Tab: React.FC<{
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}> = ({ label, active, onPress }) => (
+  <TouchableOpacity
+    onPress={onPress}
+    style={[styles.tab, active && styles.tabActive]}
+    activeOpacity={0.85}
+  >
+    <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+  </TouchableOpacity>
+);
+
 const FilterChip: React.FC<{
   label: string;
   active: boolean;
@@ -126,6 +188,7 @@ const RegistrationRow: React.FC<{
 }> = ({ record, onPress }) => {
   const isWorker = record.role === 'worker';
   const data = record.data as WorkerRegistrationData | ContractorRegistrationData;
+  const isRejected = record.status === 'rejected';
 
   const subtitle = isWorker
     ? `${(data as WorkerRegistrationData).profession} · ${(data as WorkerRegistrationData).experienceYears} שנות ניסיון`
@@ -137,34 +200,45 @@ const RegistrationRow: React.FC<{
       activeOpacity={0.85}
       onPress={onPress}
     >
-      <View
-        style={[
-          styles.iconCircle,
-          {
-            backgroundColor: isWorker ? Colors.primaryFaint : '#DBEAFE',
-          },
-        ]}
-      >
-        <Ionicons
-          name={isWorker ? 'hammer' : 'business'}
-          size={22}
-          color={isWorker ? Colors.primary : Colors.secondary}
+      {/* Same avatar source of truth as every other Admin screen: worker →
+          photo or deterministic initials; contractor → logo or the fixed
+          building mark (never initials). */}
+      {isWorker ? (
+        <WorkerAvatar
+          worker={{ id: record.id, fullName: data.fullName }}
+          size={44}
         />
-      </View>
+      ) : (
+        <ContractorAvatar contractor={null} size={44} />
+      )}
       <View style={{ flex: 1 }}>
         <View style={styles.rowTopline}>
-          <StatusBadge label={isWorker ? 'עובד' : 'קבלן'} tone="info" small />
+          <StatusBadge
+            label={isRejected ? 'נדחה' : isWorker ? 'עובד' : 'קבלן'}
+            tone={isRejected ? 'danger' : 'info'}
+            small
+          />
           <Text style={styles.rowName}>{data.fullName}</Text>
         </View>
         <Text style={styles.rowSub}>{subtitle}</Text>
-        <Text style={styles.rowMeta}>
-          הוגש:{' '}
-          <Text style={{ writingDirection: 'ltr' }}>
-            {new Date(record.submittedAt).toLocaleDateString('he-IL')}
+        {isRejected ? (
+          <Text style={styles.rowMeta}>
+            נדחה:{' '}
+            <Text style={{ writingDirection: 'ltr' }}>
+              {new Date(record.rejectedAt ?? record.processedAt ?? record.submittedAt).toLocaleDateString('he-IL')}
+            </Text>
+            {record.rejectionReason ? ` · ${record.rejectionReason}` : ''}
           </Text>
-          {' · ת.ז '}
-          <Text style={{ writingDirection: 'ltr' }}>{data.idNumber}</Text>
-        </Text>
+        ) : (
+          <Text style={styles.rowMeta}>
+            הוגש:{' '}
+            <Text style={{ writingDirection: 'ltr' }}>
+              {new Date(record.submittedAt).toLocaleDateString('he-IL')}
+            </Text>
+            {' · ת.ז '}
+            <Text style={{ writingDirection: 'ltr' }}>{data.idNumber}</Text>
+          </Text>
+        )}
       </View>
       <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />
     </TouchableOpacity>
@@ -189,6 +263,35 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     writingDirection: 'rtl',
   },
+
+  tabRow: {
+    flexDirection: 'row-reverse',
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    gap: Spacing.sm,
+    alignItems: 'center',
+  },
+  tab: {
+    flex: 1,
+    height: 40,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabActive: {
+    backgroundColor: Colors.adminPrimary,
+    borderColor: Colors.adminPrimary,
+  },
+  tabText: {
+    fontSize: FontSize.sm,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+  },
+  tabTextActive: { color: Colors.white },
 
   filterRow: {
     flexDirection: 'row-reverse',
@@ -254,13 +357,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     gap: Spacing.md,
     ...Shadow.medium,
-  },
-  iconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   rowTopline: {
     flexDirection: 'row-reverse',

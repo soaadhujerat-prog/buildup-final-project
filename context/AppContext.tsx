@@ -36,6 +36,9 @@ import {
   AppNotification,
   SupportTicket,
   SupportTicketType,
+  SupportTicketMessage,
+  SupportMessageSenderRole,
+  RegistrationStatusEvent,
   ProfessionCategory,
   ContractorFavoriteWorker,
   WorkerFavoriteContractor,
@@ -158,12 +161,26 @@ interface AppState {
   getRegistration: (id: string) => RegistrationRecord | undefined;
 
   // Admin actions
-  approveRegistration: (registrationId: string, adminId: string) => void;
+  /** Approve a still-`pending` registration. `message` is an optional
+   *  free-text note from the admin — stored on the record and used as the
+   *  body of the new user's "registration approved" notification. Appends a
+   *  RegistrationStatusEvent (pending → approved) to statusHistory. */
+  approveRegistration: (
+    registrationId: string,
+    adminId: string,
+    message?: string
+  ) => void;
   rejectRegistration: (
     registrationId: string,
     adminId: string,
     reason: string
   ) => void;
+  /** Undo a rejection — moves a `rejected` registration back to `pending` so
+   *  it re-enters the pending queue for a fresh review. Never auto-approves.
+   *  The rejection is NOT erased: the previous rejectionReason and every
+   *  prior statusHistory entry are kept, and a new (rejected → pending)
+   *  event is appended. */
+  revertRegistrationRejection: (registrationId: string, adminId: string) => void;
   blockUser: (userId: string, adminId: string, reason?: string) => void;
   unblockUser: (userId: string, adminId: string) => void;
 
@@ -279,10 +296,21 @@ interface AppState {
     subject: string,
     description: string
   ) => SupportTicket;
-  respondToTicket: (
+  /** Append one reply to a ticket's conversation — from the admin OR from
+   *  the requester. Never overwrites an earlier reply; the previous messages
+   *  stay in `messages`. Bumps `updatedAt`, mirrors the latest admin reply
+   *  onto the legacy `adminResponse` field, and notifies the other party. */
+  replyToTicket: (
+    ticketId: string,
+    senderId: string,
+    senderRole: SupportMessageSenderRole,
+    message: string
+  ) => void;
+  /** Change a ticket's status — a separate action from replying. Stamps
+   *  `resolvedAt` when moving to 'resolved' and records the acting admin. */
+  setTicketStatus: (
     ticketId: string,
     adminId: string,
-    response: string,
     newStatus: SupportTicket['status']
   ) => void;
 
@@ -321,6 +349,26 @@ const AppContext = createContext<AppState | null>(null);
 const nowIso = () => new Date().toISOString();
 const newId = (prefix: string) =>
   `${prefix}${Math.random().toString(36).slice(2, 8)}`;
+
+/** Read-time migration for support tickets: guarantees `messages` is always
+ *  an array and folds a legacy single `adminResponse` into the conversation
+ *  history (as one admin message) when the record predates the thread model.
+ *  Never drops data — an explicit `messages` array is kept as-is. */
+const normalizeSupportTicket = (t: SupportTicket): SupportTicket => {
+  if (Array.isArray(t.messages)) return t;
+  const messages: SupportTicketMessage[] = [];
+  if (t.adminResponse && t.adminResponse.trim()) {
+    messages.push({
+      id: newId('stm'),
+      ticketId: t.id,
+      senderId: t.assignedAdminId ?? 'adm1',
+      senderRole: 'admin',
+      message: t.adminResponse.trim(),
+      createdAt: t.resolvedAt ?? t.updatedAt ?? t.createdAt,
+    });
+  }
+  return { ...t, messages };
+};
 
 /** Password check for the prototype. We don't store hashes — any non-empty
  *  password matches an approved customer. Empty string => fail. */
@@ -426,8 +474,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
   const [notifications, setNotifications] =
     useState<AppNotification[]>(MOCK_NOTIFICATIONS);
-  const [supportTickets, setSupportTickets] =
-    useState<SupportTicket[]>(MOCK_SUPPORT_TICKETS);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() =>
+    MOCK_SUPPORT_TICKETS.map(normalizeSupportTicket)
+  );
 
   // Frontend-only for now — no mock seed data, contractors build this list
   // themselves at runtime. Shaped 1:1 with the future
@@ -663,19 +712,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // ---------------------------------------------------------------------
 
   const approveRegistration = useCallback<AppState['approveRegistration']>(
-    (registrationId, adminId) => {
+    (registrationId, adminId, message) => {
       const reg = registrations.find((r) => r.id === registrationId);
       if (!reg || reg.status !== 'pending') return;
 
-      // 1) flip registration to approved
+      const ts = nowIso();
+      const note = message?.trim() || undefined;
+      const event: RegistrationStatusEvent = {
+        id: newId('rse'),
+        registrationId,
+        fromStatus: reg.status,
+        toStatus: 'approved',
+        message: note,
+        createdAt: ts,
+        actorId: adminId,
+      };
+
+      // 1) flip registration to approved (append audit event, never overwrite)
       setRegistrations((prev) =>
         prev.map((r) =>
           r.id === registrationId
             ? {
                 ...r,
                 status: 'approved',
-                processedAt: nowIso(),
+                processedAt: ts,
                 processedBy: adminId,
+                approvedAt: ts,
+                approvalMessage: note,
+                statusHistory: [...(r.statusHistory ?? []), event],
               }
             : r
         )
@@ -711,8 +775,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         pushNotification({
           userId: worker.id,
           type: 'registration_approved',
-          title: 'הרישום שלך אושר',
-          body: 'ברוך הבא ל-BuildUp! הפרופיל שלך פעיל, אפשר להתחיל לחפש עבודה.',
+          title: 'ההרשמה שלך אושרה 🎉',
+          body:
+            note ??
+            'שמחים לצרף אותך ל-BuildUp. החשבון שלך אושר וניתן להתחיל להשתמש במערכת.',
           relatedId: worker.id,
         });
       } else {
@@ -739,8 +805,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         pushNotification({
           userId: contractor.id,
           type: 'registration_approved',
-          title: 'הרישום שלך אושר',
-          body: 'ברוך הבא ל-BuildUp! ניתן לפרסם משרות חדשות.',
+          title: 'ההרשמה שלך אושרה 🎉',
+          body:
+            note ??
+            'שמחים לצרף אותך ל-BuildUp. החשבון שלך אושר וניתן לפרסם משרות חדשות.',
           relatedId: contractor.id,
         });
       }
@@ -750,33 +818,94 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const rejectRegistration = useCallback<AppState['rejectRegistration']>(
     (registrationId, adminId, reason) => {
+      const ts = nowIso();
+      // The registration record is NEVER deleted — it stays in the pool with
+      // status 'rejected', full data intact, plus an appended audit event.
       setRegistrations((prev) =>
-        prev.map((r) =>
-          r.id === registrationId
-            ? {
-                ...r,
-                status: 'rejected',
-                processedAt: nowIso(),
-                processedBy: adminId,
-                rejectionReason: reason,
-              }
-            : r
-        )
+        prev.map((r) => {
+          if (r.id !== registrationId) return r;
+          const event: RegistrationStatusEvent = {
+            id: newId('rse'),
+            registrationId,
+            fromStatus: r.status,
+            toStatus: 'rejected',
+            reason,
+            createdAt: ts,
+            actorId: adminId,
+          };
+          return {
+            ...r,
+            status: 'rejected',
+            processedAt: ts,
+            processedBy: adminId,
+            rejectedAt: ts,
+            rejectionReason: reason,
+            statusHistory: [...(r.statusHistory ?? []), event],
+          };
+        })
       );
-      const reg = registrations.find((r) => r.id === registrationId);
-      if (reg) {
-        // note: rejected users don't have a Customer object yet, so we just
-        // attach the notification to the registration id as a placeholder.
-        pushNotification({
-          userId: reg.id,
-          type: 'registration_rejected',
-          title: 'הרישום נדחה',
-          body: reason,
-          relatedId: reg.id,
-        });
-      }
+      // No in-app AppNotification here: a pending registration has no real
+      // Worker/Contractor account (no real userId) yet, so a notification
+      // would be fake. The data a future backend needs to send the real
+      // rejection email is fully persisted on the record: data.email,
+      // status 'rejected', rejectionReason, rejectedAt and the appended
+      // statusHistory event. The applicant also sees the reason on
+      // RegistrationRejectedScreen.
     },
-    [registrations, pushNotification]
+    []
+  );
+
+  const revertRegistrationRejection = useCallback<
+    AppState['revertRegistrationRejection']
+  >(
+    (registrationId, adminId) => {
+      const ts = nowIso();
+      setRegistrations((prev) =>
+        prev.map((r) => {
+          if (r.id !== registrationId || r.status !== 'rejected') return r;
+          const prior = r.statusHistory ?? [];
+          // If this record was rejected before the audit trail existed (old
+          // mock data), backfill the rejection as a history entry now so the
+          // "why it was rejected" is not lost when we move it back to pending.
+          const backfill: RegistrationStatusEvent[] =
+            prior.length === 0 && (r.rejectionReason || r.rejectedAt)
+              ? [
+                  {
+                    id: newId('rse'),
+                    registrationId,
+                    fromStatus: 'pending' as CustomerStatus,
+                    toStatus: 'rejected' as CustomerStatus,
+                    reason: r.rejectionReason,
+                    createdAt: r.rejectedAt ?? r.processedAt ?? r.submittedAt,
+                    actorId: r.processedBy,
+                  },
+                ]
+              : [];
+          const event: RegistrationStatusEvent = {
+            id: newId('rse'),
+            registrationId,
+            fromStatus: r.status,
+            toStatus: 'pending',
+            createdAt: ts,
+            actorId: adminId,
+          };
+          // Back to a clean 'pending' state for a fresh review: the current
+          // rejectionReason / rejectedAt / processedAt / processedBy are all
+          // cleared. The rejection itself is NOT lost — it stays in
+          // statusHistory (reason + timestamp) via `prior`/`backfill`.
+          return {
+            ...r,
+            status: 'pending',
+            processedAt: undefined,
+            processedBy: undefined,
+            rejectedAt: undefined,
+            rejectionReason: undefined,
+            statusHistory: [...prior, ...backfill, event],
+          };
+        })
+      );
+    },
+    []
   );
 
   const setCustomerStatus = useCallback(
@@ -1423,6 +1552,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         status: 'open',
         createdAt: nowIso(),
         updatedAt: nowIso(),
+        messages: [],
       };
       setSupportTickets((prev) => [t, ...prev]);
       admins.forEach((a) =>
@@ -1439,34 +1569,82 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     [admins, pushNotification]
   );
 
-  const respondToTicket = useCallback<AppState['respondToTicket']>(
-    (ticketId, adminId, response, newStatus) => {
+  const replyToTicket = useCallback<AppState['replyToTicket']>(
+    (ticketId, senderId, senderRole, message) => {
+      const text = message.trim();
+      if (!text) return;
+      const ts = nowIso();
+      const msg: SupportTicketMessage = {
+        id: newId('stm'),
+        ticketId,
+        senderId,
+        senderRole,
+        message: text,
+        createdAt: ts,
+      };
+
       let target: SupportTicket | undefined;
       setSupportTickets((prev) =>
         prev.map((t) => {
           if (t.id !== ticketId) return t;
+          const isAdmin = senderRole === 'admin';
           target = {
             ...t,
-            adminResponse: response,
-            assignedAdminId: adminId,
-            status: newStatus,
-            updatedAt: nowIso(),
-            resolvedAt: newStatus === 'resolved' ? nowIso() : t.resolvedAt,
+            messages: [...(t.messages ?? []), msg],
+            updatedAt: ts,
+            // Mirror only — the latest admin reply, for legacy readers /
+            // notification bodies. Every reply is kept in `messages`.
+            adminResponse: isAdmin ? text : t.adminResponse,
+            assignedAdminId: isAdmin ? senderId : t.assignedAdminId,
           };
           return target;
         })
       );
-      if (target) {
+
+      if (!target) return;
+      if (senderRole === 'admin') {
         pushNotification({
           userId: target.userId,
           type: 'support_response',
-          title: 'תגובה לפנייה שלך',
-          body: response.slice(0, 80),
+          title: 'תגובה חדשה לפנייה שלך',
+          body: text.slice(0, 80),
           relatedId: ticketId,
         });
+      } else {
+        // The requester replied — let every admin know so it doesn't sit
+        // unseen. relatedId routes straight to the ticket.
+        admins.forEach((a) =>
+          pushNotification({
+            userId: a.id,
+            type: 'support_response',
+            title: 'המשתמש הגיב לפניית תמיכה',
+            body: `${target!.subject} — ${text.slice(0, 60)}`,
+            relatedId: ticketId,
+          })
+        );
       }
     },
-    [pushNotification]
+    [admins, pushNotification]
+  );
+
+  const setTicketStatus = useCallback<AppState['setTicketStatus']>(
+    (ticketId, adminId, newStatus) => {
+      const ts = nowIso();
+      setSupportTickets((prev) =>
+        prev.map((t) =>
+          t.id === ticketId
+            ? {
+                ...t,
+                status: newStatus,
+                assignedAdminId: adminId,
+                updatedAt: ts,
+                resolvedAt: newStatus === 'resolved' ? ts : t.resolvedAt,
+              }
+            : t
+        )
+      );
+    },
+    []
   );
 
   // ---------------------------------------------------------------------
@@ -1615,6 +1793,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       approveRegistration,
       rejectRegistration,
+      revertRegistrationRejection,
       blockUser,
       unblockUser,
 
@@ -1645,7 +1824,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       sendMessage,
 
       openSupportTicket,
-      respondToTicket,
+      replyToTicket,
+      setTicketStatus,
 
       markNotificationRead,
       markAllNotificationsRead,
@@ -1689,6 +1869,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       getRegistration,
       approveRegistration,
       rejectRegistration,
+      revertRegistrationRejection,
       blockUser,
       unblockUser,
       postJob,
@@ -1713,7 +1894,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       getOrCreateConversation,
       sendMessage,
       openSupportTicket,
-      respondToTicket,
+      replyToTicket,
+      setTicketStatus,
       markNotificationRead,
       markAllNotificationsRead,
       getUserById,
