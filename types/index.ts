@@ -94,8 +94,67 @@ export interface Contractor extends BaseUser {
    *  non-empty after normalization. */
   areasOfOperation: string[];
   projectTypes: string[];
+  /** Contractor classification / licence text, e.g. "ק100 – בניה 2". This is
+   *  a verified field: on the contractor's own edit screen it is read-only,
+   *  and any change goes through a ContractorLicenseUpdateRequest that an
+   *  admin reviews (see 3.5–3.7). */
   licenseDetails: string;
   bio?: string;
+
+  // ---- Contractor licence (live source of truth for the ACTIVE licence) ----
+  // A contractor is only really a contractor if a licence document exists and
+  // an admin has verified it. These fields hold the CURRENT approved licence;
+  // a not-yet-approved replacement lives on a ContractorLicenseUpdateRequest,
+  // never here, so the approved document is never overwritten while a new one
+  // is under review. All dates are ISO strings, rendered via formatDate().
+  /** The current APPROVED licence document. */
+  contractorLicenseDocument?: UploadedDocument;
+  licenseValidFrom?: string;
+  licenseValidUntil?: string;
+  licenseVerificationStatus?: ContractorLicenseVerificationStatus;
+  /** When an admin last verified the current licence. */
+  licenseLastVerifiedAt?: string;
+  /** When the licence is next due for a periodic review. A backend scheduler
+   *  will drive reminders off this; the frontend only derives "review due"
+   *  from it (isLicenseReviewDue). */
+  licenseNextReviewAt?: string;
+}
+
+/** UI-level verification state of a contractor's licence.
+ *  - verified          — an admin approved the current document; in force.
+ *  - pending_review    — a document exists but has not been verified yet
+ *                        (e.g. straight after registration approval).
+ *  - renewal_required  — verified but the periodic review date has passed.
+ *  - expired           — licenseValidUntil is in the past.
+ *  - rejected          — the last update request was rejected; the previously
+ *                        approved document (if any) stays current. */
+export type ContractorLicenseVerificationStatus =
+  | 'verified'
+  | 'pending_review'
+  | 'renewal_required'
+  | 'expired'
+  | 'rejected';
+
+/** A contractor-initiated request to change a VERIFIED licence detail — the
+ *  document, the classification text, and/or (future) the registration
+ *  number. One request can carry several proposed changes so a contractor
+ *  updating "number + document" together is one review, not two conflicting
+ *  ones. The approved licence on the Contractor is untouched until an admin
+ *  approves this request. Never deleted — rejected requests stay as history.
+ *  Shaped to drop into a future `contractor_license_update_requests` table. */
+export interface ContractorLicenseUpdateRequest {
+  id: string;
+  contractorId: string;
+  newRegistrationNumber?: string;
+  newLicenseDetails?: string;
+  newLicenseDocument?: UploadedDocument;
+  proposedValidFrom?: string;
+  proposedValidUntil?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
 }
 
 export type Customer = Worker | Contractor;
@@ -115,7 +174,7 @@ export interface UploadedDocument {
   fileName: string;
   mimeType?: string;
   size?: number;
-  type: 'id_card' | 'certification';
+  type: 'id_card' | 'certification' | 'contractor_license';
 }
 
 /** A named professional certificate the worker holds, with an optional
@@ -169,6 +228,13 @@ export interface ContractorRegistrationData {
   areasOfOperation: string[];
   projectTypes: string[];
   licenseDetails: string;
+  /** The contractor's licence / certificate document, attached at sign-up.
+   *  A separate document from idDocument and from the company logo/avatar.
+   *  Part of the immutable registration snapshot. */
+  licenseDocument?: UploadedDocument;
+  /** "בתוקף עד" — the expiry date PRINTED ON the licence document, entered by
+   *  the contractor at sign-up. ISO string. The system never derives this. */
+  licenseValidUntil?: string;
   password: string;
   bio?: string;
 }
@@ -502,6 +568,11 @@ export type NotificationType =
   | 'support_response'
   | 'new_pending_registration'
   | 'new_support_ticket'
+  | 'license_update_submitted'
+  | 'license_update_approved'
+  | 'license_update_rejected'
+  | 'license_attention'
+  | 'license_renewal_requested'
   | 'system'
   // legacy values (back-compat with old mock data)
   | 'job_request'
@@ -517,6 +588,11 @@ export interface AppNotification {
   isRead: boolean;
   createdAt: string;
   relatedId?: string;
+  /** Optional stable key for notifications that could otherwise be raised
+   *  repeatedly (e.g. a licence-attention check that runs whenever an admin
+   *  opens the dashboard). `pushNotification` no-ops if a notification with
+   *  the same dedupeKey already exists. */
+  dedupeKey?: string;
 }
 
 export type Notification = AppNotification;
@@ -543,6 +619,11 @@ export interface SupportTicketMessage {
   senderRole: SupportMessageSenderRole;
   message: string;
   createdAt: string;
+  /** Set only on the admin message that ALSO changed the ticket status in
+   *  the same action (status change is never silent — it always carries a
+   *  reply). The status the ticket moved TO. Append-only history lives right
+   *  here on the message; no separate status-history array. */
+  statusChange?: SupportTicketStatus;
 }
 
 export interface SupportTicket {

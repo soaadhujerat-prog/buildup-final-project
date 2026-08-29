@@ -36,12 +36,15 @@ import {
   AppNotification,
   SupportTicket,
   SupportTicketType,
+  SupportTicketStatus,
   SupportTicketMessage,
   SupportMessageSenderRole,
   RegistrationStatusEvent,
   ProfessionCategory,
   ContractorFavoriteWorker,
   WorkerFavoriteContractor,
+  ContractorLicenseUpdateRequest,
+  UploadedDocument,
 } from '../types';
 
 import {
@@ -82,6 +85,12 @@ import {
   contractorAreas,
   normalizeCertifications,
 } from '../utils/normalize';
+import {
+  supportTicketDisplay,
+  getContractorLicenseStatus,
+  daysUntil,
+  formatDateIL,
+} from '../utils/helpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,6 +152,7 @@ interface AppState {
   conversations: Conversation[];
   notifications: AppNotification[];
   supportTickets: SupportTicket[];
+  contractorLicenseRequests: ContractorLicenseUpdateRequest[];
 
   // Worker job-search state — persists across navigation (see JobSearchState).
   jobSearchState: JobSearchState;
@@ -298,21 +308,74 @@ interface AppState {
   ) => SupportTicket;
   /** Append one reply to a ticket's conversation — from the admin OR from
    *  the requester. Never overwrites an earlier reply; the previous messages
-   *  stay in `messages`. Bumps `updatedAt`, mirrors the latest admin reply
-   *  onto the legacy `adminResponse` field, and notifies the other party. */
+   *  stay in `messages`. Bumps `updatedAt` and mirrors the latest admin reply
+   *  onto the legacy `adminResponse` field.
+   *
+   *  `statusChange` (admin only): when passed AND different from the current
+   *  status, the SAME action also moves the ticket to that status (stamping
+   *  `resolvedAt` for 'resolved'), records it on the appended message
+   *  (`message.statusChange`), and sends a "status changed" notification
+   *  instead of a plain "new reply" one. A status change is never silent —
+   *  it always carries a reply, so there is no standalone setTicketStatus. */
   replyToTicket: (
     ticketId: string,
     senderId: string,
     senderRole: SupportMessageSenderRole,
-    message: string
+    message: string,
+    statusChange?: SupportTicketStatus
   ) => void;
-  /** Change a ticket's status — a separate action from replying. Stamps
-   *  `resolvedAt` when moving to 'resolved' and records the acting admin. */
-  setTicketStatus: (
-    ticketId: string,
+
+  // Contractor licence verification
+  /** Contractor asks to change a verified licence detail (document and/or
+   *  classification text and/or — future — registration number). Creates a
+   *  `pending` ContractorLicenseUpdateRequest; the contractor's CURRENT
+   *  approved licence stays untouched until an admin approves. Notifies
+   *  admins. */
+  submitContractorLicenseUpdate: (
+    contractorId: string,
+    patch: {
+      newLicenseDocument?: UploadedDocument;
+      newLicenseDetails?: string;
+      newRegistrationNumber?: string;
+      proposedValidFrom?: string;
+      proposedValidUntil?: string;
+    }
+  ) => ContractorLicenseUpdateRequest | null;
+  /** Admin approves / rejects a pending licence-update request. Approve →
+   *  the proposed values become the contractor's current verified licence
+   *  (re-stamps verifiedAt / nextReviewAt); reject → the request is marked
+   *  rejected (reason required) and the current licence is left as-is. The
+   *  request record is kept either way (audit history). Notifies the
+   *  contractor. */
+  reviewContractorLicenseUpdate: (
+    requestId: string,
     adminId: string,
-    newStatus: SupportTicket['status']
+    approve: boolean,
+    reason?: string
   ) => void;
+  /** Admin verifies the contractor's CURRENT licence (initial or periodic
+   *  review) without any pending replacement — sets status 'verified' and
+   *  moves the review clock forward. */
+  verifyContractorLicense: (contractorId: string, adminId: string) => void;
+  getPendingLicenseRequestForContractor: (
+    contractorId: string
+  ) => ContractorLicenseUpdateRequest | undefined;
+  /** Admin asks a contractor whose licence is expiring / expired to upload a
+   *  renewed one. Changes NOTHING on the licence itself (no date, no
+   *  document, no verification / review stamp) — it only sends the
+   *  contractor an in-app notification. Deduped per (contractor,
+   *  licenseValidUntil) so repeated taps never re-notify; a no-op unless the
+   *  derived status is 'expiring_soon' or 'expired'. */
+  requestContractorLicenseRenewal: (
+    contractorId: string,
+    adminId: string
+  ) => void;
+  /** True once a renewal request has been sent to this contractor for the
+   *  given licenseValidUntil (used to swap the admin CTA for an info line). */
+  hasRenewalRequestBeenSent: (
+    contractorId: string,
+    licenseValidUntil?: string
+  ) => boolean;
 
   // Notifications
   markNotificationRead: (notificationId: string) => void;
@@ -478,6 +541,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     MOCK_SUPPORT_TICKETS.map(normalizeSupportTicket)
   );
 
+  // Contractor licence-update requests — frontend-only, no mock seed. Shaped
+  // 1:1 with a future `contractor_license_update_requests` table. Never
+  // deleted: approved / rejected requests stay as audit history.
+  const [contractorLicenseRequests, setContractorLicenseRequests] = useState<
+    ContractorLicenseUpdateRequest[]
+  >([]);
+
   // Frontend-only for now — no mock seed data, contractors build this list
   // themselves at runtime. Shaped 1:1 with the future
   // contractor_favorite_workers Supabase table (see types/index.ts).
@@ -498,10 +568,61 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         isRead: false,
         ...n,
       };
-      setNotifications((prev) => [fresh, ...prev]);
+      setNotifications((prev) =>
+        fresh.dedupeKey && prev.some((p) => p.dedupeKey === fresh.dedupeKey)
+          ? prev
+          : [fresh, ...prev]
+      );
     },
     []
   );
+
+  // ---------------------------------------------------------------------
+  // Contractor-licence attention check (frontend, on admin session only)
+  // ---------------------------------------------------------------------
+  // There is no backend scheduler. Instead, whenever an admin is logged in
+  // (and whenever the contractor pool changes under them), we scan every
+  // contractor's licence against TODAY and raise an in-app notification for
+  // "review due" / "expiring soon" / "expired". Each notification carries a
+  // stable dedupeKey (contractorId + kind + the relevant date), so the same
+  // state never notifies twice — no setInterval, no fake cron, no email.
+  useEffect(() => {
+    if (currentUser?.role !== 'admin') return;
+    const adminId = currentUser.id;
+    contractors.forEach((c) => {
+      const st = getContractorLicenseStatus(c);
+      if (st.state === 'expired') {
+        pushNotification({
+          userId: adminId,
+          type: 'license_attention',
+          title: 'רישיון פג תוקף',
+          body: `רישיון הקבלן ${c.fullName} (${c.companyName}) פג תוקף.`,
+          relatedId: c.id,
+          dedupeKey: `lic:${c.id}:expired:${c.licenseValidUntil ?? ''}`,
+        });
+      } else if (st.state === 'expiring_soon') {
+        const d = Math.max(0, daysUntil(c.licenseValidUntil) ?? 0);
+        pushNotification({
+          userId: adminId,
+          type: 'license_attention',
+          title: 'רישיון עומד לפוג',
+          body: `רישיון הקבלן ${c.fullName} יפוג בעוד ${d} ימים.`,
+          relatedId: c.id,
+          dedupeKey: `lic:${c.id}:expiring:${c.licenseValidUntil ?? ''}`,
+        });
+      } else if (st.state === 'review_due') {
+        pushNotification({
+          userId: adminId,
+          type: 'license_attention',
+          title: 'נדרשת בדיקה תקופתית',
+          body: `הגיע מועד הבדיקה התקופתית של רישיון הקבלן ${c.fullName}.`,
+          relatedId: c.id,
+          dedupeKey: `lic:${c.id}:review:${c.licenseNextReviewAt ?? ''}`,
+        });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, contractors]);
 
   // ---------------------------------------------------------------------
   // Capacity -> pending invitations reconciliation
@@ -787,6 +908,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
       } else {
         const d = reg.data as ContractorRegistrationData;
+        // Approving a contractor registration IS the first manual licence
+        // verification: before pressing "אשר רישום" the admin has already
+        // reviewed the licence document, registration number, classification
+        // and "בתוקף עד" date on RegistrationDetails. So the live licence
+        // starts 'verified' — no separate second step. licenseValidUntil and
+        // the document are copied EXACTLY from what was submitted (never
+        // derived); the annual review clock starts now.
+        const nextReview1y = new Date();
+        nextReview1y.setFullYear(nextReview1y.getFullYear() + 1);
         const contractor: Contractor = {
           id: newUserId,
           idNumber: d.idNumber,
@@ -804,6 +934,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           projectTypes: d.projectTypes,
           licenseDetails: d.licenseDetails,
           bio: d.bio,
+          contractorLicenseDocument: d.licenseDocument,
+          licenseValidUntil: d.licenseValidUntil,
+          licenseVerificationStatus: 'verified',
+          licenseLastVerifiedAt: ts,
+          licenseNextReviewAt: nextReview1y.toISOString(),
         };
         setContractors((prev) => [...prev, contractor]);
         pushNotification({
@@ -1574,10 +1709,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const replyToTicket = useCallback<AppState['replyToTicket']>(
-    (ticketId, senderId, senderRole, message) => {
+    (ticketId, senderId, senderRole, message, statusChange) => {
       const text = message.trim();
       if (!text) return;
+      const isAdmin = senderRole === 'admin';
       const ts = nowIso();
+
+      const existing = supportTickets.find((t) => t.id === ticketId);
+      if (!existing) return;
+      // Status only moves when the caller is an admin AND the target differs.
+      const applyStatus =
+        isAdmin && !!statusChange && statusChange !== existing.status
+          ? statusChange
+          : undefined;
+
       const msg: SupportTicketMessage = {
         id: newId('stm'),
         ticketId,
@@ -1585,13 +1730,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         senderRole,
         message: text,
         createdAt: ts,
+        ...(applyStatus ? { statusChange: applyStatus } : {}),
       };
 
       let target: SupportTicket | undefined;
       setSupportTickets((prev) =>
         prev.map((t) => {
           if (t.id !== ticketId) return t;
-          const isAdmin = senderRole === 'admin';
           target = {
             ...t,
             messages: [...(t.messages ?? []), msg],
@@ -1600,20 +1745,41 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             // notification bodies. Every reply is kept in `messages`.
             adminResponse: isAdmin ? text : t.adminResponse,
             assignedAdminId: isAdmin ? senderId : t.assignedAdminId,
+            ...(applyStatus
+              ? {
+                  status: applyStatus,
+                  resolvedAt:
+                    applyStatus === 'resolved' ? ts : t.resolvedAt,
+                }
+              : {}),
           };
           return target;
         })
       );
 
       if (!target) return;
-      if (senderRole === 'admin') {
-        pushNotification({
-          userId: target.userId,
-          type: 'support_response',
-          title: 'תגובה חדשה לפנייה שלך',
-          body: text.slice(0, 80),
-          relatedId: ticketId,
-        });
+      if (isAdmin) {
+        if (applyStatus) {
+          // A status change is not "just a new reply" — say what changed.
+          const statusLabel = supportTicketDisplay(applyStatus).label;
+          pushNotification({
+            userId: target.userId,
+            type: 'support_response',
+            title: 'סטטוס פניית התמיכה שלך השתנה',
+            body:
+              `הפנייה "${target.subject}" עברה לסטטוס "${statusLabel}". ` +
+              `מנהל המערכת כתב: ${text.slice(0, 140)}`,
+            relatedId: ticketId,
+          });
+        } else {
+          pushNotification({
+            userId: target.userId,
+            type: 'support_response',
+            title: 'תגובה חדשה לפנייה שלך',
+            body: text.slice(0, 80),
+            relatedId: ticketId,
+          });
+        }
       } else {
         // The requester replied — let every admin know so it doesn't sit
         // unseen. relatedId routes straight to the ticket.
@@ -1628,27 +1794,223 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         );
       }
     },
-    [admins, pushNotification]
+    [supportTickets, admins, pushNotification]
   );
 
-  const setTicketStatus = useCallback<AppState['setTicketStatus']>(
-    (ticketId, adminId, newStatus) => {
+  // -------------------------------------------------------------------
+  // Contractor licence verification
+  // -------------------------------------------------------------------
+
+  const yearsFromNow = (n: number) => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + n);
+    return d.toISOString();
+  };
+
+  const getPendingLicenseRequestForContractor = useCallback<
+    AppState['getPendingLicenseRequestForContractor']
+  >(
+    (contractorId) =>
+      contractorLicenseRequests.find(
+        (r) => r.contractorId === contractorId && r.status === 'pending'
+      ),
+    [contractorLicenseRequests]
+  );
+
+  const submitContractorLicenseUpdate = useCallback<
+    AppState['submitContractorLicenseUpdate']
+  >(
+    (contractorId, patch) => {
+      const hasChange =
+        !!patch.newLicenseDocument ||
+        !!patch.newLicenseDetails?.trim() ||
+        !!patch.newRegistrationNumber?.trim() ||
+        !!patch.proposedValidUntil;
+      if (!hasChange) return null;
+      // Only one open request at a time.
+      if (
+        contractorLicenseRequests.some(
+          (r) => r.contractorId === contractorId && r.status === 'pending'
+        )
+      ) {
+        return null;
+      }
+      const req: ContractorLicenseUpdateRequest = {
+        id: newId('lreq'),
+        contractorId,
+        newLicenseDocument: patch.newLicenseDocument,
+        newLicenseDetails: patch.newLicenseDetails?.trim() || undefined,
+        newRegistrationNumber: patch.newRegistrationNumber?.trim() || undefined,
+        proposedValidFrom: patch.proposedValidFrom,
+        proposedValidUntil: patch.proposedValidUntil,
+        status: 'pending',
+        createdAt: nowIso(),
+      };
+      setContractorLicenseRequests((prev) => [req, ...prev]);
+
+      const contractor = contractors.find((c) => c.id === contractorId);
+      admins.forEach((a) =>
+        pushNotification({
+          userId: a.id,
+          type: 'license_update_submitted',
+          title: 'בקשת עדכון רישיון חדשה',
+          body: `${
+            contractor?.companyName ?? 'קבלן'
+          } הגיש בקשה לעדכון רישיון הקבלן לבדיקה.`,
+          relatedId: contractorId,
+        })
+      );
+      return req;
+    },
+    [contractorLicenseRequests, contractors, admins, pushNotification]
+  );
+
+  const reviewContractorLicenseUpdate = useCallback<
+    AppState['reviewContractorLicenseUpdate']
+  >(
+    (requestId, adminId, approve, reason) => {
+      const req = contractorLicenseRequests.find((r) => r.id === requestId);
+      if (!req || req.status !== 'pending') return;
+      // A rejection must always carry a reason (the UI enforces this too).
+      if (!approve && !reason?.trim()) return;
       const ts = nowIso();
-      setSupportTickets((prev) =>
-        prev.map((t) =>
-          t.id === ticketId
+
+      setContractorLicenseRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId
             ? {
-                ...t,
-                status: newStatus,
-                assignedAdminId: adminId,
-                updatedAt: ts,
-                resolvedAt: newStatus === 'resolved' ? ts : t.resolvedAt,
+                ...r,
+                status: approve ? 'approved' : 'rejected',
+                reviewedAt: ts,
+                reviewedBy: adminId,
+                rejectionReason: approve ? undefined : reason?.trim(),
               }
-            : t
+            : r
+        )
+      );
+
+      if (approve) {
+        // The proposed values become the current verified licence. The old
+        // document is replaced only NOW, on approval — never while pending.
+        setContractors((prev) =>
+          prev.map((c) =>
+            c.id === req.contractorId
+              ? {
+                  ...c,
+                  contractorRegistrationNumber:
+                    req.newRegistrationNumber ??
+                    c.contractorRegistrationNumber,
+                  licenseDetails: req.newLicenseDetails ?? c.licenseDetails,
+                  contractorLicenseDocument:
+                    req.newLicenseDocument ?? c.contractorLicenseDocument,
+                  licenseValidFrom:
+                    req.proposedValidFrom ?? c.licenseValidFrom,
+                  // Always the date the contractor entered from the new
+                  // document — never derived. Falls back to the current value
+                  // only if a request somehow carried none.
+                  licenseValidUntil:
+                    req.proposedValidUntil ?? c.licenseValidUntil,
+                  licenseVerificationStatus: 'verified',
+                  licenseLastVerifiedAt: ts,
+                  // Annual manual review clock — 1 year from THIS verification,
+                  // independent of how long the document itself is valid.
+                  licenseNextReviewAt: yearsFromNow(1),
+                }
+              : c
+          )
+        );
+      }
+
+      pushNotification({
+        userId: req.contractorId,
+        type: approve
+          ? 'license_update_approved'
+          : 'license_update_rejected',
+        title: approve
+          ? 'בקשת עדכון הרישיון אושרה'
+          : 'בקשת עדכון הרישיון נדחתה',
+        body: approve
+          ? 'הרישיון החדש עודכן ואומת. הוא מוצג כעת בפרופיל שלך.'
+          : `הבקשה נדחתה${
+              reason?.trim() ? `: ${reason.trim()}` : ''
+            }. הרישיון הקודם נשאר בתוקף.`,
+        relatedId: req.contractorId,
+      });
+    },
+    [contractorLicenseRequests, pushNotification]
+  );
+
+  const verifyContractorLicense = useCallback<
+    AppState['verifyContractorLicense']
+  >(
+    (contractorId, _adminId) => {
+      const ts = nowIso();
+      // The periodic annual review — a pure admin-side audit stamp. It moves
+      // ONLY the review clock forward. licenseValidUntil, the document, the
+      // registration number and the classification are all left untouched,
+      // and no contractor notification is raised (nothing changed for them).
+      setContractors((prev) =>
+        prev.map((c) =>
+          c.id === contractorId
+            ? {
+                ...c,
+                licenseVerificationStatus: 'verified',
+                licenseLastVerifiedAt: ts,
+                licenseNextReviewAt: yearsFromNow(1),
+              }
+            : c
         )
       );
     },
     []
+  );
+
+  const renewalRequestKey = (contractorId: string, validUntil?: string) =>
+    `lic-renewal:${contractorId}:${validUntil ?? ''}`;
+
+  const hasRenewalRequestBeenSent = useCallback<
+    AppState['hasRenewalRequestBeenSent']
+  >(
+    (contractorId, licenseValidUntil) => {
+      const key = renewalRequestKey(contractorId, licenseValidUntil);
+      return notifications.some((n) => n.dedupeKey === key);
+    },
+    [notifications]
+  );
+
+  const requestContractorLicenseRenewal = useCallback<
+    AppState['requestContractorLicenseRenewal']
+  >(
+    (contractorId, _adminId) => {
+      const c = contractors.find((x) => x.id === contractorId);
+      if (!c) return;
+      const st = getContractorLicenseStatus(c);
+      // Only meaningful for a validity problem — never for a periodic review.
+      if (st.state !== 'expiring_soon' && st.state !== 'expired') return;
+
+      const when = c.licenseValidUntil ? formatDateIL(c.licenseValidUntil) : '';
+      // Sends the contractor a notification and NOTHING else. dedupeKey keeps
+      // repeated taps (and the same expiring state) from re-notifying.
+      pushNotification({
+        userId: contractorId,
+        type: 'license_renewal_requested',
+        title:
+          st.state === 'expired'
+            ? 'רישיון הקבלן שלך פג תוקף'
+            : 'נדרש חידוש רישיון קבלן',
+        body:
+          st.state === 'expired'
+            ? `רישיון הקבלן שלך פג${
+                when ? ` בתאריך ${when}` : ''
+              }. יש להעלות רישיון מעודכן לצורך בדיקת מנהל המערכת.`
+            : `רישיון הקבלן שלך עומד לפוג${
+                when ? ` בתאריך ${when}` : ''
+              }. יש להעלות מסמך רישיון מעודכן ותאריך תוקף חדש.`,
+        relatedId: contractorId,
+        dedupeKey: renewalRequestKey(contractorId, c.licenseValidUntil),
+      });
+    },
+    [contractors, pushNotification]
   );
 
   // ---------------------------------------------------------------------
@@ -1786,6 +2148,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       conversations,
       notifications,
       supportTickets,
+      contractorLicenseRequests,
 
       loginAsCustomer,
       loginAsAdmin,
@@ -1829,7 +2192,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       openSupportTicket,
       replyToTicket,
-      setTicketStatus,
+
+      submitContractorLicenseUpdate,
+      reviewContractorLicenseUpdate,
+      verifyContractorLicense,
+      getPendingLicenseRequestForContractor,
+      requestContractorLicenseRenewal,
+      hasRenewalRequestBeenSent,
 
       markNotificationRead,
       markAllNotificationsRead,
@@ -1865,6 +2234,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       conversations,
       notifications,
       supportTickets,
+      contractorLicenseRequests,
       loginAsCustomer,
       loginAsAdmin,
       logout,
@@ -1899,7 +2269,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       sendMessage,
       openSupportTicket,
       replyToTicket,
-      setTicketStatus,
+      submitContractorLicenseUpdate,
+      reviewContractorLicenseUpdate,
+      verifyContractorLicense,
+      getPendingLicenseRequestForContractor,
+      requestContractorLicenseRenewal,
+      hasRenewalRequestBeenSent,
       markNotificationRead,
       markAllNotificationsRead,
       getUserById,

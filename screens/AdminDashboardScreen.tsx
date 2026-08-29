@@ -15,12 +15,17 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
-import { isSupportTicketOpen, supportTicketDisplay } from '../utils/helpers';
+import {
+  isSupportTicketOpen,
+  supportTicketDisplay,
+  contractorLicenseNeedsAttention,
+} from '../utils/helpers';
 
 interface Props {
   onOpenPendingRegistrations: () => void;
   onOpenUserManagement: (filter?: 'all' | 'approved' | 'blocked' | 'rejected') => void;
   onOpenSupportTickets: () => void;
+  onOpenLicenseAttention: () => void;
   onOpenNotifications: () => void;
   onOpenSettings: () => void;
   onOpenRegistrationDetails: (registrationId: string) => void;
@@ -32,6 +37,7 @@ const AdminDashboardScreen: React.FC<Props> = ({
   onOpenPendingRegistrations,
   onOpenUserManagement,
   onOpenSupportTickets,
+  onOpenLicenseAttention,
   onOpenNotifications,
   onOpenSettings,
   onOpenRegistrationDetails,
@@ -46,6 +52,7 @@ const AdminDashboardScreen: React.FC<Props> = ({
     contractors,
     supportTickets,
     notifications,
+    contractorLicenseRequests,
   } = useApp();
 
   // ---- Real-source derivations ----
@@ -79,6 +86,19 @@ const AdminDashboardScreen: React.FC<Props> = ({
       ).length,
     [notifications, currentUser]
   );
+
+  // "רישיונות הדורשים טיפול" — live from contractors + pending licence
+  // requests: expired / expiring ≤30d / annual review due / pending update.
+  const licenseAttentionCount = useMemo(() => {
+    const pendingIds = new Set(
+      contractorLicenseRequests
+        .filter((r) => r.status === 'pending')
+        .map((r) => r.contractorId)
+    );
+    return contractors.filter((c) =>
+      contractorLicenseNeedsAttention(c, pendingIds.has(c.id))
+    ).length;
+  }, [contractors, contractorLicenseRequests]);
 
   const recentPendingRegs = pendingRegs.slice(0, 3);
   const recentOpenTickets = openTickets.slice(0, 3);
@@ -162,6 +182,13 @@ const AdminDashboardScreen: React.FC<Props> = ({
             label="פניות פתוחות"
             value={openTickets.length}
             onPress={onOpenSupportTickets}
+          />
+          <StatCard
+            icon="shield-half-outline"
+            tint={Colors.primary}
+            label="רישיונות הדורשים טיפול"
+            value={licenseAttentionCount}
+            onPress={onOpenLicenseAttention}
           />
         </View>
 

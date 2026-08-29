@@ -68,6 +68,26 @@ const iconForType = (
         tint: Colors.info,
         bg: '#DBEAFE',
       };
+    case 'license_update_submitted':
+    case 'license_attention':
+    case 'license_renewal_requested':
+      return {
+        name: 'shield-half-outline',
+        tint: Colors.warning,
+        bg: '#FEF3C7',
+      };
+    case 'license_update_approved':
+      return {
+        name: 'shield-checkmark-outline',
+        tint: Colors.success,
+        bg: '#DCFCE7',
+      };
+    case 'license_update_rejected':
+      return {
+        name: 'shield-outline',
+        tint: Colors.danger,
+        bg: '#FEE2E2',
+      };
     case 'new_pending_registration':
       return {
         name: 'document-text-outline',

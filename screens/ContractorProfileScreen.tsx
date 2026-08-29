@@ -12,8 +12,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import ContractorAvatar from '../components/ContractorAvatar';
-import { Contractor } from '../types';
+import StatusBadge from '../components/StatusBadge';
+import AttachedDocument from '../components/AttachedDocument';
+import { Contractor, ContractorLicenseUpdateRequest } from '../types';
 import { contractorAreas } from '../utils/normalize';
+import {
+  formatDateIL,
+  getContractorLicenseStatus,
+  licenseExpiryState,
+  CONTRACTOR_LICENSE_MANUAL_NOTE,
+} from '../utils/helpers';
 
 interface Props {
   onBack: () => void;
@@ -30,8 +38,11 @@ const ContractorProfileScreen: React.FC<Props> = ({
   onOpenEdit,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser } = useApp();
+  const { currentUser, getPendingLicenseRequestForContractor } = useApp();
   const me = currentUser as Contractor | undefined;
+  const pendingLicenseReq = me
+    ? getPendingLicenseRequestForContractor(me.id)
+    : undefined;
 
   if (!me || me.role !== 'contractor') {
     return (
@@ -76,19 +87,15 @@ const ContractorProfileScreen: React.FC<Props> = ({
         {/* Company details */}
         <Section title="פרטי החברה">
           <FieldRow label="שם החברה" value={me.companyName} />
-          <FieldRow
-            label="מספר רישום קבלנים"
-            value={me.contractorRegistrationNumber}
-            mono
-            ltr
-          />
-          <FieldRow label="פרטי רישיון" value={me.licenseDetails} />
           <FieldRow label="עיר" value={me.city} />
           <FieldRow
             label="אזורי פעילות"
             value={contractorAreas(me).join(' · ') || '—'}
           />
         </Section>
+
+        {/* Contractor licence — live source of truth for the active licence */}
+        <LicenseSection me={me} pendingRequest={pendingLicenseReq} />
 
         {/* Project types */}
         <Section title="סוגי פרויקטים">
@@ -135,6 +142,104 @@ const ContractorProfileScreen: React.FC<Props> = ({
 };
 
 // ---------- subcomponents ----------
+
+const LicenseSection: React.FC<{
+  me: Contractor;
+  pendingRequest?: ContractorLicenseUpdateRequest;
+}> = ({ me, pendingRequest }) => {
+  const info = getContractorLicenseStatus(me);
+  const expiry = licenseExpiryState(me.licenseValidUntil);
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>רישיון קבלן</Text>
+      </View>
+      <View style={styles.sectionBody}>
+        <View style={styles.licenseStatusRow}>
+          <StatusBadge label={info.label} tone={info.tone} small />
+          <Text style={styles.fLabel}>סטטוס</Text>
+        </View>
+        <FieldRow
+          label="מספר רישום"
+          value={me.contractorRegistrationNumber}
+          mono
+          ltr
+        />
+        <FieldRow label="סיווג" value={me.licenseDetails} />
+        <FieldRow
+          label="בתוקף עד"
+          value={
+            me.licenseValidUntil ? formatDateIL(me.licenseValidUntil) : '—'
+          }
+          ltr
+        />
+        <FieldRow
+          label="נבדק לאחרונה"
+          value={
+            me.licenseLastVerifiedAt
+              ? formatDateIL(me.licenseLastVerifiedAt)
+              : 'טרם נבדק'
+          }
+          ltr
+        />
+        <FieldRow
+          label="בדיקה תקופתית הבאה"
+          value={
+            info.state === 'review_due'
+              ? 'נדרשת בדיקה תקופתית'
+              : me.licenseNextReviewAt
+              ? formatDateIL(me.licenseNextReviewAt)
+              : '—'
+          }
+          ltr
+        />
+
+        <View style={{ marginTop: 6 }}>
+          <Text style={styles.fLabel}>המסמך המאושר הנוכחי</Text>
+          <View style={{ marginTop: 6 }}>
+            <AttachedDocument doc={me.contractorLicenseDocument} />
+          </View>
+        </View>
+
+        <Text style={styles.licenseNote}>{CONTRACTOR_LICENSE_MANUAL_NOTE}</Text>
+
+        {info.needsAttention && info.state !== 'pending' && (
+          <View
+            style={[
+              styles.licenseWarn,
+              expiry === 'expired' && styles.licenseWarnDanger,
+            ]}
+          >
+            <Ionicons
+              name="warning-outline"
+              size={18}
+              color={expiry === 'expired' ? Colors.danger : Colors.warning}
+            />
+            <Text style={styles.licenseWarnText}>
+              {info.state === 'expired'
+                ? 'רישיון הקבלן פג תוקף. ניתן להעלות רישיון חדש דרך עריכת הפרופיל.'
+                : info.state === 'expiring_soon'
+                ? 'רישיון הקבלן מתקרב לפקיעה. מומלץ להעלות רישיון מחודש דרך עריכת הפרופיל.'
+                : 'הגיע מועד הבדיקה התקופתית של הרישיון על ידי מנהל המערכת.'}
+            </Text>
+          </View>
+        )}
+
+        {/* Pending renewal — separate information, current licence unaffected */}
+        {pendingRequest && (
+          <View style={styles.licensePendingBanner}>
+            <Ionicons name="hourglass-outline" size={18} color={Colors.secondary} />
+            <Text style={styles.licensePendingText}>
+              בקשת עדכון רישיון ממתינה לאישור מנהל המערכת. הרישיון המאושר
+              הנוכחי נשאר בתוקף עד לקבלת החלטה.
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+};
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
   title,
@@ -281,6 +386,60 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+
+  licenseStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  licenseWarn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#FEF3C7',
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginTop: 8,
+  },
+  licenseWarnDanger: { backgroundColor: '#FEE2E2' },
+  licenseWarnText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  licenseNote: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 18,
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
+  licensePendingBanner: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#DBEAFE',
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginTop: 8,
+  },
+  licensePendingText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    color: Colors.secondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
   },
 
   tagRow: {

@@ -5,30 +5,19 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
-  Alert,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { UploadedDocument } from '../types';
 import { isImageDocument, formatFileSize } from './DocumentUploadField';
+import { openDocument } from '../utils/openDocument';
 
 interface Props {
   doc?: UploadedDocument;
   /** Text shown when nothing is attached. */
   emptyLabel?: string;
 }
-
-const openDoc = async (uri: string) => {
-  try {
-    const ok = await Linking.canOpenURL(uri);
-    if (!ok) throw new Error('cannot open');
-    await Linking.openURL(uri);
-  } catch {
-    Alert.alert('לא ניתן לפתוח', 'לא ניתן לפתוח את הקובץ במכשיר זה.');
-  }
-};
 
 /** Compact, READ-ONLY view of one UploadedDocument — an image thumbnail, a
  *  file chip, or a clear "not attached" state. Shared by every admin screen
@@ -53,7 +42,10 @@ const AttachedDocument: React.FC<Props> = ({
 
   if (isImageDocument(doc)) {
     return (
-      <TouchableOpacity onPress={() => openDoc(doc.uri)} activeOpacity={0.85}>
+      <TouchableOpacity
+        onPress={() => openDocument(doc.uri, doc.fileName)}
+        activeOpacity={0.85}
+      >
         <Image
           source={{ uri: doc.uri }}
           style={styles.thumb}
@@ -67,7 +59,7 @@ const AttachedDocument: React.FC<Props> = ({
   return (
     <TouchableOpacity
       style={styles.fileCard}
-      onPress={() => openDoc(doc.uri)}
+      onPress={() => openDocument(doc.uri, doc.fileName)}
       activeOpacity={0.85}
     >
       <View style={styles.fileIconWrap}>

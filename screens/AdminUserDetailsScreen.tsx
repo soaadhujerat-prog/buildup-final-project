@@ -30,6 +30,12 @@ import {
   contractorAreas,
   normalizeCertifications,
 } from '../utils/normalize';
+import {
+  formatDateIL,
+  getContractorLicenseStatus,
+  daysUntil,
+  CONTRACTOR_LICENSE_MANUAL_NOTE,
+} from '../utils/helpers';
 
 interface Props {
   userId: string;
@@ -55,6 +61,11 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
     blockUser,
     unblockUser,
     updateContractorProfile,
+    getPendingLicenseRequestForContractor,
+    reviewContractorLicenseUpdate,
+    verifyContractorLicense,
+    requestContractorLicenseRenewal,
+    hasRenewalRequestBeenSent,
   } = useApp();
 
   const user = getUserById(userId);
@@ -63,6 +74,8 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
   const [regEditVisible, setRegEditVisible] = useState(false);
   const [regEditValue, setRegEditValue] = useState('');
   const [regEditSubmitting, setRegEditSubmitting] = useState(false);
+  const [licRejectVisible, setLicRejectVisible] = useState(false);
+  const [licRejectReason, setLicRejectReason] = useState('');
 
   // Every KPI is derived LIVE from the source arrays in AppContext — no
   // stored counters anywhere. sendInvitation / applyToJob / an Assignment
@@ -204,6 +217,105 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
           },
         },
       ]
+    );
+  };
+
+  // ---- Contractor licence review ----
+  const pendingLicenseReq = c
+    ? getPendingLicenseRequestForContractor(c.id)
+    : undefined;
+
+  // Renewal request — only for a VALIDITY problem (expiring_soon / expired).
+  // Sends the contractor a notification and changes nothing on the licence.
+  const handleRequestRenewal = () => {
+    if (!c) return;
+    const st = getContractorLicenseStatus(c);
+    const when = c.licenseValidUntil ? formatDateIL(c.licenseValidUntil) : '';
+    Alert.alert(
+      'בקשת חידוש רישיון',
+      st.state === 'expired'
+        ? `רישיון הקבלן פג${
+            when ? ` בתאריך ${when}` : ''
+          }. לשלוח לקבלן בקשה להעלות רישיון מעודכן?`
+        : `רישיון הקבלן עומד לפוג${
+            when ? ` ב־${when}` : ''
+          }. לשלוח לקבלן בקשה להעלות רישיון מעודכן?`,
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'שלח בקשה',
+          onPress: () => {
+            requestContractorLicenseRenewal(c.id, currentUser?.id ?? 'adm1');
+            Alert.alert('הבקשה נשלחה', 'נשלחה לקבלן בקשה לחידוש הרישיון.');
+          },
+        },
+      ]
+    );
+  };
+
+  // Periodic review — only offered when the licence status is exactly
+  // "review due". It moves the review clock forward; it never touches the
+  // licence's validity date or the document.
+  const handlePeriodicReview = () => {
+    if (!c) return;
+    Alert.alert(
+      'בדיקה תקופתית של הרישיון',
+      'אני מאשר/ת שבדקתי את רישיון הקבלן הנוכחי והוא תקין.',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'אשר בדיקה',
+          onPress: () => {
+            verifyContractorLicense(c.id, currentUser?.id ?? 'adm1');
+            Alert.alert(
+              'הבדיקה נרשמה',
+              'מועד הבדיקה התקופתית הבאה נקבע לעוד שנה.'
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const handleLicenseApprove = () => {
+    if (!pendingLicenseReq) return;
+    Alert.alert(
+      'אישור עדכון רישיון',
+      'לאשר את הרישיון החדש? הוא יחליף את הרישיון המאושר הנוכחי ויסומן כמאומת.',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'אשר',
+          onPress: () => {
+            reviewContractorLicenseUpdate(
+              pendingLicenseReq.id,
+              currentUser?.id ?? 'adm1',
+              true
+            );
+            Alert.alert('אושר', 'הרישיון החדש עודכן ואומת.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleLicenseRejectConfirm = () => {
+    if (!pendingLicenseReq) return;
+    if (!licRejectReason.trim()) {
+      Alert.alert('שגיאה', 'יש לציין סיבת דחייה');
+      return;
+    }
+    reviewContractorLicenseUpdate(
+      pendingLicenseReq.id,
+      currentUser?.id ?? 'adm1',
+      false,
+      licRejectReason.trim()
+    );
+    setLicRejectVisible(false);
+    setLicRejectReason('');
+    Alert.alert(
+      'הבקשה נדחתה',
+      'בקשת עדכון הרישיון נדחתה. הרישיון הקודם נשאר בתוקף.'
     );
   };
 
@@ -373,32 +485,216 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
 
         {/* Contractor-only */}
         {c && (
-          <Section title="פרטי הקבלן">
-            <FieldRow label="חברה" value={c.companyName} />
-            <FieldRow
-              label="מספר רישום קבלנים"
-              value={c.contractorRegistrationNumber}
-              mono
-              ltr
-            />
-            <TouchableOpacity
-              style={styles.regEditBtn}
-              onPress={openRegEdit}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="create-outline" size={16} color={Colors.primary} />
-              <Text style={styles.regEditBtnText}>עדכן מספר רישום</Text>
-            </TouchableOpacity>
-            <FieldRow
-              label="אזורי פעילות"
-              value={contractorAreas(c).join(', ') || '—'}
-            />
-            <FieldRow
-              label="סוגי פרויקטים"
-              value={c.projectTypes.join(', ')}
-            />
-            <FieldRow label="פרטי רישיון" value={c.licenseDetails} />
-          </Section>
+          <>
+            <Section title="פרטי הקבלן">
+              <FieldRow label="חברה" value={c.companyName} />
+              <FieldRow
+                label="אזורי פעילות"
+                value={contractorAreas(c).join(', ') || '—'}
+              />
+              <FieldRow
+                label="סוגי פרויקטים"
+                value={c.projectTypes.join(', ')}
+              />
+            </Section>
+
+            {/* Current approved licence (manual admin check only) */}
+            <Section title="רישיון קבלן">
+              <View style={styles.licStatusRow}>
+                <StatusBadge
+                  label={getContractorLicenseStatus(c).label}
+                  tone={getContractorLicenseStatus(c).tone}
+                  small
+                />
+                <Text style={styles.fLabel}>סטטוס</Text>
+              </View>
+              {getContractorLicenseStatus(c).state === 'expiring_soon' && (
+                <Text style={styles.licContextLine}>
+                  התוקף יפוג בעוד{' '}
+                  {Math.max(0, daysUntil(c.licenseValidUntil) ?? 0)} ימים
+                  {c.licenseValidUntil
+                    ? ` (${formatDateIL(c.licenseValidUntil)})`
+                    : ''}
+                </Text>
+              )}
+              {getContractorLicenseStatus(c).state === 'expired' && (
+                <Text style={[styles.licContextLine, { color: Colors.danger }]}>
+                  הרישיון פג תוקף
+                  {c.licenseValidUntil
+                    ? ` בתאריך ${formatDateIL(c.licenseValidUntil)}`
+                    : ''}
+                </Text>
+              )}
+              <FieldRow
+                label="מספר רישום"
+                value={c.contractorRegistrationNumber}
+                mono
+                ltr
+              />
+              <FieldRow label="סיווג" value={c.licenseDetails} />
+              <FieldRow
+                label="בתוקף עד"
+                value={c.licenseValidUntil ? formatDateIL(c.licenseValidUntil) : '—'}
+                ltr
+              />
+              <FieldRow
+                label="נבדק לאחרונה"
+                value={
+                  c.licenseLastVerifiedAt
+                    ? formatDateIL(c.licenseLastVerifiedAt)
+                    : 'טרם נבדק'
+                }
+                ltr
+              />
+              <FieldRow
+                label="בדיקה תקופתית הבאה"
+                value={
+                  getContractorLicenseStatus(c).state === 'review_due'
+                    ? 'נדרשת בדיקה תקופתית'
+                    : c.licenseNextReviewAt
+                    ? formatDateIL(c.licenseNextReviewAt)
+                    : '—'
+                }
+                ltr
+              />
+              <View style={{ marginTop: 6 }}>
+                <Text style={styles.fLabel}>המסמך המאושר הנוכחי</Text>
+                <View style={{ marginTop: 6 }}>
+                  <AttachedDocument doc={c.contractorLicenseDocument} />
+                </View>
+              </View>
+              <Text style={styles.licNote}>{CONTRACTOR_LICENSE_MANUAL_NOTE}</Text>
+
+              {/* VALIDITY problem → ask the contractor to upload a renewed
+                  licence. Never shown together with "בצע בדיקה תקופתית"
+                  (the central status is a single value). */}
+              {(getContractorLicenseStatus(c).state === 'expiring_soon' ||
+                getContractorLicenseStatus(c).state === 'expired') &&
+                (pendingLicenseReq ? (
+                  <Text style={styles.licInfoLine}>
+                    עדכון רישיון ממתין לבדיקה
+                  </Text>
+                ) : hasRenewalRequestBeenSent(c.id, c.licenseValidUntil) ? (
+                  <Text style={styles.licInfoLine}>
+                    בקשת חידוש נשלחה לקבלן
+                  </Text>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.licRenewCta}
+                    onPress={handleRequestRenewal}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name="refresh-outline"
+                      size={16}
+                      color={Colors.white}
+                    />
+                    <Text style={styles.licReviewCtaText}>בקש חידוש רישיון</Text>
+                  </TouchableOpacity>
+                ))}
+
+              {/* The periodic-review action appears ONLY when the licence
+                  status is exactly "נדרשת בדיקה תקופתית" — not when it's
+                  expiring / expired (that needs a renewal, not a review). */}
+              {getContractorLicenseStatus(c).state === 'review_due' && (
+                <TouchableOpacity
+                  style={styles.licReviewCta}
+                  onPress={handlePeriodicReview}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name="shield-checkmark-outline"
+                    size={16}
+                    color={Colors.white}
+                  />
+                  <Text style={styles.licReviewCtaText}>בצע בדיקה תקופתית</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={styles.regEditBtn}
+                onPress={openRegEdit}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="create-outline" size={16} color={Colors.primary} />
+                <Text style={styles.regEditBtnText}>עדכן מספר רישום</Text>
+              </TouchableOpacity>
+            </Section>
+
+            {/* Pending contractor-initiated licence-update request — current
+                vs. new, side by side, so the admin can compare before deciding. */}
+            {pendingLicenseReq && (
+              <Section title="בקשת עדכון רישיון">
+                <FieldRow
+                  label="תאריך הבקשה"
+                  value={formatDateIL(pendingLicenseReq.createdAt)}
+                  ltr
+                />
+                <View style={styles.licCompareHead}>
+                  <Text style={styles.licCompareCol}>חדש שהוגש</Text>
+                  <Text style={styles.licCompareCol}>נוכחי</Text>
+                  <Text style={styles.licCompareLabel} />
+                </View>
+                <LicCompareRow
+                  label="מספר רישום"
+                  current={c.contractorRegistrationNumber}
+                  next={
+                    pendingLicenseReq.newRegistrationNumber ??
+                    c.contractorRegistrationNumber
+                  }
+                  changed={!!pendingLicenseReq.newRegistrationNumber}
+                />
+                <LicCompareRow
+                  label="סיווג"
+                  current={c.licenseDetails}
+                  next={pendingLicenseReq.newLicenseDetails ?? c.licenseDetails}
+                  changed={!!pendingLicenseReq.newLicenseDetails}
+                />
+                <LicCompareRow
+                  label="בתוקף עד"
+                  current={
+                    c.licenseValidUntil ? formatDateIL(c.licenseValidUntil) : '—'
+                  }
+                  next={
+                    pendingLicenseReq.proposedValidUntil
+                      ? formatDateIL(pendingLicenseReq.proposedValidUntil)
+                      : c.licenseValidUntil
+                      ? formatDateIL(c.licenseValidUntil)
+                      : '—'
+                  }
+                  changed={!!pendingLicenseReq.proposedValidUntil}
+                />
+                <View style={{ marginTop: 8 }}>
+                  <Text style={styles.fLabel}>מסמך נוכחי</Text>
+                  <View style={{ marginTop: 4, marginBottom: 8 }}>
+                    <AttachedDocument doc={c.contractorLicenseDocument} />
+                  </View>
+                  <Text style={styles.fLabel}>מסמך חדש שהוגש</Text>
+                  <View style={{ marginTop: 4 }}>
+                    <AttachedDocument
+                      doc={pendingLicenseReq.newLicenseDocument}
+                    />
+                  </View>
+                </View>
+                <View style={styles.licReviewActions}>
+                  <TouchableOpacity
+                    style={[styles.licReviewBtn, styles.licRejectBtn]}
+                    onPress={() => setLicRejectVisible(true)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.licRejectBtnText}>דחה</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.licReviewBtn, styles.licApproveBtn]}
+                    onPress={handleLicenseApprove}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.licApproveBtnText}>אשר</Text>
+                  </TouchableOpacity>
+                </View>
+              </Section>
+            )}
+          </>
         )}
 
         {user.bio && (
@@ -591,6 +887,62 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Licence-update rejection reason */}
+      <Modal
+        visible={licRejectVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLicRejectVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.modalBackdrop}>
+            <KeyboardAvoidingView
+              style={styles.modalKav}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <TouchableWithoutFeedback
+                onPress={Keyboard.dismiss}
+                accessible={false}
+              >
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>דחיית עדכון רישיון</Text>
+                  </View>
+                  <Text style={styles.modalSub}>
+                    ציין סיבה לדחייה. הסיבה תישלח לקבלן. הרישיון הקודם יישאר
+                    בתוקף.
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={licRejectReason}
+                    onChangeText={setLicRejectReason}
+                    placeholder="לדוגמה: המסמך אינו קריא / פרטי הרישיון אינם תואמים"
+                    placeholderTextColor={Colors.textMuted}
+                    multiline
+                  />
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnCancel]}
+                      onPress={() => setLicRejectVisible(false)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnCancelText}>ביטול</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalBtn, styles.modalBtnConfirm]}
+                      onPress={handleLicenseRejectConfirm}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.modalBtnConfirmText}>שלח דחייה</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 };
@@ -645,6 +997,26 @@ const FieldRow: React.FC<{
       </Text>
     )}
     <Text style={styles.fLabel}>{label}</Text>
+  </View>
+);
+
+const LicCompareRow: React.FC<{
+  label: string;
+  current: string;
+  next: string;
+  changed: boolean;
+}> = ({ label, current, next, changed }) => (
+  <View style={styles.licCompareRow}>
+    <Text
+      style={[styles.licCompareVal, changed && styles.licCompareValChanged]}
+      numberOfLines={2}
+    >
+      {next}
+    </Text>
+    <Text style={styles.licCompareVal} numberOfLines={2}>
+      {current}
+    </Text>
+    <Text style={styles.licCompareLabel}>{label}</Text>
   </View>
 );
 
@@ -946,11 +1318,142 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
     backgroundColor: Colors.white,
   },
+  licReviewCta: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.warning,
+  },
+  licRenewCta: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primary,
+  },
+  licReviewCtaText: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.white,
+    writingDirection: 'rtl',
+  },
+  licInfoLine: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.secondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 8,
+  },
   regEditBtnText: {
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.primary,
     writingDirection: 'rtl',
+  },
+  licStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  licNote: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 18,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  licContextLine: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.warning,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 2,
+  },
+  licCompareHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingBottom: 4,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  licCompareCol: {
+    flex: 1,
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  licCompareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  licCompareLabel: {
+    width: 80,
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  licCompareVal: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    fontWeight: '600',
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  licCompareValChanged: {
+    color: Colors.primary,
+    fontWeight: '800',
+  },
+  licReviewActions: {
+    flexDirection: 'row-reverse',
+    gap: 12,
+    marginTop: 12,
+  },
+  licReviewBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+  },
+  licApproveBtn: { backgroundColor: Colors.success },
+  licApproveBtnText: {
+    color: Colors.white,
+    fontWeight: '700',
+    fontSize: FontSize.md,
+  },
+  licRejectBtn: {
+    backgroundColor: Colors.white,
+    borderWidth: 1.5,
+    borderColor: Colors.danger,
+  },
+  licRejectBtnText: {
+    color: Colors.danger,
+    fontWeight: '700',
+    fontSize: FontSize.md,
   },
   regReadonly: {
     borderWidth: 1.5,

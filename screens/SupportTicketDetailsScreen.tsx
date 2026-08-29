@@ -44,12 +44,16 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
   onOpenUser,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, supportTickets, getUserById, replyToTicket, setTicketStatus } =
-    useApp();
+  const { currentUser, supportTickets, getUserById, replyToTicket } = useApp();
   const ticket = supportTickets.find((t) => t.id === ticketId);
 
   const scrollRef = useRef<ScrollView>(null);
   const [reply, setReply] = useState('');
+  // Admin picks a status here; it is applied ONLY together with the reply,
+  // via the combined "send + update status" action. Never a silent change.
+  const [pendingStatus, setPendingStatus] = useState<SupportTicketStatus | null>(
+    null
+  );
   // True only while the reply TextInput holds focus — so the keyboard
   // listener below scrolls the compose area up only when the user is
   // actually writing, never on an unrelated keyboard event.
@@ -129,29 +133,41 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
     (m) => m.senderRole === 'admin'
   );
 
+  // A status change is queued only if the admin picked one that differs from
+  // the ticket's current status.
+  const wantsStatusChange =
+    isAdmin && !!pendingStatus && pendingStatus !== ticket.status;
+
   const handleSend = () => {
+    if (!currentUser) return;
     const text = reply.trim();
     if (!text) {
-      Alert.alert('שגיאה', 'יש לכתוב תגובה לפני שליחה');
+      Alert.alert(
+        'שגיאה',
+        wantsStatusChange
+          ? 'כדי לשנות את סטטוס הפנייה יש להוסיף תגובה למשתמש.'
+          : 'יש לכתוב תגובה לפני שליחה'
+      );
       return;
     }
-    if (!currentUser) return;
     replyToTicket(
       ticket.id,
       currentUser.id,
       currentUser.role as 'admin' | 'worker' | 'contractor',
-      text
+      text,
+      wantsStatusChange ? pendingStatus! : undefined
     );
     setReply('');
+    setPendingStatus(null);
     Keyboard.dismiss();
     requestAnimationFrame(() =>
       scrollRef.current?.scrollToEnd({ animated: true })
     );
   };
 
-  const handleStatus = (raw: SupportTicketStatus) => {
-    if (!isAdmin || raw === ticket.status) return;
-    setTicketStatus(ticket.id, currentUser?.id ?? 'adm1', raw);
+  const togglePendingStatus = (raw: SupportTicketStatus) => {
+    if (!isAdmin) return;
+    setPendingStatus((prev) => (prev === raw ? null : raw));
   };
 
   return (
@@ -297,6 +313,18 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
                     </Text>
                   </View>
                   <Text style={styles.bubbleBody}>{m.message}</Text>
+                  {!!m.statusChange && (
+                    <View style={styles.statusChangePill}>
+                      <Ionicons
+                        name="swap-horizontal"
+                        size={12}
+                        color={Colors.secondary}
+                      />
+                      <Text style={styles.statusChangePillText}>
+                        עודכן סטטוס ל: {supportTicketDisplay(m.statusChange).label}
+                      </Text>
+                    </View>
+                  )}
                   <Text style={styles.bubbleTime}>
                     {formatDateTime(m.createdAt)}
                   </Text>
@@ -318,39 +346,51 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             )}
           </View>
 
-          {/* Status — admin only, a separate action from replying */}
+          {/* Status — admin only. Picking a status here does NOT change it on
+              its own; it is applied together with the reply below. */}
           {isAdmin && (
             <View style={styles.section}>
               <View style={styles.sectionHead}>
-                <Text style={styles.sectionTitle}>סטטוס הפנייה</Text>
+                <Text style={styles.sectionTitle}>שינוי סטטוס</Text>
               </View>
               <View style={styles.statusRow}>
                 {STATUS_OPTIONS.map((opt) => {
-                  const active =
+                  const isCurrent =
                     supportTicketDisplay(ticket.status).state ===
                     supportTicketDisplay(opt.raw).state;
+                  const isPending =
+                    !!pendingStatus &&
+                    supportTicketDisplay(pendingStatus).state ===
+                      supportTicketDisplay(opt.raw).state;
                   return (
                     <TouchableOpacity
                       key={opt.raw}
-                      onPress={() => handleStatus(opt.raw)}
+                      onPress={() => togglePendingStatus(opt.raw)}
                       style={[
                         styles.statusOpt,
-                        active && styles.statusOptActive,
+                        isCurrent && styles.statusOptCurrent,
+                        isPending && styles.statusOptActive,
                       ]}
                       activeOpacity={0.85}
                     >
                       <Text
                         style={[
                           styles.statusOptText,
-                          active && styles.statusOptTextActive,
+                          (isCurrent || isPending) && styles.statusOptTextActive,
                         ]}
                       >
                         {opt.label}
+                        {isCurrent ? ' (נוכחי)' : ''}
                       </Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
+              {wantsStatusChange && (
+                <Text style={styles.statusHint}>
+                  השינוי יבוצע יחד עם שליחת התגובה. חובה להוסיף תגובה למשתמש.
+                </Text>
+              )}
             </View>
           )}
 
@@ -387,7 +427,9 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
               activeOpacity={0.85}
             >
               <Ionicons name="send" size={18} color={Colors.white} />
-              <Text style={styles.submitText}>שלח תגובה</Text>
+              <Text style={styles.submitText}>
+                {wantsStatusChange ? 'שלח תגובה ועדכן סטטוס' : 'שלח תגובה'}
+              </Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -570,6 +612,23 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'ltr',
   },
+  statusChangePill: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 4,
+    backgroundColor: '#DBEAFE',
+    borderRadius: Radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 2,
+  },
+  statusChangePillText: {
+    fontSize: FontSize.xs,
+    fontWeight: '700',
+    color: Colors.secondary,
+    writingDirection: 'rtl',
+  },
 
   textarea: {
     minHeight: 110,
@@ -603,6 +662,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     borderColor: Colors.primary,
   },
+  statusOptCurrent: {
+    backgroundColor: Colors.secondary,
+    borderColor: Colors.secondary,
+  },
   statusOptText: {
     fontSize: FontSize.sm,
     fontWeight: '700',
@@ -610,6 +673,14 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   statusOptTextActive: { color: Colors.white },
+  statusHint: {
+    fontSize: FontSize.xs,
+    color: Colors.warning,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 8,
+  },
 
   submitBtn: {
     flexDirection: 'row-reverse',

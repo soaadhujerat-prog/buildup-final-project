@@ -18,6 +18,7 @@ import { useApp } from '../context/AppContext';
 import CityPickerField from '../components/CityPickerField';
 import HorizontalChipPicker from '../components/HorizontalChipPicker';
 import DocumentUploadField from '../components/DocumentUploadField';
+import DatePickerField from '../components/DatePickerField';
 import {
   AREAS_ISRAEL,
   PROFESSIONS_BY_CATEGORY,
@@ -32,7 +33,7 @@ import {
   WorkerRegistrationData,
 } from '../types';
 import CertificationsField from '../components/CertificationsField';
-import { isValidIsraeliPhone, normalizePhone } from '../utils/helpers';
+import { isValidIsraeliPhone, normalizePhone, dmyToIso } from '../utils/helpers';
 
 type Role = 'worker' | 'contractor';
 
@@ -81,6 +82,12 @@ const SignUpScreen: React.FC<Props> = ({
   const [areasOfOperation, setAreasOfOperation] = useState<string[]>(['מרכז']);
   const [projectTypes, setProjectTypes] = useState<string[]>(['מגורים']);
   const [licenseDetails, setLicenseDetails] = useState('');
+  // Contractor licence / certificate document — a separate document from the
+  // ID card and the company logo. Required.
+  const [licenseDocument, setLicenseDocument] =
+    useState<UploadedDocument | null>(null);
+  // "בתוקף עד" as printed on the licence document (DD/MM/YYYY). Required.
+  const [licenseValidUntil, setLicenseValidUntil] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -140,6 +147,11 @@ const SignUpScreen: React.FC<Props> = ({
       if (!contractorRegNumber.trim())
         errs.push('מספר רישום קבלנים חובה');
       if (!licenseDetails.trim()) errs.push('פרטי רישיון/סיווג חובה');
+      if (!licenseDocument) errs.push('יש לצרף רישיון קבלן / תעודת קבלן');
+      if (!licenseValidUntil.trim())
+        errs.push('יש להזין את תאריך התוקף של הרישיון');
+      else if (!dmyToIso(licenseValidUntil))
+        errs.push('תאריך תוקף הרישיון אינו תקין');
       if (areasOfOperation.length === 0)
         errs.push('יש לבחור לפחות אזור פעילות אחד');
       if (projectTypes.length === 0)
@@ -201,6 +213,8 @@ const SignUpScreen: React.FC<Props> = ({
           areaOfOperation: areasOfOperation[0],
           projectTypes,
           licenseDetails: licenseDetails.trim(),
+          licenseDocument: licenseDocument ?? undefined,
+          licenseValidUntil: dmyToIso(licenseValidUntil) ?? undefined,
           password,
           bio: bio.trim() || undefined,
         };
@@ -435,6 +449,20 @@ const SignUpScreen: React.FC<Props> = ({
               onChange={setLicenseDetails}
               placeholder="ק100 – בניה 2 – עד 5 קומות"
               icon="shield-checkmark-outline"
+            />
+            <DocumentUploadField
+              value={licenseDocument}
+              onChange={setLicenseDocument}
+              label="רישיון קבלן / תעודת קבלן"
+              documentType="contractor_license"
+              sheetTitle="הוספת רישיון קבלן"
+              emptyHint="צילום, גלריה או קובץ PDF של רישיון הקבלן"
+            />
+            <DatePickerField
+              label="הרישיון בתוקף עד"
+              value={licenseValidUntil}
+              onChange={setLicenseValidUntil}
+              minimumDate={new Date()}
             />
             <View style={styles.inputGroup}>
               <View style={styles.labelRow}>

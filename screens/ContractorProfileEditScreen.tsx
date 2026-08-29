@@ -23,9 +23,19 @@ import { useApp } from '../context/AppContext';
 import ChipInput from '../components/ChipInput';
 import CityPickerField from '../components/CityPickerField';
 import ContractorAvatar from '../components/ContractorAvatar';
+import StatusBadge from '../components/StatusBadge';
+import DocumentUploadField from '../components/DocumentUploadField';
+import AttachedDocument from '../components/AttachedDocument';
+import DatePickerField from '../components/DatePickerField';
 import { AREAS_ISRAEL } from '../data/mockData';
-import { Contractor } from '../types';
-import { isValidIsraeliPhone, normalizePhone } from '../utils/helpers';
+import { Contractor, UploadedDocument } from '../types';
+import {
+  isValidIsraeliPhone,
+  normalizePhone,
+  formatDateIL,
+  getContractorLicenseStatus,
+  dmyToIso,
+} from '../utils/helpers';
 import { contractorAreas } from '../utils/normalize';
 
 interface Props {
@@ -36,7 +46,13 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, updateContractorProfile, openSupportTicket } = useApp();
+  const {
+    currentUser,
+    updateContractorProfile,
+    openSupportTicket,
+    submitContractorLicenseUpdate,
+    getPendingLicenseRequestForContractor,
+  } = useApp();
   const me = currentUser as Contractor | undefined;
 
   const [fullName, setFullName] = useState(me?.fullName ?? '');
@@ -61,9 +77,24 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const [projectTypes, setProjectTypes] = useState<string[]>(
     me?.projectTypes ?? []
   );
-  const [licenseDetails, setLicenseDetails] = useState(me?.licenseDetails ?? '');
+  // Classification / licence text is a VERIFIED field — read-only here, like
+  // the registration number. A change goes through a licence-update request.
+  const licenseDetails = me?.licenseDetails ?? '';
   const [bio, setBio] = useState(me?.bio ?? '');
   const [submitting, setSubmitting] = useState(false);
+
+  // Licence-update request (new document and/or new classification). Does NOT
+  // touch the current approved licence — an admin must approve it first.
+  const pendingLicenseReq = me
+    ? getPendingLicenseRequestForContractor(me.id)
+    : undefined;
+  const [licenseDocReq, setLicenseDocReq] = useState<UploadedDocument | null>(
+    null
+  );
+  const [licenseValidUntilReq, setLicenseValidUntilReq] = useState('');
+  const [licenseDetailsReq, setLicenseDetailsReq] = useState('');
+  const [licenseRegNumberReq, setLicenseRegNumberReq] = useState('');
+  const [licenseReqSubmitting, setLicenseReqSubmitting] = useState(false);
 
   // Company photo / logo — reuses the shared BaseUser.avatarUrl field (one
   // source of truth for "the image that represents this contractor"),
@@ -183,6 +214,46 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
       Alert.alert('שגיאה', 'שליחת הבקשה נכשלה. נסה שוב.');
     } finally {
       setRegChangeSubmitting(false);
+    }
+  };
+
+  const submitLicenseRequest = () => {
+    if (!me || licenseReqSubmitting) return;
+    const proposedIso = dmyToIso(licenseValidUntilReq);
+    if (!licenseDocReq || !proposedIso) {
+      Alert.alert(
+        'שגיאה',
+        'יש לצרף מסמך רישיון חדש ולהזין את תאריך התוקף שמופיע בו.'
+      );
+      return;
+    }
+    setLicenseReqSubmitting(true);
+    try {
+      const req = submitContractorLicenseUpdate(me.id, {
+        newLicenseDocument: licenseDocReq,
+        proposedValidUntil: proposedIso,
+        newLicenseDetails: licenseDetailsReq.trim() || undefined,
+        newRegistrationNumber: licenseRegNumberReq.trim() || undefined,
+      });
+      if (!req) {
+        Alert.alert(
+          'לא ניתן לשלוח',
+          'כבר קיימת בקשת עדכון רישיון שממתינה לאישור מנהל המערכת.'
+        );
+        return;
+      }
+      setLicenseDocReq(null);
+      setLicenseValidUntilReq('');
+      setLicenseDetailsReq('');
+      setLicenseRegNumberReq('');
+      Alert.alert(
+        'הבקשה נשלחה',
+        'בקשת עדכון הרישיון נשלחה למנהל המערכת. הרישיון המאושר הנוכחי נשאר בתוקף עד לאישור הבקשה.'
+      );
+    } catch {
+      Alert.alert('שגיאה', 'שליחת הבקשה נכשלה. נסה שוב.');
+    } finally {
+      setLicenseReqSubmitting(false);
     }
   };
 
@@ -337,11 +408,21 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
               </Text>
             </TouchableOpacity>
           </View>
-          <Field
-            label="פרטי רישיון / סיווג"
-            value={licenseDetails}
-            onChange={setLicenseDetails}
-          />
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>פרטי רישיון / סיווג</Text>
+            </View>
+            <View style={styles.readonlyField}>
+              <Ionicons name="lock-closed" size={14} color={Colors.textMuted} />
+              <Text style={[styles.readonlyValue, { writingDirection: 'rtl', textAlign: 'right' }]}>
+                {licenseDetails || '—'}
+              </Text>
+            </View>
+            <Text style={styles.readonlyHint}>
+              לעדכון הסיווג או מסמך הרישיון יש להגיש בקשת עדכון רישיון (למטה)
+              לאישור מנהל המערכת.
+            </Text>
+          </View>
           <View style={styles.inputGroup}>
             <View style={styles.labelRow}>
               <Text style={styles.label}>אזורי פעילות (ניתן לבחור כמה)</Text>
@@ -375,6 +456,104 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
             onChange={setProjectTypes}
             placeholder="הוסף סוג פרויקט..."
           />
+        </Section>
+
+        <Section title="עדכון רישיון קבלן">
+          {/* Current approved licence — read-only reference */}
+          <View style={styles.licenseCurrentRow}>
+            <StatusBadge
+              label={getContractorLicenseStatus(me).label}
+              tone={getContractorLicenseStatus(me).tone}
+              small
+            />
+            <Text style={styles.label}>רישיון נוכחי</Text>
+          </View>
+          <View style={styles.inputGroup}>
+            <View style={styles.readonlyField}>
+              <Ionicons name="lock-closed" size={14} color={Colors.textMuted} />
+              <Text style={[styles.readonlyValue, { writingDirection: 'ltr' }]}>
+                {me.contractorRegistrationNumber || '—'}
+              </Text>
+            </View>
+            <Text style={styles.readonlyHint}>
+              סיווג: {me.licenseDetails || '—'}
+              {'\n'}בתוקף עד:{' '}
+              {me.licenseValidUntil ? formatDateIL(me.licenseValidUntil) : '—'}
+            </Text>
+          </View>
+          <View style={{ marginTop: 4 }}>
+            <AttachedDocument doc={me.contractorLicenseDocument} />
+          </View>
+
+          {pendingLicenseReq ? (
+            <View style={styles.licensePendingBox}>
+              <Ionicons
+                name="hourglass-outline"
+                size={18}
+                color={Colors.warning}
+              />
+              <Text style={styles.licensePendingText}>
+                בקשת עדכון רישיון ממתינה לאישור מנהל המערכת. הרישיון המאושר
+                הנוכחי נשאר בתוקף עד שההחלטה תתקבל.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={{ height: 1, backgroundColor: Colors.border, marginVertical: 4 }} />
+              <Text style={[styles.label, { textAlign: 'right', width: '100%' }]}>
+                רישיון חדש
+              </Text>
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>מסמך רישיון חדש</Text>
+                </View>
+                <DocumentUploadField
+                  value={licenseDocReq}
+                  onChange={setLicenseDocReq}
+                  label="רישיון קבלן / תעודת קבלן חדשים"
+                  documentType="contractor_license"
+                  sheetTitle="העלאת רישיון חדש"
+                  emptyHint="צילום, גלריה או קובץ PDF של הרישיון המחודש"
+                />
+              </View>
+              <DatePickerField
+                label="בתוקף עד (כפי שמופיע ברישיון החדש)"
+                value={licenseValidUntilReq}
+                onChange={setLicenseValidUntilReq}
+                minimumDate={new Date()}
+              />
+              <Field
+                label="סיווג חדש (אופציונלי)"
+                value={licenseDetailsReq}
+                onChange={setLicenseDetailsReq}
+              />
+              <Field
+                label="מספר רישום חדש (רק אם השתנה)"
+                value={licenseRegNumberReq}
+                onChange={setLicenseRegNumberReq}
+              />
+              <Text style={styles.readonlyHint}>
+                הרישיון המאושר הנוכחי יישאר פעיל עד שמנהל המערכת יאשר את
+                הרישיון החדש. אם הבקשה תידחה — הרישיון הנוכחי יישאר בתוקף.
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.licenseReqBtn,
+                  licenseReqSubmitting && { opacity: 0.7 },
+                ]}
+                onPress={submitLicenseRequest}
+                disabled={licenseReqSubmitting}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="cloud-upload-outline" size={16} color={Colors.white} />
+                <Text style={styles.licenseReqBtnText}>
+                  {licenseReqSubmitting
+                    ? 'שולח...'
+                    : 'שלח בקשה לעדכון רישיון'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </Section>
 
         <Section title="אודות">
@@ -832,6 +1011,44 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+
+  licenseCurrentRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+  },
+  licensePendingBox: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#FEF3C7',
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+  },
+  licensePendingText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  licenseReqBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.primary,
+    paddingVertical: 14,
+    borderRadius: Radius.full,
+  },
+  licenseReqBtnText: {
+    color: Colors.white,
+    fontSize: FontSize.md,
+    fontWeight: '700',
     writingDirection: 'rtl',
   },
 

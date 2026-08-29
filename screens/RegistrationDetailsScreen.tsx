@@ -25,7 +25,7 @@ import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
 import AttachedDocument from '../components/AttachedDocument';
 import { isImageDocument, formatFileSize } from '../components/DocumentUploadField';
-import { formatDateTime } from '../utils/helpers';
+import { formatDateTime, formatDateIL } from '../utils/helpers';
 import {
   ContractorRegistrationData,
   WorkerRegistrationData,
@@ -285,7 +285,8 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           <CheckRow label="אימות תעודת זהות מול מערכת ממשלתית" />
           {!isWorker && <CheckRow label="אימות מספר רישום קבלן" />}
           <Text style={styles.notes}>
-            נדרש חיבור ל-API ממשלתי מורשה לצורך אימות אוטומטי.
+            בשלב זה מנהל המערכת בודק את הפרטים ידנית. אימות מקוון מול מאגר
+            ממשלתי כפוף לזמינות שירות ממשלתי מורשה.
           </Text>
           {reg.externalChecks.eligibilityNotes && (
             <Text style={styles.notes}>
@@ -409,24 +410,49 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
 
         {/* Contractor-only */}
         {cd && (
-          <Section title="פרטי הקבלן">
-            <FieldRow label="חברה" value={cd.companyName} />
-            <FieldRow
-              label="מספר רישום קבלנים"
-              value={cd.contractorRegistrationNumber}
-              mono
-              ltr
-            />
-            <FieldRow
-              label="אזורי פעילות"
-              value={contractorAreas(cd).join(', ') || '—'}
-            />
-            <FieldRow
-              label="סוגי פרויקטים"
-              value={cd.projectTypes.join(', ')}
-            />
-            <FieldRow label="פרטי רישיון" value={cd.licenseDetails} />
-          </Section>
+          <>
+            <Section title="פרטי הקבלן">
+              <FieldRow label="חברה" value={cd.companyName} />
+              <FieldRow
+                label="אזורי פעילות"
+                value={contractorAreas(cd).join(', ') || '—'}
+              />
+              <FieldRow
+                label="סוגי פרויקטים"
+                value={cd.projectTypes.join(', ')}
+              />
+            </Section>
+
+            {/* Licence — part of the original registration snapshot. The live
+                verification status is derived on the user's profile, not here. */}
+            <Section title="רישיון קבלן">
+              <FieldRow
+                label="מספר רישום"
+                value={cd.contractorRegistrationNumber}
+                mono
+                ltr
+              />
+              <FieldRow label="פרטי רישיון / סיווג" value={cd.licenseDetails} />
+              <FieldRow
+                label="בתוקף עד"
+                value={
+                  cd.licenseValidUntil
+                    ? formatDateIL(cd.licenseValidUntil)
+                    : '—'
+                }
+                ltr
+              />
+              <View style={styles.certRow}>
+                <Text style={styles.certName}>מסמך הרישיון</Text>
+                <AttachedDocument doc={cd.licenseDocument} />
+              </View>
+              <Text style={styles.notes}>
+                סטטוס אימות: ממתין לבדיקת מנהל המערכת. הרישיון ייבדק ידנית על
+                בסיס המסמך והתאריך שהוגשו. אימות מקוון מול מאגר ממשלתי כפוף
+                לזמינות שירות ממשלתי מורשה.
+              </Text>
+            </Section>
+          </>
         )}
 
         {data.bio && (

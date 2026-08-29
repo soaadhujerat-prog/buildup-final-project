@@ -75,6 +75,7 @@ import RegistrationDetailsScreen from '../screens/RegistrationDetailsScreen';
 import UserManagementScreen from '../screens/UserManagementScreen';
 import AdminUserDetailsScreen from '../screens/AdminUserDetailsScreen';
 import AdminContractorJobsScreen from '../screens/AdminContractorJobsScreen';
+import AdminLicenseAttentionScreen from '../screens/AdminLicenseAttentionScreen';
 
 // Shared (role-aware)
 import JobDetailsScreen from '../screens/JobDetailsScreen';
@@ -125,6 +126,7 @@ type Route =
   | { name: 'AdminRegistrationDetails'; registrationId: string }
   | { name: 'AdminUserDetails'; userId: string }
   | { name: 'AdminContractorJobs'; contractorId: string }
+  | { name: 'AdminLicenseAttention' }
   // Shared (any role)
   | { name: 'Messages' }
   | { name: 'Chat'; conversationId: string }
@@ -385,6 +387,31 @@ const AppNavigator: React.FC = () => {
           } else if (role === 'admin') {
             setAdminTab('support-tickets');
             resetTo(null);
+          }
+          break;
+        case 'license_update_submitted':
+        case 'license_attention':
+          // relatedId = contractorId → open that contractor's admin card
+          // (its licence / "בקשת עדכון רישיון" section).
+          if (role === 'admin' && relatedId) {
+            push({ name: 'AdminUserDetails', userId: relatedId });
+          }
+          break;
+        case 'license_update_approved':
+        case 'license_update_rejected':
+          // Contractor: land on their own profile, where the licence section
+          // reflects the outcome.
+          if (role === 'contractor') {
+            setContractorTab('profile');
+            resetTo(null);
+          }
+          break;
+        case 'license_renewal_requested':
+          // Contractor: straight into the profile-edit screen, where the
+          // "עדכון רישיון קבלן" area lets them upload the renewed licence.
+          if (role === 'contractor') {
+            setContractorTab('profile');
+            push({ name: 'ContractorProfileEdit' });
           }
           break;
         case 'registration_approved':
@@ -696,6 +723,15 @@ const AppNavigator: React.FC = () => {
         return (
           <AdminContractorJobsScreen
             contractorId={route.contractorId}
+            onBack={goBack}
+            onOpenUser={(userId) =>
+              push({ name: 'AdminUserDetails', userId })
+            }
+          />
+        );
+      case 'AdminLicenseAttention':
+        return (
+          <AdminLicenseAttentionScreen
             onBack={goBack}
             onOpenUser={(userId) =>
               push({ name: 'AdminUserDetails', userId })
@@ -1043,6 +1079,14 @@ const AdminHome: React.FC<{
   onLogout: () => void;
   regInitialStatus: 'pending' | 'approved' | 'rejected';
 }> = ({ tab, setTab, navigate, onLogout, regInitialStatus }) => {
+  // Which status filter "ניהול משתמשים" opens with. Set from the dashboard
+  // KPI that was tapped (e.g. "משתמשים חסומים" → 'blocked'); always reset to
+  // 'all' when the user opens the tab from the bottom bar, so a normal entry
+  // never gets stuck on a previous filter. Local (not global) on purpose.
+  const [userMgmtStatus, setUserMgmtStatus] = useState<
+    'all' | 'approved' | 'blocked'
+  >('all');
+
   const body = useMemo(() => {
     switch (tab) {
       case 'dashboard':
@@ -1050,10 +1094,19 @@ const AdminHome: React.FC<{
           <AdminDashboardScreen
             onOpenPendingRegistrations={() => setTab('pending-registrations')}
             onOpenUserManagement={(filter) => {
-              void filter;
+              setUserMgmtStatus(
+                filter === 'blocked'
+                  ? 'blocked'
+                  : filter === 'approved'
+                  ? 'approved'
+                  : 'all'
+              );
               setTab('user-management');
             }}
             onOpenSupportTickets={() => setTab('support-tickets')}
+            onOpenLicenseAttention={() =>
+              navigate({ name: 'AdminLicenseAttention' })
+            }
             onOpenNotifications={() => navigate({ name: 'Notifications' })}
             onOpenSettings={() => navigate({ name: 'Settings' })}
             onOpenRegistrationDetails={(registrationId) =>
@@ -1084,6 +1137,7 @@ const AdminHome: React.FC<{
       case 'user-management':
         return (
           <UserManagementScreen
+            initialStatus={userMgmtStatus}
             onBack={() => setTab('dashboard')}
             onOpenUser={(userId) =>
               navigate({ name: 'AdminUserDetails', userId })
@@ -1100,7 +1154,7 @@ const AdminHome: React.FC<{
           />
         );
     }
-  }, [tab, setTab, navigate, onLogout, regInitialStatus]);
+  }, [tab, setTab, navigate, onLogout, regInitialStatus, userMgmtStatus]);
 
   return (
     <View style={styles.shell}>
@@ -1133,7 +1187,12 @@ const AdminHome: React.FC<{
           },
         ]}
         active={tab}
-        onChange={(k) => setTab(k as AdminTab)}
+        onChange={(k) => {
+          // A plain tap on "משתמשים" always opens the default (all) filter —
+          // it never inherits a filter a dashboard KPI set earlier.
+          if (k === 'user-management') setUserMgmtStatus('all');
+          setTab(k as AdminTab);
+        }}
       />
     </View>
   );

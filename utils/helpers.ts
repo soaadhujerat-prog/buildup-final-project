@@ -1,6 +1,7 @@
 import type {
   ApplicationStatus,
   Assignment,
+  ContractorLicenseVerificationStatus,
   InvitationStatus,
   SupportTicketStatus,
 } from '../types';
@@ -379,6 +380,178 @@ export const getTimeAgo = (dateString: string): string => {
   if (diffDays === 1) return 'אתמול';
   if (diffDays < 7) return `לפני ${diffDays} ימים`;
   return formatShortDate(dateString);
+};
+
+// ---------------------------------------------------------------------------
+// Contractor licence — derived expiry / verification / review status.
+// Pure date math (no timers, no scheduler): a backend later drives real
+// reminders off licenseValidUntil / licenseNextReviewAt; the frontend only
+// reads the current state from them.
+// ---------------------------------------------------------------------------
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export type LicenseExpiryState =
+  | 'valid'
+  | 'expiring_soon'
+  | 'expired'
+  | 'unknown';
+
+/** `warnWithinDays` before licenseValidUntil counts as "expiring_soon". */
+export const licenseExpiryState = (
+  validUntil?: string,
+  warnWithinDays = 30
+): LicenseExpiryState => {
+  if (!validUntil) return 'unknown';
+  const d = new Date(validUntil);
+  if (isNaN(d.getTime())) return 'unknown';
+  const diff = d.getTime() - Date.now();
+  if (diff < 0) return 'expired';
+  if (diff <= warnWithinDays * MS_PER_DAY) return 'expiring_soon';
+  return 'valid';
+};
+
+/** True once licenseNextReviewAt has passed — "נדרשת בדיקה תקופתית". */
+export const isLicenseReviewDue = (nextReviewAt?: string): boolean => {
+  if (!nextReviewAt) return false;
+  const d = new Date(nextReviewAt);
+  if (isNaN(d.getTime())) return false;
+  return d.getTime() < Date.now();
+};
+
+/** Days from now until `iso` (negative if already past). */
+export const daysUntil = (iso?: string): number | null => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return Math.ceil((d.getTime() - Date.now()) / MS_PER_DAY);
+};
+
+/** The wording used everywhere the licence-verification meaning is explained.
+ *  The admin performs a MANUAL check of the uploaded document only — there is
+ *  no government-registry verification yet. Never claim otherwise, and never
+ *  expose internal engineering terms to the user. */
+export const CONTRACTOR_LICENSE_MANUAL_NOTE =
+  'אימות הרישיון מתבצע בבדיקה ידנית של מנהל המערכת על בסיס המסמך שהוגש. אימות מקוון מול מאגר ממשלתי כפוף לזמינות שירות ממשלתי מורשה.';
+
+export type ContractorLicenseState =
+  | 'pending'
+  | 'verified'
+  | 'review_due'
+  | 'expiring_soon'
+  | 'expired';
+
+export interface ContractorLicenseStatusInfo {
+  state: ContractorLicenseState;
+  label: string;
+  tone: BadgeTone;
+  /** True when the contractor / admin should act. */
+  needsAttention: boolean;
+}
+
+/** THE single source of truth for a contractor licence's visual state,
+ *  derived only from stored fields — never a stored status string.
+ *  Priority: expired > expiring soon (≤30d) > annual review due > verified.
+ *  Anything not yet admin-verified is always "pending", regardless of dates.
+ *  A pending update *request* is separate information — it does NOT change
+ *  this and never replaces the current approved licence. */
+export const getContractorLicenseStatus = (c: {
+  licenseVerificationStatus?: ContractorLicenseVerificationStatus;
+  licenseValidUntil?: string;
+  licenseNextReviewAt?: string;
+}): ContractorLicenseStatusInfo => {
+  if (c.licenseVerificationStatus !== 'verified') {
+    return {
+      state: 'pending',
+      label: 'ממתין לבדיקת מנהל המערכת',
+      tone: 'warning',
+      needsAttention: true,
+    };
+  }
+  const exp = licenseExpiryState(c.licenseValidUntil);
+  if (exp === 'expired') {
+    return { state: 'expired', label: 'פג תוקף', tone: 'danger', needsAttention: true };
+  }
+  if (exp === 'expiring_soon') {
+    return {
+      state: 'expiring_soon',
+      label: 'מתקרב לפקיעה',
+      tone: 'warning',
+      needsAttention: true,
+    };
+  }
+  if (isLicenseReviewDue(c.licenseNextReviewAt)) {
+    return {
+      state: 'review_due',
+      label: 'נדרשת בדיקה תקופתית',
+      tone: 'warning',
+      needsAttention: true,
+    };
+  }
+  return { state: 'verified', label: 'מאומת', tone: 'success', needsAttention: false };
+};
+
+/** Back-compat alias — same shape (plus a `state` field) as before. */
+export const contractorLicenseUiInfo = getContractorLicenseStatus;
+
+/** "requires attention" for the Admin dashboard KPI / list — the derived
+ *  status needs action, OR there's a pending update request to review. */
+export const contractorLicenseNeedsAttention = (
+  c: {
+    licenseVerificationStatus?: ContractorLicenseVerificationStatus;
+    licenseValidUntil?: string;
+    licenseNextReviewAt?: string;
+  },
+  hasPendingRequest: boolean
+): boolean => hasPendingRequest || getContractorLicenseStatus(c).needsAttention;
+
+/** Frontend-only policy helper — ready for a future "block sensitive business
+ *  actions when the licence isn't in force" rule. NOT enforced anywhere yet:
+ *  job posting / applications / staffing are deliberately left untouched.
+ *  Backend + product policy decide where this gates. */
+export const contractorLicenseAllowsSensitiveActions = (c: {
+  licenseVerificationStatus?: ContractorLicenseVerificationStatus;
+  licenseValidUntil?: string;
+}): boolean =>
+  c.licenseVerificationStatus === 'verified' &&
+  licenseExpiryState(c.licenseValidUntil) !== 'expired';
+
+// ---------------------------------------------------------------------------
+// Licence dates — the model stores ISO; DatePickerField speaks "DD/MM/YYYY".
+// All licence dates are shown as "DD.MM.YYYY" (never the long "1 בספטמבר"
+// form).
+// ---------------------------------------------------------------------------
+
+/** ISO → "DD.MM.YYYY" for display. */
+export const formatDateIL = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${d.getFullYear()}`;
+};
+
+/** DatePickerField "DD/MM/YYYY" → ISO string, or null if malformed. Anchored
+ *  to local noon so re-parsing never shifts the calendar day across a TZ. */
+export const dmyToIso = (dmy: string): string | null => {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((dmy ?? '').trim());
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+  if (isNaN(d.getTime())) return null;
+  d.setHours(12, 0, 0, 0);
+  return d.toISOString();
+};
+
+/** ISO → "DD/MM/YYYY" for seeding a DatePickerField's value. */
+export const isoToDmy = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
 };
 
 export const getAvatarBackground = (name: string): string => {

@@ -269,6 +269,12 @@ export const MOCK_CONTRACTORS: Contractor[] = [
     projectTypes: ['מגורים', 'מסחר', 'ציבורי'],
     licenseDetails: 'ק100 – בניה 2 – עד 5 קומות',
     bio: 'קבלן בנייה ותיק עם ניסיון של מעל 20 שנה בפרויקטים למגורים ומסחר.',
+    // Licence in good standing — verified, valid, review not yet due.
+    licenseValidFrom: '2025-09-01',
+    licenseValidUntil: '2027-09-01',
+    licenseVerificationStatus: 'verified',
+    licenseLastVerifiedAt: '2026-03-01',
+    licenseNextReviewAt: '2027-03-01',
   },
   {
     id: 'c2',
@@ -286,6 +292,13 @@ export const MOCK_CONTRACTORS: Contractor[] = [
     projectTypes: ['מגורים', 'יוקרה'],
     licenseDetails: 'ק100 – בניה 3 – עד 8 קומות',
     bio: 'מתמחה בפרויקטים של וילות יוקרה ושיפוצים רחבי היקף.',
+    // Licence verified but close to expiry and past its periodic-review date —
+    // exercises the "expiring soon" + "review due" warnings.
+    licenseValidFrom: '2024-09-20',
+    licenseValidUntil: '2026-09-20',
+    licenseVerificationStatus: 'verified',
+    licenseLastVerifiedAt: '2025-08-01',
+    licenseNextReviewAt: '2026-08-01',
   },
 ];
 
