@@ -647,6 +647,15 @@ export interface SupportTicket {
    *  AppContext (a legacy `adminResponse` is migrated into a message at load
    *  time). */
   messages?: SupportTicketMessage[];
+  /** Conversation lifecycle — kept deliberately SEPARATE from `status`. A
+   *  ticket can be "טופל" (done) and still open for follow-up messages, or
+   *  explicitly closed so that neither side can add more. Closing never
+   *  changes `status` and never removes a message; it can be undone by
+   *  reopening. `undefined`/`false` both mean "open". */
+  isClosed?: boolean;
+  closedAt?: string;
+  /** Identifier of the admin who closed the conversation. */
+  closedBy?: string;
 }
 
 // ---------------------------------------------------------------------------

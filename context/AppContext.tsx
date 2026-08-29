@@ -324,6 +324,17 @@ interface AppState {
     message: string,
     statusChange?: SupportTicketStatus
   ) => void;
+  /** Close a ticket's conversation. Independent of `status` (a "טופל" ticket
+   *  stays "טופל"): it only sets `isClosed`/`closedAt`/`closedBy`, bumps
+   *  `updatedAt`, and notifies the requester. No message is ever removed or
+   *  edited. A no-op if the ticket is missing or already closed. Admin-only
+   *  by convention — enforced at the call site. */
+  closeSupportTicket: (ticketId: string, adminId: string) => void;
+  /** Reopen a closed ticket so the conversation can continue. Clears
+   *  `isClosed`/`closedAt`/`closedBy`, bumps `updatedAt`, notifies the
+   *  requester. `status` is left exactly as it was. A no-op if the ticket is
+   *  missing or not currently closed. */
+  reopenSupportTicket: (ticketId: string, adminId: string) => void;
 
   // Contractor licence verification
   /** Contractor asks to change a verified licence detail (document and/or
@@ -686,9 +697,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const worker = workers.find((w) => w.idNumber === id);
       if (worker) {
         if (worker.status === 'blocked') {
-          // Return the user so the navigator can route to BlockedAccount and
-          // show the block reason. NOT set as currentUser — a blocked user
-          // never gets a live session in the normal app shells.
+          // A blocked user DOES get a live session — but the navigator's
+          // blocked guard keeps them out of every normal shell and only lets
+          // them reach the BlockedAccount screen + the shared support-ticket
+          // flow (open a ticket, follow the admin's replies). `ok: false` +
+          // `reason: 'blocked'` still tells LoginScreen this is not a normal
+          // sign-in.
+          setCurrentUser(worker);
           return { ok: false, user: worker, status: 'blocked', reason: 'blocked' };
         }
         setCurrentUser(worker);
@@ -701,6 +716,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const contractor = contractors.find((c) => c.idNumber === id);
       if (contractor) {
         if (contractor.status === 'blocked') {
+          // See the worker branch above — a blocked contractor gets a live
+          // session that the navigator's blocked guard confines to the
+          // BlockedAccount screen and the shared support-ticket flow.
+          setCurrentUser(contractor);
           return {
             ok: false,
             user: contractor,
@@ -1717,6 +1736,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       const existing = supportTickets.find((t) => t.id === ticketId);
       if (!existing) return;
+      // Hard stop: a closed conversation accepts no more messages from either
+      // side, regardless of what any screen still shows. The UI hides the
+      // compose box, but this is the real guard.
+      if (existing.isClosed) return;
       // Status only moves when the caller is an admin AND the target differs.
       const applyStatus =
         isAdmin && !!statusChange && statusChange !== existing.status
@@ -1795,6 +1818,64 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     },
     [supportTickets, admins, pushNotification]
+  );
+
+  const closeSupportTicket = useCallback<AppState['closeSupportTicket']>(
+    (ticketId, adminId) => {
+      const ts = nowIso();
+      let target: SupportTicket | undefined;
+      setSupportTickets((prev) =>
+        prev.map((t) => {
+          if (t.id !== ticketId || t.isClosed) return t;
+          target = {
+            ...t,
+            isClosed: true,
+            closedAt: ts,
+            closedBy: adminId,
+            updatedAt: ts,
+          };
+          return target;
+        })
+      );
+      if (!target) return;
+      pushNotification({
+        userId: target.userId,
+        type: 'support_response',
+        title: 'הפנייה שלך נסגרה',
+        body: 'הטיפול בפנייה הסתיים והיא נסגרה. ניתן לצפות בהיסטוריית השיחה בכל עת.',
+        relatedId: ticketId,
+      });
+    },
+    [pushNotification]
+  );
+
+  const reopenSupportTicket = useCallback<AppState['reopenSupportTicket']>(
+    (ticketId, _adminId) => {
+      const ts = nowIso();
+      let target: SupportTicket | undefined;
+      setSupportTickets((prev) =>
+        prev.map((t) => {
+          if (t.id !== ticketId || !t.isClosed) return t;
+          target = {
+            ...t,
+            isClosed: false,
+            closedAt: undefined,
+            closedBy: undefined,
+            updatedAt: ts,
+          };
+          return target;
+        })
+      );
+      if (!target) return;
+      pushNotification({
+        userId: target.userId,
+        type: 'support_response',
+        title: 'הפנייה שלך נפתחה מחדש',
+        body: 'הפנייה חזרה למצב פתוח וניתן להמשיך את השיחה.',
+        relatedId: ticketId,
+      });
+    },
+    [pushNotification]
   );
 
   // -------------------------------------------------------------------
@@ -2192,6 +2273,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       openSupportTicket,
       replyToTicket,
+      closeSupportTicket,
+      reopenSupportTicket,
 
       submitContractorLicenseUpdate,
       reviewContractorLicenseUpdate,
@@ -2269,6 +2352,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       sendMessage,
       openSupportTicket,
       replyToTicket,
+      closeSupportTicket,
+      reopenSupportTicket,
       submitContractorLicenseUpdate,
       reviewContractorLicenseUpdate,
       verifyContractorLicense,

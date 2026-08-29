@@ -20,6 +20,9 @@ import { SupportTicketType } from '../types';
 interface Props {
   onBack: () => void;
   onSubmitted: (ticketId: string) => void;
+  /** Optional pre-filled subject (e.g. the blocked-account support flow).
+   *  The user can still edit or clear it before sending. */
+  initialSubject?: string;
 }
 
 const TYPES: { value: SupportTicketType; label: string; icon: keyof typeof import('@expo/vector-icons').Ionicons.glyphMap; description: string }[] = [
@@ -52,12 +55,13 @@ const TYPES: { value: SupportTicketType; label: string; icon: keyof typeof impor
 const OpenSupportTicketScreen: React.FC<Props> = ({
   onBack,
   onSubmitted,
+  initialSubject,
 }) => {
   const insets = useSafeAreaInsets();
   const { currentUser, openSupportTicket } = useApp();
 
   const [type, setType] = useState<SupportTicketType>('question');
-  const [subject, setSubject] = useState('');
+  const [subject, setSubject] = useState(initialSubject ?? '');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 

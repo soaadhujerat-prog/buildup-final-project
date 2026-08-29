@@ -36,15 +36,26 @@ interface Props {
   onBack: () => void;
   /** Admin-only: open the requester's user card. Absent for non-admin. */
   onOpenUser?: (userId: string) => void;
+  /** Non-admin only: start a brand-new ticket (shown on a closed ticket, so
+   *  the user still has a way forward once the conversation is locked). */
+  onOpenNewTicket?: () => void;
 }
 
 const SupportTicketDetailsScreen: React.FC<Props> = ({
   ticketId,
   onBack,
   onOpenUser,
+  onOpenNewTicket,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, supportTickets, getUserById, replyToTicket } = useApp();
+  const {
+    currentUser,
+    supportTickets,
+    getUserById,
+    replyToTicket,
+    closeSupportTicket,
+    reopenSupportTicket,
+  } = useApp();
   const ticket = supportTickets.find((t) => t.id === ticketId);
 
   const scrollRef = useRef<ScrollView>(null);
@@ -133,13 +144,56 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
     (m) => m.senderRole === 'admin'
   );
 
+  // Conversation-lifecycle flag, independent of `status`. When true neither
+  // side can add a message; the "טופל"/"בטיפול"/... status still shows as-is.
+  const isClosed = !!ticket.isClosed;
+  const isDone = supportTicketDisplay(ticket.status).state === 'done';
+
   // A status change is queued only if the admin picked one that differs from
   // the ticket's current status.
   const wantsStatusChange =
     isAdmin && !!pendingStatus && pendingStatus !== ticket.status;
 
+  const confirmCloseTicket = () => {
+    Alert.alert(
+      'סגירת פנייה',
+      'לאחר סגירת הפנייה המשתמש לא יוכל להוסיף תגובות נוספות לפנייה זו. ניתן יהיה לפתוח אותה מחדש במידת הצורך.',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'סגור פנייה',
+          style: 'destructive',
+          onPress: () => {
+            if (!currentUser) return;
+            closeSupportTicket(ticket.id, currentUser.id);
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmReopenTicket = () => {
+    Alert.alert(
+      'פתיחת הפנייה מחדש',
+      'להחזיר את הפנייה למצב פתוח ולאפשר המשך שיחה?',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'פתח מחדש',
+          onPress: () => {
+            if (!currentUser) return;
+            reopenSupportTicket(ticket.id, currentUser.id);
+          },
+        },
+      ]
+    );
+  };
+
   const handleSend = () => {
     if (!currentUser) return;
+    // Belt-and-braces: the compose box is not rendered on a closed ticket,
+    // and replyToTicket refuses one too — but never send from here either.
+    if (isClosed) return;
     const text = reply.trim();
     if (!text) {
       Alert.alert(
@@ -207,6 +261,9 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
                 tone={supportTicketDisplay(ticket.status).tone}
                 small
               />
+              {isClosed && (
+                <StatusBadge label="סגורה" tone="neutral" small />
+              )}
               <Text style={styles.heroSubject}>{ticket.subject}</Text>
             </View>
             <View style={styles.heroMeta}>
@@ -215,6 +272,18 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             <Text style={styles.receivedLine}>
               {supportTicketReceivedLine(ticket.createdAt)}
             </Text>
+            {isClosed && (
+              <View style={styles.closedLine}>
+                <Ionicons
+                  name="lock-closed"
+                  size={14}
+                  color={Colors.textSecondary}
+                />
+                <Text style={styles.closedLineText}>
+                  הפנייה נסגרה בתאריך {formatDateTime(ticket.closedAt)}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Requester info — admin only */}
@@ -332,7 +401,7 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
               );
             })}
 
-            {!hasAdminReply && !isAdmin && (
+            {!hasAdminReply && !isAdmin && !isClosed && (
               <View style={styles.waitingBox}>
                 <Ionicons
                   name="hourglass-outline"
@@ -346,6 +415,55 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             )}
           </View>
 
+          {isClosed ? (
+            /* Closed conversation — the history and the status badge above
+               stay fully visible; only adding new messages is disabled. */
+            <View style={styles.section}>
+              <View style={styles.closedNotice}>
+                <Ionicons
+                  name="lock-closed"
+                  size={20}
+                  color={Colors.textSecondary}
+                />
+                <Text style={styles.closedNoticeText}>
+                  {isAdmin
+                    ? 'הפנייה סגורה ולא ניתן להוסיף תגובות.'
+                    : 'פנייה זו נסגרה על ידי צוות התמיכה. לא ניתן להוסיף תגובות נוספות. אם דרושה עזרה נוספת, ניתן לפתוח פנייה חדשה.'}
+                </Text>
+              </View>
+
+              {isAdmin ? (
+                <TouchableOpacity
+                  style={styles.lifecycleBtn}
+                  onPress={confirmReopenTicket}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name="lock-open-outline"
+                    size={18}
+                    color={Colors.primary}
+                  />
+                  <Text style={styles.lifecycleBtnText}>פתח פנייה מחדש</Text>
+                </TouchableOpacity>
+              ) : (
+                onOpenNewTicket && (
+                  <TouchableOpacity
+                    style={styles.lifecycleBtn}
+                    onPress={onOpenNewTicket}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={18}
+                      color={Colors.primary}
+                    />
+                    <Text style={styles.lifecycleBtnText}>פתח פנייה חדשה</Text>
+                  </TouchableOpacity>
+                )
+              )}
+            </View>
+          ) : (
+          <>
           {/* Status — admin only. Picking a status here does NOT change it on
               its own; it is applied together with the reply below. */}
           {isAdmin && (
@@ -394,6 +512,29 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             </View>
           )}
 
+          {/* Close conversation — admin only, and only once the ticket has
+              actually been handled ("טופל"). Deliberately separate from the
+              status buttons above: closing is a lifecycle action, not a
+              status, and it leaves "טופל" showing as-is. */}
+          {isAdmin && isDone && (
+            <View style={styles.section}>
+              <View style={styles.sectionHead}>
+                <Text style={styles.sectionTitle}>סגירת פנייה</Text>
+              </View>
+              <Text style={styles.closeHint}>
+                סגירת הפנייה תמנע מהמשתמש להוסיף תגובות נוספות. ניתן יהיה לפתוח
+                אותה מחדש בעת הצורך.
+              </Text>
+              <TouchableOpacity
+                style={styles.closeBtn}
+                onPress={confirmCloseTicket}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.closeBtnText}>🔒 סגור פנייה</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Compose — both admin and requester can append to the thread */}
           <View style={styles.section}>
             <View style={styles.sectionHead}>
@@ -432,6 +573,8 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
               </Text>
             </TouchableOpacity>
           </View>
+          </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -715,6 +858,77 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
     lineHeight: 20,
+  },
+
+  closedLine: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  closedLineText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  closedNotice: {
+    flexDirection: 'row-reverse',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+  },
+  closedNoticeText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  lifecycleBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: Spacing.md,
+    paddingVertical: 14,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.white,
+  },
+  lifecycleBtnText: {
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+  closeHint: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+    marginBottom: Spacing.md,
+  },
+  closeBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.danger,
+    paddingVertical: 16,
+    borderRadius: Radius.full,
+    ...Shadow.medium,
+  },
+  closeBtnText: {
+    color: Colors.white,
+    fontSize: FontSize.md,
+    fontWeight: '700',
+    writingDirection: 'rtl',
   },
 });
 

@@ -210,6 +210,9 @@ const TicketRow: React.FC<{
             Row 2: the subject on its own line, full width. */}
         <View style={styles.rowStatusLine}>
           <StatusBadge label={display.label} tone={display.tone} small />
+          {ticket.isClosed && (
+            <StatusBadge label="סגורה" tone="neutral" small />
+          )}
         </View>
         <Text style={styles.subject} numberOfLines={2}>
           {ticket.subject}

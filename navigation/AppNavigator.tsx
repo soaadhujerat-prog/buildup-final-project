@@ -104,7 +104,6 @@ type Route =
   | { name: 'ResetPassword' }
   | { name: 'RegistrationPending'; registrationId: string }
   | { name: 'RegistrationRejected'; registrationId: string }
-  | { name: 'BlockedAccount'; userOrRegistrationId: string }
   // Worker drilldowns (Tab is implicit via WorkerTab state)
   | { name: 'WorkerJobDetails'; jobId: string }
   | { name: 'WorkerFavoriteContractors' }
@@ -141,6 +140,16 @@ type RoleHome =
   | { kind: 'contractor' }
   | { kind: 'admin' };
 
+// A blocked user never enters the route stack — the navigator's blocked guard
+// short-circuits before it. This tiny state machine is the ONLY navigation
+// available to them: the block screen itself, plus the shared support-ticket
+// screens (reused as-is, never a parallel "blocked support" system).
+type BlockedView =
+  | { name: 'root' }
+  | { name: 'tickets' }
+  | { name: 'ticket'; ticketId: string }
+  | { name: 'newTicket' };
+
 // Tabs per role — tab is just a string label tracking which dashboard pane shows
 type WorkerTab =
   | 'dashboard'
@@ -163,7 +172,7 @@ type AdminTab =
 // =============================================================================
 
 const AppNavigator: React.FC = () => {
-  const { currentUser, logout, getOrCreateConversation, getUserById } = useApp();
+  const { currentUser, logout, getOrCreateConversation } = useApp();
 
   // History stack for the post-login drilldown area — the last entry is the
   // active screen; popping it (goBack) reveals whatever the user actually
@@ -185,6 +194,10 @@ const AppNavigator: React.FC = () => {
   const [adminRegStatus, setAdminRegStatus] = useState<
     'pending' | 'approved' | 'rejected'
   >('pending');
+  // Sub-navigation for a blocked session (see BlockedView). Reset to 'root'
+  // whenever the session user changes, so a stale ticket id never carries
+  // over into a different person's blocked view.
+  const [blockedView, setBlockedView] = useState<BlockedView>({ name: 'root' });
 
   // ---- Route-stack helpers ----------------------------------------------------
 
@@ -222,6 +235,7 @@ const AppNavigator: React.FC = () => {
     const key = currentUser ? `${currentUser.role}:${currentUser.id}` : null;
     if (key === sessionKeyRef.current) return;
     sessionKeyRef.current = key;
+    setBlockedView({ name: 'root' });
 
     if (!currentUser) {
       // logged out — only push to Welcome if we're already past Splash/auth
@@ -261,6 +275,19 @@ const AppNavigator: React.FC = () => {
   // the tab root (empty stack) we let the OS handle it (default behavior).
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Blocked session: walk the BlockedView machine back one step; only
+      // fall through to the OS at its root.
+      const isBlocked =
+        !!currentUser &&
+        currentUser.role !== 'admin' &&
+        currentUser.status === 'blocked';
+      if (isBlocked) {
+        if (blockedView.name === 'root') return false;
+        setBlockedView((prev) =>
+          prev.name === 'ticket' ? { name: 'tickets' } : { name: 'root' }
+        );
+        return true;
+      }
       if (home !== null && routeStack.length > 0) {
         setRouteStack((prev) => prev.slice(0, -1));
         return true;
@@ -268,7 +295,7 @@ const AppNavigator: React.FC = () => {
       return false;
     });
     return () => sub.remove();
-  }, [home, routeStack.length]);
+  }, [home, routeStack.length, currentUser, blockedView.name]);
 
   // ---- Helpers ----------------------------------------------------------------
 
@@ -314,12 +341,9 @@ const AppNavigator: React.FC = () => {
         name: 'RegistrationRejected',
         registrationId: r.registration.id,
       });
-    } else if (r.reason === 'blocked' && r.user) {
-      resetTo({
-        name: 'BlockedAccount',
-        userOrRegistrationId: r.user.id,
-      });
     }
+    // reason === 'blocked': loginAsCustomer has already set the session user;
+    // the navigator's blocked guard takes over from here (no route needed).
   };
 
   // Notification deep-linking: route based on type + relatedId
@@ -491,21 +515,6 @@ const AppNavigator: React.FC = () => {
       />
     );
   }
-  if (route?.name === 'BlockedAccount') {
-    const blocked = getUserById(route.userOrRegistrationId);
-    return (
-      <BlockedAccountScreen
-        userOrRegistrationId={route.userOrRegistrationId}
-        blockedReason={
-          blocked && 'blockedReason' in blocked
-            ? blocked.blockedReason
-            : undefined
-        }
-        onBackToWelcome={goWelcome}
-      />
-    );
-  }
-
   // ---- Need a logged-in role to render any role shell -----------------------
   if (!currentUser || home === null) {
     // Should be impossible after auth flow, but guard
@@ -513,15 +522,52 @@ const AppNavigator: React.FC = () => {
   }
 
   // Blocked guard (frontend/UX only — real enforcement comes with the
-  // backend). If the session user's status is 'blocked' — whether they got
-  // here somehow at login, or an admin blocked them mid-session and the
-  // currentUser state updated — they never see the normal app shells.
+  // backend). If the session user's status is 'blocked' — whether they signed
+  // in that way, or an admin blocked them mid-session and the currentUser
+  // state updated — they never see the normal app shells. The ONLY thing they
+  // can reach is the block screen and the shared support-ticket flow, wired
+  // through the BlockedView machine (never the route stack).
   if (currentUser.role !== 'admin' && currentUser.status === 'blocked') {
+    if (blockedView.name === 'tickets') {
+      return (
+        <SupportTicketsScreen
+          onBack={() => setBlockedView({ name: 'root' })}
+          onOpenTicket={(ticketId) =>
+            setBlockedView({ name: 'ticket', ticketId })
+          }
+          onOpenNewTicket={() => setBlockedView({ name: 'newTicket' })}
+        />
+      );
+    }
+    if (blockedView.name === 'ticket') {
+      return (
+        <SupportTicketDetailsScreen
+          ticketId={blockedView.ticketId}
+          onBack={() => setBlockedView({ name: 'tickets' })}
+          onOpenNewTicket={() => setBlockedView({ name: 'newTicket' })}
+        />
+      );
+    }
+    if (blockedView.name === 'newTicket') {
+      return (
+        <OpenSupportTicketScreen
+          initialSubject="בירור חסימת חשבון"
+          onBack={() => setBlockedView({ name: 'root' })}
+          onSubmitted={(ticketId) =>
+            setBlockedView({ name: 'ticket', ticketId })
+          }
+        />
+      );
+    }
     return (
       <BlockedAccountScreen
-        userOrRegistrationId={currentUser.id}
         blockedReason={currentUser.blockedReason}
         onBackToWelcome={handleLogout}
+        onOpenNewTicket={() => setBlockedView({ name: 'newTicket' })}
+        onOpenTicket={(ticketId) =>
+          setBlockedView({ name: 'ticket', ticketId })
+        }
+        onOpenAllTickets={() => setBlockedView({ name: 'tickets' })}
       />
     );
   }
@@ -785,6 +831,11 @@ const AppNavigator: React.FC = () => {
             onOpenUser={
               currentUser.role === 'admin'
                 ? (userId) => push({ name: 'AdminUserDetails', userId })
+                : undefined
+            }
+            onOpenNewTicket={
+              currentUser.role !== 'admin'
+                ? () => push({ name: 'OpenSupportTicket' })
                 : undefined
             }
           />
