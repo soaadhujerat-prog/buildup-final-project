@@ -269,6 +269,14 @@ interface AppState {
     cancelledBy: 'worker' | 'contractor',
     message?: string
   ) => void;
+  /** Mark an ACTIVE assignment as the worker having FINISHED their part
+   *  normally. Flips the Assignment to 'completed', stamps completedAt /
+   *  updatedAt, and notifies the worker. This is NOT a cancellation: the slot
+   *  stays occupied (no capacity change, no reopening of registration), and
+   *  nothing on the job itself changes — job.status, acceptingApplications,
+   *  workersNeeded and the job lifecycle are all untouched. No-op on a
+   *  completed or already-cancelled assignment. */
+  completeAssignment: (assignmentId: string) => void;
 
   // Favorite workers — personal to each contractor, never a global Worker
   // property. See ContractorFavoriteWorker in types/index.ts.
@@ -1537,6 +1545,43 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   // ---------------------------------------------------------------------
+  // Assignment completion (worker finished their part — NOT a cancellation)
+  // ---------------------------------------------------------------------
+  // Only THIS assignment record changes: status → 'completed', + completedAt.
+  // The slot stays occupied (getOccupiedSlotCount counts active + completed),
+  // so the [assignments] capacity reconciler sees no drop and never reopens
+  // registration. job.status / acceptingApplications / workersNeeded are
+  // deliberately not touched here — one worker finishing is not the whole job
+  // finishing.
+  const completeAssignment = useCallback<AppState['completeAssignment']>(
+    (assignmentId) => {
+      const existing = assignments.find((a) => a.id === assignmentId);
+      if (!existing || existing.status !== 'active') return;
+
+      const ts = nowIso();
+      setAssignments((prev) =>
+        prev.map((a) =>
+          a.id === assignmentId && a.status === 'active'
+            ? { ...a, status: 'completed', completedAt: ts, updatedAt: ts }
+            : a
+        )
+      );
+
+      const job = jobs.find((j) => j.id === existing.jobId);
+      pushNotification({
+        userId: existing.workerId,
+        type: 'assignment_completed',
+        title: 'העבודה שלך במשרה הסתיימה',
+        body: `הקבלן סימן שסיימת את עבודתך במשרה "${
+          job?.title ?? ''
+        }". השיבוץ נשמר בהיסטוריית העבודות שלך.`,
+        relatedId: existing.jobId,
+      });
+    },
+    [assignments, jobs, pushNotification]
+  );
+
+  // ---------------------------------------------------------------------
   // Favorite workers
   // ---------------------------------------------------------------------
 
@@ -2310,6 +2355,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       respondToInvitation,
       cancelInvitation,
       cancelAssignment,
+      completeAssignment,
 
       toggleFavoriteWorker,
       isFavoriteWorker,
@@ -2395,6 +2441,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       respondToInvitation,
       cancelInvitation,
       cancelAssignment,
+      completeAssignment,
       toggleFavoriteWorker,
       isFavoriteWorker,
       getFavoriteWorkerIds,

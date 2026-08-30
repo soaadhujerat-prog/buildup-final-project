@@ -19,10 +19,12 @@ import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
 import ResponseDialog from '../components/ResponseDialog';
+import SharedWorkHistorySheet from '../components/SharedWorkHistorySheet';
 import { getJobHeaderBadge, isOpenForApplications } from '../services/jobStatusService';
 import {
   getWorkerJobAssignment,
   hasActiveAssignment,
+  getWorkerContractorRelationship,
 } from '../services/assignmentService';
 import { callPhone } from '../utils/contact';
 import {
@@ -31,6 +33,7 @@ import {
   invitationTimeline,
   currentStaffedState,
   assignmentCancelLine,
+  RELATIONSHIP_BADGE,
   APPLICATION_STATUS_LABEL,
   APPLICATION_STATUS_TONE,
   INVITATION_STATUS_LABEL,
@@ -88,6 +91,7 @@ const JobDetailsScreen: React.FC<Props> = ({
 
   const job = getJobById(jobId);
   const [applying, setApplying] = useState(false);
+  const [historyVisible, setHistoryVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [candidateDialog, setCandidateDialog] = useState<
     { mode: 'accept' | 'reject'; app: Application } | null
@@ -159,6 +163,14 @@ const JobDetailsScreen: React.FC<Props> = ({
   const jobOpen = isOpenForApplications(job);
   const staffing = getStaffingProgress(job.id);
   const fullyStaffed = isJobFullyStaffed(job.id);
+
+  // Worker viewing this contractor — professional-history relationship,
+  // derived only from real Assignments (same badge the contractor sees on the
+  // worker's profile).
+  const contractorRelationship =
+    isWorker && currentUser && contractor
+      ? getWorkerContractorRelationship(assignments, currentUser.id, contractor.id)
+      : 'never';
 
   // Candidates the contractor should treat as live right now (drives the
   // "מועמדים ממתינים" count) — withdrawn / rejected are history, not pending.
@@ -560,6 +572,30 @@ const JobDetailsScreen: React.FC<Props> = ({
                 </TouchableOpacity>
               )}
             </View>
+            {isWorker && (
+              <View style={styles.relationshipBlock}>
+                <StatusBadge
+                  label={RELATIONSHIP_BADGE[contractorRelationship].label}
+                  tone={RELATIONSHIP_BADGE[contractorRelationship].tone}
+                />
+                {contractorRelationship !== 'never' && (
+                  <TouchableOpacity
+                    style={styles.historyCta}
+                    onPress={() => setHistoryVisible(true)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name="time-outline"
+                      size={16}
+                      color={Colors.primary}
+                    />
+                    <Text style={styles.historyCtaText}>
+                      צפה בהיסטוריית עבודות משותפות
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
             {currentUser?.role === 'worker' && (
               <View style={styles.contactRow}>
                 <TouchableOpacity
@@ -1118,6 +1154,15 @@ const JobDetailsScreen: React.FC<Props> = ({
           )}
         </View>
       </Modal>
+
+      {isWorker && currentUser && contractor && (
+        <SharedWorkHistorySheet
+          visible={historyVisible}
+          onClose={() => setHistoryVisible(false)}
+          workerId={currentUser.id}
+          contractorId={contractor.id}
+        />
+      )}
     </View>
   );
 };
@@ -1409,6 +1454,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     gap: Spacing.md,
+  },
+  relationshipBlock: {
+    marginTop: Spacing.md,
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  historyCta: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    alignSelf: 'stretch',
+  },
+  historyCtaText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
   },
   contractorIcon: {
     width: 40,

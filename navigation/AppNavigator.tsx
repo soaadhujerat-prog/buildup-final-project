@@ -443,6 +443,13 @@ const AppNavigator: React.FC = () => {
           break;
         }
 
+        // Contractor marked the worker as having finished their part. Only the
+        // worker is notified. relatedId = job id.
+        case 'assignment_completed': {
+          if (role === 'worker') push({ name: 'WorkerMyAssignments' });
+          break;
+        }
+
         // New chat message. relatedId = conversation id → open that thread;
         // fall back to the inbox if the id can't be matched.
         case 'new_message': {

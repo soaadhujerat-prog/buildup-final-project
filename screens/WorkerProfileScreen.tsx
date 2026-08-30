@@ -20,13 +20,18 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
+import SharedWorkHistorySheet from '../components/SharedWorkHistorySheet';
 import { callPhone } from '../utils/contact';
 import {
   INVITATION_STATUS_LABEL,
   INVITATION_STATUS_TONE,
+  RELATIONSHIP_BADGE,
 } from '../utils/helpers';
 import { isOpenForApplications } from '../services/jobStatusService';
-import { hasActiveAssignment } from '../services/assignmentService';
+import {
+  hasActiveAssignment,
+  getWorkerContractorRelationship,
+} from '../services/assignmentService';
 import { Contractor, Worker } from '../types';
 import { workerProfessions, normalizeCertifications } from '../utils/normalize';
 
@@ -67,6 +72,13 @@ const WorkerProfileScreen: React.FC<Props> = ({
   const [pickerVisible, setPickerVisible] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState('');
+  const [historyVisible, setHistoryVisible] = useState(false);
+
+  // Professional-history relationship, derived only from real Assignments.
+  const relationship =
+    isContractor && me
+      ? getWorkerContractorRelationship(assignments, workerId, me.id)
+      : 'never';
 
   // Jobs this contractor can actually invite THIS worker to. Source of truth
   // is `jobs` from AppContext filtered by the canonical registration check
@@ -181,6 +193,35 @@ const WorkerProfileScreen: React.FC<Props> = ({
             </View>
           </View>
         </View>
+
+        {/* Professional-history relationship — contractor viewing worker */}
+        {isContractor && (
+          <View style={styles.relationshipCard}>
+            <View style={styles.relationshipTop}>
+              <StatusBadge
+                label={RELATIONSHIP_BADGE[relationship].label}
+                tone={RELATIONSHIP_BADGE[relationship].tone}
+              />
+              <Text style={styles.relationshipHint}>היכרות מקצועית</Text>
+            </View>
+            {relationship !== 'never' && (
+              <TouchableOpacity
+                style={styles.historyCta}
+                onPress={() => setHistoryVisible(true)}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name="time-outline"
+                  size={16}
+                  color={Colors.primary}
+                />
+                <Text style={styles.historyCtaText}>
+                  צפה בהיסטוריית עבודות משותפות
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Rates */}
         <View style={styles.ratesCard}>
@@ -439,6 +480,23 @@ const WorkerProfileScreen: React.FC<Props> = ({
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {isContractor && me && (
+        <SharedWorkHistorySheet
+          visible={historyVisible}
+          onClose={() => setHistoryVisible(false)}
+          workerId={workerId}
+          contractorId={me.id}
+          onOpenJob={
+            onOpenJobDetails
+              ? (jobId) => {
+                  setHistoryVisible(false);
+                  onOpenJobDetails(jobId);
+                }
+              : undefined
+          }
+        />
+      )}
     </View>
   );
 };
@@ -557,6 +615,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginTop: 8,
+  },
+  relationshipCard: {
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    gap: 10,
+    ...Shadow.small,
+  },
+  relationshipTop: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  relationshipHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    writingDirection: 'rtl',
+  },
+  historyCta: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  historyCtaText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
   },
   ratesCard: {
     flexDirection: 'row-reverse',

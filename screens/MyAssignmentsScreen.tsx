@@ -14,7 +14,13 @@ import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import ResponseDialog from '../components/ResponseDialog';
 import { callPhone } from '../utils/contact';
-import { formatDateTime } from '../utils/helpers';
+import {
+  formatDateTime,
+  assignmentStaffedLine,
+  assignmentCompletedLine,
+  ASSIGNMENT_STATUS_LABEL,
+  ASSIGNMENT_STATUS_TONE,
+} from '../utils/helpers';
 import { Assignment, Contractor, JobPost, Worker } from '../types';
 
 interface Props {
@@ -28,16 +34,10 @@ interface AssignmentRow {
   assignment: Assignment;
 }
 
-const STATUS_LABEL: Record<Assignment['status'], string> = {
-  active: 'פעיל',
-  completed: 'הושלם',
-  cancelled: 'בוטל',
-};
-const STATUS_TONE: Record<Assignment['status'], 'success' | 'info' | 'danger'> = {
-  active: 'success',
-  completed: 'info',
-  cancelled: 'danger',
-};
+// active → "פעיל", completed → "העבודה הסתיימה", cancelled → "השיבוץ בוטל".
+// A finished job must never read like the contractor cancelled the worker.
+const STATUS_LABEL = ASSIGNMENT_STATUS_LABEL;
+const STATUS_TONE = ASSIGNMENT_STATUS_TONE;
 
 const MyAssignmentsScreen: React.FC<Props> = ({
   onBack,
@@ -168,6 +168,9 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                         <Text style={styles.metaText}>{sourceLabel}</Text>
                       </View>
                     </View>
+                    <Text style={styles.stampText}>
+                      {assignmentStaffedLine(item.assignment)}
+                    </Text>
                   </View>
                   <Ionicons
                     name="chevron-back"
@@ -175,6 +178,18 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                     color={Colors.textMuted}
                   />
                 </TouchableOpacity>
+
+                {item.assignment.status === 'completed' && (
+                  <View style={styles.completedInfo}>
+                    <Text style={styles.completedInfoMeta}>
+                      {assignmentCompletedLine(item.assignment) ??
+                        'העבודה הסתיימה'}
+                    </Text>
+                    <Text style={styles.completedInfoMeta}>
+                      השיבוץ נשמר בהיסטוריית העבודות שלך.
+                    </Text>
+                  </View>
+                )}
 
                 {item.assignment.status === 'cancelled' && (
                   <View style={styles.cancelInfo}>
@@ -314,6 +329,26 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'row-reverse',
     gap: 8,
+  },
+  stampText: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginTop: 4,
+  },
+  completedInfo: {
+    backgroundColor: Colors.gray50,
+    borderRadius: Radius.sm,
+    padding: Spacing.sm,
+    gap: 3,
+  },
+  completedInfoMeta: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: FontSize.xs + 6,
   },
   cancelInfo: {
     backgroundColor: Colors.gray50,

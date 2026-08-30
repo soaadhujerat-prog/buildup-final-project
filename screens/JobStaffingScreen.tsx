@@ -1,15 +1,28 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StaffingProgress from '../components/StaffingProgress';
+import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ResponseDialog from '../components/ResponseDialog';
 import { callPhone } from '../utils/contact';
-import { formatDateTime } from '../utils/helpers';
+import {
+  assignmentStaffedLine,
+  assignmentCompletedLine,
+  assignmentCancelLine,
+} from '../utils/helpers';
+import { getEffectiveJobAssignments } from '../services/assignmentService';
 import { Worker, Assignment } from '../types';
 
 interface Props {
@@ -19,6 +32,11 @@ interface Props {
   onOpenChat: (workerId: string) => void;
   onOpenSearchWorkers: () => void;
   onOpenSmartMatch: () => void;
+}
+
+interface WorkerRow {
+  assignment: Assignment;
+  worker: Worker;
 }
 
 const JobStaffingScreen: React.FC<Props> = ({
@@ -33,51 +51,83 @@ const JobStaffingScreen: React.FC<Props> = ({
   const {
     getJobById,
     getUserById,
-    getAssignmentsForJob,
+    assignments,
     getStaffingProgress,
     cancelAssignment,
+    completeAssignment,
   } = useApp();
 
   const job = getJobById(jobId);
   const progress = getStaffingProgress(jobId);
 
-  const staffedWorkers = useMemo(() => {
-    return getAssignmentsForJob(jobId)
-      .filter((a) => a.status === 'active')
-      .map((a) => ({
-        assignment: a,
-        worker: getUserById(a.workerId) as Worker | undefined,
+  // One effective row per unique worker (never the raw collection) so a
+  // re-hired worker can't appear in two sections at once.
+  const rows = useMemo<WorkerRow[]>(() => {
+    return getEffectiveJobAssignments(assignments, jobId)
+      .map((assignment) => ({
+        assignment,
+        worker: getUserById(assignment.workerId) as Worker | undefined,
       }))
-      .filter((x): x is { assignment: Assignment; worker: Worker } => !!x.worker);
-  }, [jobId, getAssignmentsForJob, getUserById]);
+      .filter((x): x is WorkerRow => !!x.worker);
+  }, [assignments, jobId, getUserById]);
 
-  // Cancelled staffing stays in history — shown as a footer, never mixed in
-  // with the live "who's on the job" list.
-  const cancelledAssignments = useMemo(() => {
-    return getAssignmentsForJob(jobId)
-      .filter((a) => a.status === 'cancelled')
-      .map((a) => ({
-        assignment: a,
-        worker: getUserById(a.workerId) as Worker | undefined,
-      }))
-      .filter((x): x is { assignment: Assignment; worker: Worker } => !!x.worker)
-      .sort(
-        (a, b) =>
-          new Date(b.assignment.cancelledAt ?? b.assignment.updatedAt).getTime() -
-          new Date(a.assignment.cancelledAt ?? a.assignment.updatedAt).getTime()
-      );
-  }, [jobId, getAssignmentsForJob, getUserById]);
+  const activeRows = useMemo(
+    () =>
+      rows
+        .filter((r) => r.assignment.status === 'active')
+        .sort(
+          (a, b) =>
+            new Date(a.assignment.createdAt).getTime() -
+            new Date(b.assignment.createdAt).getTime()
+        ),
+    [rows]
+  );
 
-  const [cancelTarget, setCancelTarget] = useState<{
-    assignment: Assignment;
-    worker: Worker;
-  } | null>(null);
+  const completedRows = useMemo(
+    () =>
+      rows
+        .filter((r) => r.assignment.status === 'completed')
+        .sort(
+          (a, b) =>
+            new Date(b.assignment.completedAt ?? b.assignment.updatedAt).getTime() -
+            new Date(a.assignment.completedAt ?? a.assignment.updatedAt).getTime()
+        ),
+    [rows]
+  );
+
+  const cancelledRows = useMemo(
+    () =>
+      rows
+        .filter((r) => r.assignment.status === 'cancelled')
+        .sort(
+          (a, b) =>
+            new Date(b.assignment.cancelledAt ?? b.assignment.updatedAt).getTime() -
+            new Date(a.assignment.cancelledAt ?? a.assignment.updatedAt).getTime()
+        ),
+    [rows]
+  );
+
+  const [cancelTarget, setCancelTarget] = useState<WorkerRow | null>(null);
 
   const submitCancel = (message: string) => {
     if (!cancelTarget) return;
     const id = cancelTarget.assignment.id;
     setCancelTarget(null);
     cancelAssignment(id, 'contractor', message || undefined);
+  };
+
+  const confirmComplete = (row: WorkerRow) => {
+    Alert.alert(
+      'סיום עבודה',
+      `האם לסמן ש-${row.worker.fullName} סיים את עבודתו במשרה?\nהשיבוץ יישמר בהיסטוריה ולא יתפנה מקום לעובד חדש.`,
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'סיום עבודה',
+          onPress: () => completeAssignment(row.assignment.id),
+        },
+      ]
+    );
   };
 
   if (!job) {
@@ -91,6 +141,11 @@ const JobStaffingScreen: React.FC<Props> = ({
     );
   }
 
+  const nothingYet =
+    activeRows.length === 0 &&
+    completedRows.length === 0 &&
+    cancelledRows.length === 0;
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
@@ -101,34 +156,33 @@ const JobStaffingScreen: React.FC<Props> = ({
         >
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} pointerEvents="none">ניהול שיבוצים</Text>
+        <Text style={styles.headerTitle} pointerEvents="none">
+          ניהול שיבוצים
+        </Text>
       </View>
 
-      <FlatList
-        data={staffedWorkers}
-        keyExtractor={(x) => x.assignment.id}
+      <ScrollView
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-        ListHeaderComponent={
-          <View style={styles.summaryCard}>
-            <Text style={styles.jobTitle}>{job.title}</Text>
-            <View style={styles.jobMetaRow}>
-              <Ionicons
-                name="location-outline"
-                size={14}
-                color={Colors.textSecondary}
-              />
-              <Text style={styles.jobMetaText}>
-                {job.city} · {job.address}
-              </Text>
-            </View>
-            <View style={styles.progressWrap}>
-              <StaffingProgress progress={progress} />
-            </View>
+      >
+        <View style={styles.summaryCard}>
+          <Text style={styles.jobTitle}>{job.title}</Text>
+          <View style={styles.jobMetaRow}>
+            <Ionicons
+              name="location-outline"
+              size={14}
+              color={Colors.textSecondary}
+            />
+            <Text style={styles.jobMetaText}>
+              {job.city} · {job.address}
+            </Text>
           </View>
-        }
-        ListEmptyComponent={
+          <View style={styles.progressWrap}>
+            <StaffingProgress progress={progress} />
+          </View>
+        </View>
+
+        {nothingYet ? (
           <View style={styles.emptyWrap}>
             <Ionicons name="people-outline" size={56} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>עדיין לא שובצו עובדים</Text>
@@ -159,52 +213,75 @@ const JobStaffingScreen: React.FC<Props> = ({
               </TouchableOpacity>
             </View>
           </View>
-        }
-        renderItem={({ item }) => (
-          <WorkerAssignmentCard
-            worker={item.worker}
-            onPressProfile={() => onOpenWorkerProfile(item.worker.id)}
-            onPressMessage={() =>
-              onOpenChat(item.worker.id)
-            }
-            onPressCall={() => callPhone(item.worker.phone)}
-            onCancel={() =>
-              setCancelTarget({ assignment: item.assignment, worker: item.worker })
-            }
-          />
+        ) : (
+          <>
+            {/* Section 1 — currently working */}
+            <SectionHeader
+              title="עובדים משובצים כרגע"
+              count={activeRows.length}
+            />
+            {activeRows.length === 0 ? (
+              <Text style={styles.sectionEmpty}>
+                אין כרגע עובדים פעילים במשרה.
+              </Text>
+            ) : (
+              activeRows.map((row) => (
+                <ActiveWorkerCard
+                  key={row.assignment.id}
+                  row={row}
+                  onPressProfile={() => onOpenWorkerProfile(row.worker.id)}
+                  onPressMessage={() => onOpenChat(row.worker.id)}
+                  onPressCall={() => callPhone(row.worker.phone)}
+                  onComplete={() => confirmComplete(row)}
+                  onCancel={() => setCancelTarget(row)}
+                />
+              ))
+            )}
+
+            {/* Section 2 — finished their part */}
+            {completedRows.length > 0 && (
+              <>
+                <SectionHeader
+                  title="עובדים שסיימו את עבודתם"
+                  count={completedRows.length}
+                />
+                {completedRows.map((row) => (
+                  <HistoryWorkerCard
+                    key={row.assignment.id}
+                    row={row}
+                    badgeLabel="העבודה הסתיימה"
+                    badgeTone="info"
+                    onPressProfile={() => onOpenWorkerProfile(row.worker.id)}
+                    onPressMessage={() => onOpenChat(row.worker.id)}
+                    onPressCall={() => callPhone(row.worker.phone)}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Section 3 — cancelled staffing */}
+            {cancelledRows.length > 0 && (
+              <>
+                <SectionHeader
+                  title="שיבוצים שבוטלו"
+                  count={cancelledRows.length}
+                />
+                {cancelledRows.map((row) => (
+                  <HistoryWorkerCard
+                    key={row.assignment.id}
+                    row={row}
+                    badgeLabel="השיבוץ בוטל"
+                    badgeTone="neutral"
+                    onPressProfile={() => onOpenWorkerProfile(row.worker.id)}
+                    onPressMessage={() => onOpenChat(row.worker.id)}
+                    onPressCall={() => callPhone(row.worker.phone)}
+                  />
+                ))}
+              </>
+            )}
+          </>
         )}
-        ListFooterComponent={
-          cancelledAssignments.length > 0 ? (
-            <View style={styles.historyWrap}>
-              <Text style={styles.historyTitle}>שיבוצים שבוטלו</Text>
-              {cancelledAssignments.map(({ assignment, worker }) => (
-                <View key={assignment.id} style={styles.historyRow}>
-                  <View style={styles.historyTop}>
-                    <Ionicons
-                      name="close-circle-outline"
-                      size={16}
-                      color={Colors.danger}
-                    />
-                    <Text style={styles.historyName}>{worker.fullName}</Text>
-                  </View>
-                  <Text style={styles.historyMeta}>
-                    בוטל על ידי{' '}
-                    {assignment.cancelledBy === 'worker' ? 'העובד' : 'הקבלן'}
-                    {assignment.cancelledAt
-                      ? ` ב־${formatDateTime(assignment.cancelledAt)}`
-                      : ''}
-                  </Text>
-                  {assignment.cancellationMessage ? (
-                    <Text style={styles.historyMessage}>
-                      “{assignment.cancellationMessage}”
-                    </Text>
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          ) : null
-        }
-      />
+      </ScrollView>
 
       <ResponseDialog
         visible={!!cancelTarget}
@@ -221,64 +298,174 @@ const JobStaffingScreen: React.FC<Props> = ({
   );
 };
 
-const WorkerAssignmentCard: React.FC<{
+const SectionHeader: React.FC<{ title: string; count: number }> = ({
+  title,
+  count,
+}) => (
+  <View style={styles.sectionHeader}>
+    <View style={styles.sectionCountPill}>
+      <Text style={styles.sectionCountText}>{count}</Text>
+    </View>
+    <Text style={styles.sectionTitle}>{title}</Text>
+  </View>
+);
+
+const ContactRow: React.FC<{
   worker: Worker;
+  onPressMessage: () => void;
+  onPressCall: () => void;
+}> = ({ worker, onPressMessage, onPressCall }) => (
+  <View style={styles.cardActions}>
+    <TouchableOpacity
+      style={styles.actionBtn}
+      onPress={onPressMessage}
+      activeOpacity={0.85}
+      accessibilityLabel={`שלח הודעה ל${worker.fullName}`}
+    >
+      <Ionicons name="chatbubble-outline" size={16} color={Colors.primary} />
+      <Text style={styles.actionBtnText}>שלח הודעה</Text>
+    </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.actionBtn}
+      onPress={onPressCall}
+      activeOpacity={0.85}
+      accessibilityLabel={`התקשר ל${worker.fullName}`}
+    >
+      <Ionicons name="call-outline" size={16} color={Colors.primary} />
+      <Text style={styles.actionBtnText}>התקשר</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+const ActiveWorkerCard: React.FC<{
+  row: WorkerRow;
   onPressProfile: () => void;
   onPressMessage: () => void;
   onPressCall: () => void;
+  onComplete: () => void;
   onCancel: () => void;
-}> = ({ worker, onPressProfile, onPressMessage, onPressCall, onCancel }) => (
+}> = ({
+  row,
+  onPressProfile,
+  onPressMessage,
+  onPressCall,
+  onComplete,
+  onCancel,
+}) => (
   <View style={styles.card}>
     <TouchableOpacity
       style={styles.cardHead}
       onPress={onPressProfile}
       activeOpacity={0.85}
     >
-      <WorkerAvatar worker={worker} size={44} />
+      <WorkerAvatar worker={row.worker} size={44} />
       <View style={{ flex: 1 }}>
         <View style={styles.cardTopline}>
           <View style={styles.statusDot} />
-          <Text style={styles.workerName}>{worker.fullName}</Text>
+          <Text style={styles.workerName}>{row.worker.fullName}</Text>
         </View>
         <Text style={styles.workerMeta} numberOfLines={1}>
-          {worker.profession} · {worker.experienceYears} שנים · {worker.city}
+          {row.worker.profession} · {row.worker.experienceYears} שנים ·{' '}
+          {row.worker.city}
+        </Text>
+        <Text style={styles.stampText}>
+          {assignmentStaffedLine(row.assignment)}
         </Text>
       </View>
       <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />
     </TouchableOpacity>
 
+    <ContactRow
+      worker={row.worker}
+      onPressMessage={onPressMessage}
+      onPressCall={onPressCall}
+    />
+
     <View style={styles.cardActions}>
       <TouchableOpacity
-        style={styles.actionBtn}
-        onPress={onPressMessage}
+        style={styles.completeBtn}
+        onPress={onComplete}
         activeOpacity={0.85}
-        accessibilityLabel={`שלח הודעה ל${worker.fullName}`}
+        accessibilityLabel={`סיום העבודה של ${row.worker.fullName}`}
       >
-        <Ionicons name="chatbubble-outline" size={16} color={Colors.primary} />
-        <Text style={styles.actionBtnText}>שלח הודעה</Text>
+        <Ionicons
+          name="checkmark-done-outline"
+          size={16}
+          color={Colors.success}
+        />
+        <Text style={styles.completeBtnText}>סיום עבודה</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={styles.actionBtn}
-        onPress={onPressCall}
+        style={styles.cancelBtn}
+        onPress={onCancel}
         activeOpacity={0.85}
-        accessibilityLabel={`התקשר ל${worker.fullName}`}
+        accessibilityLabel={`ביטול השיבוץ של ${row.worker.fullName}`}
       >
-        <Ionicons name="call-outline" size={16} color={Colors.primary} />
-        <Text style={styles.actionBtnText}>התקשר</Text>
+        <Ionicons name="close-circle-outline" size={16} color={Colors.danger} />
+        <Text style={styles.cancelBtnText}>ביטול שיבוץ</Text>
       </TouchableOpacity>
     </View>
-
-    <TouchableOpacity
-      style={styles.cancelBtn}
-      onPress={onCancel}
-      activeOpacity={0.85}
-      accessibilityLabel={`ביטול השיבוץ של ${worker.fullName}`}
-    >
-      <Ionicons name="close-circle-outline" size={16} color={Colors.danger} />
-      <Text style={styles.cancelBtnText}>ביטול שיבוץ</Text>
-    </TouchableOpacity>
   </View>
 );
+
+const HistoryWorkerCard: React.FC<{
+  row: WorkerRow;
+  badgeLabel: string;
+  badgeTone: 'info' | 'neutral';
+  onPressProfile: () => void;
+  onPressMessage: () => void;
+  onPressCall: () => void;
+}> = ({
+  row,
+  badgeLabel,
+  badgeTone,
+  onPressProfile,
+  onPressMessage,
+  onPressCall,
+}) => {
+  const completedLine = assignmentCompletedLine(row.assignment);
+  const cancelLine =
+    row.assignment.status === 'cancelled'
+      ? assignmentCancelLine(row.assignment)
+      : null;
+  return (
+    <View style={styles.card}>
+      <TouchableOpacity
+        style={styles.cardHead}
+        onPress={onPressProfile}
+        activeOpacity={0.85}
+      >
+        <WorkerAvatar worker={row.worker} size={44} />
+        <View style={{ flex: 1 }}>
+          <View style={styles.cardTopline}>
+            <StatusBadge label={badgeLabel} tone={badgeTone} small />
+            <Text style={styles.workerName}>{row.worker.fullName}</Text>
+          </View>
+          <Text style={styles.stampText}>
+            {assignmentStaffedLine(row.assignment)}
+          </Text>
+          {completedLine && (
+            <Text style={styles.stampText}>{completedLine}</Text>
+          )}
+          {cancelLine && <Text style={styles.stampText}>{cancelLine}</Text>}
+          {row.assignment.status === 'cancelled' &&
+          row.assignment.cancellationMessage ? (
+            <Text style={styles.historyMessage}>
+              “{row.assignment.cancellationMessage}”
+            </Text>
+          ) : null}
+        </View>
+        <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />
+      </TouchableOpacity>
+
+      <ContactRow
+        worker={row.worker}
+        onPressMessage={onPressMessage}
+        onPressCall={onPressCall}
+      />
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
@@ -315,13 +502,13 @@ const styles = StyleSheet.create({
   backLink: { alignItems: 'center', marginTop: 12 },
   backLinkText: { color: Colors.primary, fontWeight: '700' },
 
-  list: { padding: Spacing.lg, paddingBottom: 60 },
+  list: { padding: Spacing.lg, paddingBottom: 60, gap: Spacing.sm },
 
   summaryCard: {
     backgroundColor: Colors.white,
     borderRadius: Radius.lg,
     padding: Spacing.lg,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.sm,
     gap: 10,
     ...Shadow.medium,
   },
@@ -343,6 +530,42 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   progressWrap: { marginTop: 4 },
+
+  sectionHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: Spacing.lg,
+    marginBottom: 2,
+  },
+  sectionTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  sectionCountPill: {
+    minWidth: 22,
+    paddingHorizontal: 6,
+    height: 22,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primaryFaint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionCountText: {
+    fontSize: FontSize.xs,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  sectionEmpty: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    paddingVertical: 4,
+  },
 
   card: {
     backgroundColor: Colors.white,
@@ -379,6 +602,22 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     marginTop: 2,
   },
+  stampText: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    writingDirection: 'rtl',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  historyMessage: {
+    fontSize: FontSize.sm,
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    fontStyle: 'italic',
+    lineHeight: FontSize.sm + 5,
+    marginTop: 2,
+  },
   cardActions: {
     flexDirection: 'row-reverse',
     gap: 8,
@@ -400,7 +639,26 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     writingDirection: 'rtl',
   },
+  completeBtn: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.success,
+    backgroundColor: Colors.white,
+  },
+  completeBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.success,
+    writingDirection: 'rtl',
+  },
   cancelBtn: {
+    flex: 1,
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'center',
@@ -416,54 +674,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.danger,
     writingDirection: 'rtl',
-  },
-
-  historyWrap: {
-    marginTop: Spacing.lg,
-    backgroundColor: Colors.white,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    gap: 10,
-    ...Shadow.small,
-  },
-  historyTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: Colors.primary,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  historyRow: {
-    gap: 3,
-    paddingVertical: 8,
-    borderBottomColor: Colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  historyTop: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-  },
-  historyName: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.text,
-    writingDirection: 'rtl',
-  },
-  historyMeta: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    lineHeight: FontSize.xs + 6,
-  },
-  historyMessage: {
-    fontSize: FontSize.sm,
-    color: Colors.text,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    fontStyle: 'italic',
-    lineHeight: FontSize.sm + 5,
   },
 
   emptyWrap: {

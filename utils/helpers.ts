@@ -5,6 +5,7 @@ import type {
   InvitationStatus,
   SupportTicketStatus,
 } from '../types';
+import type { WorkerContractorRelationship } from '../services/assignmentService';
 
 export const formatDate = (dateString: string): string => {
   const date = new Date(dateString);
@@ -326,14 +327,64 @@ export const currentStaffedState = (
 ): { label: string; tone: BadgeTone } => {
   if (decisionStatus === 'accepted' && assignment) {
     if (assignment.status === 'cancelled') {
-      return { label: 'בוטל', tone: 'neutral' };
+      return { label: 'השיבוץ בוטל', tone: 'neutral' };
     }
     if (assignment.status === 'completed') {
-      return { label: 'הושלם', tone: 'info' };
+      return { label: 'העבודה הסתיימה', tone: 'info' };
     }
   }
   return base;
 };
+
+// ---------------------------------------------------------------------------
+// Assignment (staffing) — one shared source for the "when" lines and the
+// worker-side status pill, so "סיום עבודה" never reads as "השיבוץ בוטל".
+// ---------------------------------------------------------------------------
+
+/** "שובץ ב־DD.MM.YYYY בשעה HH:mm" — always from Assignment.createdAt, the real
+ *  moment the slot was created (never the application/invitation date). */
+export const assignmentStaffedLine = (
+  assignment: Pick<Assignment, 'createdAt'>
+): string => `שובץ ב־${formatDateTime(assignment.createdAt)}`;
+
+/** "העבודה הסתיימה ב־DD.MM.YYYY בשעה HH:mm" — from Assignment.completedAt. */
+export const assignmentCompletedLine = (
+  assignment: Pick<Assignment, 'completedAt'>
+): string | null =>
+  assignment.completedAt
+    ? `העבודה הסתיימה ב־${formatDateTime(assignment.completedAt)}`
+    : null;
+
+/** Worker-facing status pill for their own assignment. active → "פעיל",
+ *  completed → "העבודה הסתיימה" (NOT a generic "הושלם"), cancelled →
+ *  "השיבוץ בוטל". */
+export const ASSIGNMENT_STATUS_LABEL: Record<Assignment['status'], string> = {
+  active: 'פעיל',
+  completed: 'העבודה הסתיימה',
+  cancelled: 'השיבוץ בוטל',
+};
+
+export const ASSIGNMENT_STATUS_TONE: Record<Assignment['status'], BadgeTone> = {
+  active: 'success',
+  completed: 'info',
+  cancelled: 'neutral',
+};
+
+/** Worker <-> contractor relationship badge — one shared label/tone so the
+ *  WorkerProfile (contractor viewing worker) and JobDetails (worker viewing
+ *  contractor) show identical wording. */
+export const RELATIONSHIP_BADGE: Record<
+  WorkerContractorRelationship,
+  { label: string; tone: BadgeTone }
+> = {
+  never: { label: 'טרם עבדתם יחד', tone: 'neutral' },
+  current: { label: 'עובדים יחד כעת', tone: 'success' },
+  past: { label: 'עבדתם יחד בעבר', tone: 'info' },
+};
+
+/** "עבודה משותפת אחת" / "N עבודות משותפות" — the shared-history summary. */
+export const sharedWorkCountLabel = (count: number): string =>
+  count === 1 ? 'עבודה משותפת אחת' : `${count} עבודות משותפות`;
 
 /** "בוטל על ידי הקבלן ב־DD.MM.YYYY בשעה HH:mm" (or "העובד"). */
 export const assignmentCancelLine = (
@@ -358,6 +409,7 @@ export const getNotificationIcon = (type: string): string => {
   const icons: Record<string, string> = {
     job_request: 'briefcase',
     job_accepted: 'checkmark-circle',
+    assignment_completed: 'checkmark-done-circle',
     job_rejected: 'close-circle',
     new_message: 'chatbubble',
     review: 'star',

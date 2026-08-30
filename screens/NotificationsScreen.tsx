@@ -30,6 +30,7 @@ const iconForType = (
     case 'application_accepted':
     case 'invitation_accepted':
     case 'job_accepted':
+    case 'assignment_completed':
     case 'registration_approved':
     case 'account_unblocked':
       return {

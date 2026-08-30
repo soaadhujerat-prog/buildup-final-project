@@ -40,6 +40,19 @@ const StaffingProgress: React.FC<Props> = ({ progress, compact }) => {
     );
   }
 
+  // Only a real cancellation leaves a slot to fill — a worker who finished
+  // their part still occupies theirs.
+  const missingHint =
+    progress.missing === 1
+      ? 'חסר עובד אחד'
+      : progress.missing > 1
+      ? `חסרים ${progress.missing} עובדים`
+      : null;
+
+  // Secondary breakdown — shown only once some workers have finished, so the
+  // main "X מתוך Y שובצו" number never needs a caveat.
+  const showBreakdown = progress.completed > 0;
+
   return (
     <View style={styles.wrap}>
       <View style={styles.headRow}>
@@ -56,6 +69,14 @@ const StaffingProgress: React.FC<Props> = ({ progress, compact }) => {
           ]}
         />
       </View>
+      {showBreakdown && (
+        <Text style={styles.subText}>
+          עובדים כעת: {progress.active} · סיימו עבודה: {progress.completed}
+        </Text>
+      )}
+      {missingHint && (
+        <Text style={[styles.subText, styles.missingText]}>{missingHint}</Text>
+      )}
     </View>
   );
 };
@@ -90,6 +111,17 @@ const styles = StyleSheet.create({
   fill: {
     height: '100%',
     borderRadius: Radius.full,
+  },
+
+  subText: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  missingText: {
+    color: Colors.warning,
+    fontWeight: '700',
   },
 
   compactWrap: { width: '100%', gap: 4 },

@@ -472,8 +472,16 @@ export interface Assignment {
   source: AssignmentSource;
   sourceId?: string; // the Application or Invitation id that created this
   status: AssignmentStatus;
+  /** Real timestamp the staffing slot was created (contractor accepted an
+   *  application / worker accepted an invitation). THE source of truth for
+   *  "שובץ ב-..." — never fall back to the application/invitation date once an
+   *  Assignment exists. */
   createdAt: string;
   updatedAt: string;
+  /** Set only when the worker FINISHED their part normally (status became
+   *  'completed'). A completed assignment still holds its slot — it is not a
+   *  cancellation and never frees a place for a new worker. */
+  completedAt?: string;
   /** Set only when status became 'cancelled'. */
   cancelledAt?: string;
   cancelledBy?: 'worker' | 'contractor';
@@ -559,6 +567,7 @@ export type NotificationType =
   | 'invitation_declined'
   | 'invitation_cancelled'
   | 'assignment_cancelled'
+  | 'assignment_completed'
   | 'new_message'
   | 'review'
   | 'registration_approved'
