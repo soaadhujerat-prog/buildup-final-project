@@ -180,8 +180,8 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const submitRegChange = () => {
     if (!me || regChangeSubmitting) return;
     const requested = regChangeNewNumber.trim();
-    if (!requested) {
-      Alert.alert('שגיאה', 'יש להזין את מספר הרישום החדש המבוקש.');
+    if (!requested || !/^\d+$/.test(requested)) {
+      Alert.alert('שגיאה', 'יש להזין מספר רישום קבלן תקין');
       return;
     }
     if (requested === regNumber) {
@@ -530,7 +530,10 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
               <Field
                 label="מספר רישום חדש (רק אם השתנה)"
                 value={licenseRegNumberReq}
-                onChange={setLicenseRegNumberReq}
+                onChange={(t) =>
+                  setLicenseRegNumberReq(t.replace(/\D/g, '').slice(0, 12))
+                }
+                keyboardType="numeric"
               />
               <Text style={styles.readonlyHint}>
                 הרישיון המאושר הנוכחי יישאר פעיל עד שמנהל המערכת יאשר את
@@ -625,8 +628,11 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
                       { textAlign: 'left', writingDirection: 'ltr' },
                     ]}
                     value={regChangeNewNumber}
-                    onChangeText={setRegChangeNewNumber}
+                    onChangeText={(t) =>
+                      setRegChangeNewNumber(t.replace(/\D/g, '').slice(0, 12))
+                    }
                     keyboardType="numeric"
+                    maxLength={12}
                     placeholder="לדוגמה: 105678"
                     placeholderTextColor={Colors.textMuted}
                   />

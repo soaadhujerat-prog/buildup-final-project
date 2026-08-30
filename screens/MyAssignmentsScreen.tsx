@@ -30,6 +30,7 @@ import {
   ASSIGNMENT_STATUS_TONE,
 } from '../utils/helpers';
 import { Assignment, Contractor, JobPost, Worker } from '../types';
+import { jobProfessions } from '../utils/normalize';
 
 interface Props {
   onBack: () => void;
@@ -232,7 +233,7 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                       </Text>
                     </View>
                     <Text style={styles.sub} numberOfLines={1}>
-                      {item.job.profession} · {item.job.city}
+                      {jobProfessions(item.job).join(', ')} · {item.job.city}
                     </Text>
                     <View style={styles.metaRow}>
                       {contractor && (

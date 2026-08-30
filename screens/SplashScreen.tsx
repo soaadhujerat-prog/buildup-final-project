@@ -4,108 +4,223 @@ import {
   Text,
   StyleSheet,
   Animated,
-  Dimensions,
+  Easing,
   TouchableWithoutFeedback,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { Colors, FontSize } from '../theme/colors';
-
-const { width, height } = Dimensions.get('window');
+import BuildUpLogo from '../components/BuildUpLogo';
 
 interface Props {
   onFinish: () => void;
 }
 
+// The ONE place splash timing lives: how long the splash stays up after its
+// entrance animation settles, before navigating on. Was 1200ms — +2000ms so
+// the richer motion has room to breathe.
+const HOLD_AFTER_ENTRANCE_MS = 1200 + 2000;
+
 const SplashScreen: React.FC<Props> = ({ onFinish }) => {
-  const scaleAnim = useRef(new Animated.Value(0.5)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
-  const taglineAnim = useRef(new Animated.Value(0)).current;
+  const logoScale = useRef(new Animated.Value(0.94)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const textOpacity = useRef(new Animated.Value(0)).current;
+  const textShift = useRef(new Animated.Value(12)).current;
+
+  const blob1 = useRef(new Animated.Value(0)).current;
+  const blob2 = useRef(new Animated.Value(0)).current;
+  const dots = useRef([
+    new Animated.Value(0.3),
+    new Animated.Value(0.3),
+    new Animated.Value(0.3),
+  ]).current;
+
   const finishedRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const finish = () => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    if (timerRef.current) clearTimeout(timerRef.current);
     onFinish();
   };
 
   useEffect(() => {
-    Animated.sequence([
+    // --- Entrance: logo fades + scales up, then title/subtitle follow ---
+    const entrance = Animated.sequence([
       Animated.parallel([
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          tension: 60,
-          friction: 8,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacityAnim, {
+        Animated.timing(logoOpacity, {
           toValue: 1,
           duration: 600,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(logoScale, {
+          toValue: 1,
+          friction: 7,
+          tension: 40,
           useNativeDriver: true,
         }),
       ]),
-      Animated.timing(taglineAnim, {
-        toValue: 1,
-        duration: 400,
-        delay: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setTimeout(finish, 1200);
+      Animated.parallel([
+        Animated.timing(textOpacity, {
+          toValue: 1,
+          duration: 450,
+          delay: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(textShift, {
+          toValue: 0,
+          duration: 450,
+          delay: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]);
+    // Navigate only after the entrance settles — same structure as before,
+    // just a longer hold. One timer, cleared on unmount / tap-to-skip.
+    entrance.start(() => {
+      timerRef.current = setTimeout(finish, HOLD_AFTER_ENTRANCE_MS);
     });
+
+    // --- Looping ambient motion (native-driver transforms only) ---
+    const blobLoop = (v: Animated.Value, duration: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(v, {
+            toValue: 1,
+            duration,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(v, {
+            toValue: 0,
+            duration,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    const a1 = blobLoop(blob1, 6000);
+    const a2 = blobLoop(blob2, 8500);
+
+    // --- Bottom dots: a gentle staggered pulse, no spinner ---
+    const pulse = (v: Animated.Value) =>
+      Animated.sequence([
+        Animated.timing(v, {
+          toValue: 1,
+          duration: 420,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(v, {
+          toValue: 0.3,
+          duration: 420,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]);
+    const dotsLoop = Animated.loop(
+      Animated.stagger(160, dots.map((d) => pulse(d)))
+    );
+
+    a1.start();
+    a2.start();
+    dotsLoop.start();
+
+    return () => {
+      entrance.stop();
+      a1.stop();
+      a2.stop();
+      dotsLoop.stop();
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const blob1Style = {
+    transform: [
+      { translateX: blob1.interpolate({ inputRange: [0, 1], outputRange: [0, 12] }) },
+      { translateY: blob1.interpolate({ inputRange: [0, 1], outputRange: [0, -10] }) },
+      { scale: blob1.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] }) },
+    ],
+  };
+  const blob2Style = {
+    transform: [
+      { translateX: blob2.interpolate({ inputRange: [0, 1], outputRange: [0, -14] }) },
+      { translateY: blob2.interpolate({ inputRange: [0, 1], outputRange: [0, 12] }) },
+      { scale: blob2.interpolate({ inputRange: [0, 1], outputRange: [1.02, 0.98] }) },
+    ],
+  };
 
   return (
     <TouchableWithoutFeedback onPress={finish}>
       <LinearGradient
-        colors={[Colors.primary, Colors.primaryDark, Colors.secondary]}
+        // Vertical 3-zone blend, no visible banding: warm sand → brand brown
+        // (the midpoint, unchanged) → the muted navy already used here. Extra
+        // in-between stops + custom locations keep every transition soft.
+        colors={[
+          '#D8C3A0', // top — warm sand, present but not washed out
+          '#B98F63', // caramel
+          Colors.primary, // #9A7150 — BuildUp warm brown, held at the centre
+          Colors.primaryDark, // #7A573C — deeper brown
+          '#3C4152', // bridge — brown desaturating toward blue
+          Colors.secondaryDark, // #152D4A — muted navy (already in the screen)
+        ]}
+        locations={[0, 0.18, 0.4, 0.6, 0.82, 1]}
         style={styles.container}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
       >
-      {/* Background decoration */}
-      <View style={styles.circle1} />
-      <View style={styles.circle2} />
+        <Animated.View
+          style={[styles.blob, styles.circle1, blob1Style]}
+          pointerEvents="none"
+        />
+        <Animated.View
+          style={[styles.blob, styles.circle2, blob2Style]}
+          pointerEvents="none"
+        />
 
-      <Animated.View
-        style={[
-          styles.logoContainer,
-          {
-            transform: [{ scale: scaleAnim }],
-            opacity: opacityAnim,
-          },
-        ]}
-      >
-        <View style={styles.iconWrapper}>
-          <Ionicons name="construct" size={56} color={Colors.primary} />
-        </View>
-        <Text style={styles.appName}>BuildUp</Text>
-        <Text style={styles.appNameHe}>בילד אפ</Text>
-      </Animated.View>
+        <Animated.View
+          style={[
+            styles.logoContainer,
+            { transform: [{ scale: logoScale }], opacity: logoOpacity },
+          ]}
+        >
+          <BuildUpLogo size={110} style={styles.iconWrapper} />
+          <Text style={styles.appName}>BuildUp</Text>
+          <Text style={styles.appNameHe}>בילד אפ</Text>
+        </Animated.View>
 
-      <Animated.Text
-        style={[
-          styles.tagline,
-          {
-            opacity: taglineAnim,
-            transform: [
-              {
-                translateY: taglineAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [20, 0],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        מחברים בין קבלנים לעובדים{'\n'}בתחום הבנייה
-      </Animated.Text>
+        <Animated.Text
+          style={[
+            styles.tagline,
+            { opacity: textOpacity, transform: [{ translateY: textShift }] },
+          ]}
+        >
+          מחברים בין קבלנים לעובדים{'\n'}בתחום הבנייה
+        </Animated.Text>
 
         <View style={styles.footer}>
           <View style={styles.loadingDots}>
-            {[0, 1, 2].map((i) => (
-              <View key={i} style={styles.dot} />
+            {dots.map((d, i) => (
+              <Animated.View
+                key={i}
+                style={[
+                  styles.dot,
+                  {
+                    opacity: d,
+                    transform: [
+                      {
+                        scale: d.interpolate({
+                          inputRange: [0.3, 1],
+                          outputRange: [0.85, 1.15],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
             ))}
           </View>
         </View>
@@ -120,23 +235,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  circle1: {
+  blob: {
     position: 'absolute',
+    borderRadius: 999,
+    // top blob — soft translucent sand, tone-on-tone with the beige top
+    backgroundColor: 'rgba(226,208,178,0.20)',
+  },
+  circle1: {
     width: 300,
     height: 300,
-    borderRadius: 150,
-    backgroundColor: 'rgba(255,255,255,0.05)',
     top: -80,
     right: -80,
   },
   circle2: {
-    position: 'absolute',
     width: 200,
     height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(255,255,255,0.05)',
     bottom: 60,
     left: -60,
+    // bottom blob — translucent navy/blue that melts into the lower gradient
+    backgroundColor: 'rgba(46,91,150,0.22)',
   },
   logoContainer: {
     alignItems: 'center',
@@ -187,7 +304,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.7)',
   },
 });
 

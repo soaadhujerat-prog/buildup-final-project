@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Dimensions,
+  Animated,
+  Easing,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import BuildUpLogo from '../components/BuildUpLogo';
 
 const { height } = Dimensions.get('window');
 
@@ -20,40 +23,99 @@ interface Props {
   onAdminLogin: () => void;
 }
 
+// Neutral value props — each one reads the same whether you're a contractor or
+// a worker. Icons are from the construction world (Ionicons — already used
+// across the app).
+const VALUE_PROPS: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
+  { icon: 'people-outline', text: 'מחברים בין קבלנים רשומים לעובדי בנייה מקצועיים' },
+  { icon: 'briefcase-outline', text: 'מנהלים עבודה, שיבוצים ותקשורת במקום אחד' },
+  { icon: 'ribbon-outline', text: 'בונים שיתופי פעולה מקצועיים לאורך זמן' },
+];
+
 const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => {
   const [selectedRole, setSelectedRole] = useState<CustomerRole>('contractor');
+
+  // Two slow, gentle background blobs. Native-driver only (transform), looped,
+  // and stopped on unmount so nothing keeps running after the screen is gone.
+  const blob1 = useRef(new Animated.Value(0)).current;
+  const blob2 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = (v: Animated.Value, duration: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(v, {
+            toValue: 1,
+            duration,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(v, {
+            toValue: 0,
+            duration,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    const a1 = loop(blob1, 6500);
+    const a2 = loop(blob2, 9000);
+    a1.start();
+    a2.start();
+    return () => {
+      a1.stop();
+      a2.stop();
+    };
+  }, [blob1, blob2]);
+
+  const blob1Style = {
+    transform: [
+      { translateX: blob1.interpolate({ inputRange: [0, 1], outputRange: [0, 14] }) },
+      { translateY: blob1.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) },
+      { scale: blob1.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] }) },
+    ],
+  };
+  const blob2Style = {
+    transform: [
+      { translateX: blob2.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) },
+      { translateY: blob2.interpolate({ inputRange: [0, 1], outputRange: [0, 10] }) },
+      { scale: blob2.interpolate({ inputRange: [0, 1], outputRange: [1.02, 0.98] }) },
+    ],
+  };
 
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={[Colors.primary, Colors.primaryDark]}
+        colors={[Colors.primary, Colors.primaryDark, Colors.secondaryDark]}
         style={styles.topSection}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
-        <View style={styles.decorCircle1} />
-        <View style={styles.decorCircle2} />
+        <Animated.View
+          style={[styles.blob, styles.blobLight, blob1Style]}
+          pointerEvents="none"
+        />
+        <Animated.View
+          style={[styles.blob, styles.blobNavy, blob2Style]}
+          pointerEvents="none"
+        />
 
         <View style={styles.logoArea}>
-          <View style={styles.logoIcon}>
-            <Ionicons name="construct" size={40} color={Colors.primary} />
-          </View>
+          <BuildUpLogo size={52} style={styles.logoIcon} />
           <Text style={styles.logoText}>BuildUp</Text>
         </View>
 
         <View style={styles.features}>
-          {[
-            { icon: 'flash', text: 'מצא עובדים תוך דקות' },
-            { icon: 'star', text: 'התאמה חכמה לפרויקט שלך' },
-            { icon: 'shield-checkmark', text: 'משתמשים מאומתים על ידי המערכת' },
-          ].map((feature, index) => (
-            <View key={index} style={styles.featureRow}>
+          {VALUE_PROPS.map((feature) => (
+            <View key={feature.text} style={styles.featureRow}>
               <Text style={styles.featureText}>{feature.text}</Text>
-              <Ionicons
-                name={feature.icon as any}
-                size={20}
-                color={Colors.primaryLight}
-              />
+              <View style={styles.featureIconWrap}>
+                <Ionicons
+                  name={feature.icon}
+                  size={18}
+                  color={Colors.white}
+                />
+              </View>
             </View>
           ))}
         </View>
@@ -62,7 +124,7 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => 
       <View style={styles.bottomSection}>
         <Text style={styles.welcomeTitle}>ברוכים הבאים ל-BuildUp</Text>
         <Text style={styles.welcomeSubtitle}>
-          הפלטפורמה החכמה לחיבור קבלנים עם עובדי בנייה מקצועיים
+          הפלטפורמה לניהול עבודה, שיבוצים ותקשורת בין אנשי מקצוע בענף הבנייה
         </Text>
 
         <View style={styles.roleContainer}>
@@ -71,61 +133,24 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => 
           </View>
 
           <View style={styles.roleOptions}>
-            <TouchableOpacity
-              style={[
-                styles.roleCard,
-                selectedRole === 'contractor' && styles.roleCardActive,
-              ]}
-              activeOpacity={0.8}
+            <RoleCard
+              active={selectedRole === 'contractor'}
+              accent={Colors.secondary}
+              accentFaint={Colors.adminPrimaryFaint}
+              icon="business"
+              label="קבלן"
+              desc="מפרסם משרות ומנהל צוותים"
               onPress={() => setSelectedRole('contractor')}
-            >
-              <Ionicons
-                name="business"
-                size={28}
-                color={
-                  selectedRole === 'contractor'
-                    ? Colors.primary
-                    : Colors.textSecondary
-                }
-              />
-              <Text
-                style={[
-                  styles.roleLabel,
-                  selectedRole === 'contractor' && styles.roleLabelActive,
-                ]}
-              >
-                קבלן
-              </Text>
-              <Text style={styles.roleDesc}>מחפש עובדים לפרויקטים</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.roleCard,
-                selectedRole === 'worker' && styles.roleCardActive,
-              ]}
-              activeOpacity={0.8}
+            />
+            <RoleCard
+              active={selectedRole === 'worker'}
+              accent={Colors.primary}
+              accentFaint={Colors.primaryFaint}
+              icon="hammer"
+              label="עובד"
+              desc="מוצא עבודות ומנהל שיבוצים"
               onPress={() => setSelectedRole('worker')}
-            >
-              <Ionicons
-                name="hammer"
-                size={28}
-                color={
-                  selectedRole === 'worker'
-                    ? Colors.primary
-                    : Colors.textSecondary
-                }
-              />
-              <Text
-                style={[
-                  styles.roleLabel,
-                  selectedRole === 'worker' && styles.roleLabelActive,
-                ]}
-              >
-                עובד
-              </Text>
-              <Text style={styles.roleDesc}>מחפש עבודות בבנייה</Text>
-            </TouchableOpacity>
+            />
           </View>
         </View>
 
@@ -162,10 +187,43 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => 
   );
 };
 
+const RoleCard: React.FC<{
+  active: boolean;
+  accent: string;
+  accentFaint: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  desc: string;
+  onPress: () => void;
+}> = ({ active, accent, accentFaint, icon, label, desc, onPress }) => (
+  <TouchableOpacity
+    style={[
+      styles.roleCard,
+      { borderColor: active ? accent : Colors.border },
+      active && { backgroundColor: accentFaint },
+    ]}
+    activeOpacity={0.85}
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityState={{ selected: active }}
+  >
+    <View
+      style={[
+        styles.roleIconWrap,
+        { backgroundColor: active ? accent : Colors.gray100 },
+      ]}
+    >
+      <Ionicons name={icon} size={24} color={active ? Colors.white : Colors.textSecondary} />
+    </View>
+    <Text style={[styles.roleLabel, active && { color: accent }]}>{label}</Text>
+    <Text style={styles.roleDesc}>{desc}</Text>
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.background,
   },
   topSection: {
     height: height * 0.44,
@@ -173,22 +231,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xxl,
     overflow: 'hidden',
   },
-  decorCircle1: {
+  blob: {
     position: 'absolute',
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    top: -80,
-    left: -60,
+    borderRadius: 999,
   },
-  decorCircle2: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    bottom: -40,
+  blobLight: {
+    width: 260,
+    height: 260,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    top: -90,
+    left: -70,
+  },
+  blobNavy: {
+    width: 180,
+    height: 180,
+    backgroundColor: 'rgba(30,58,95,0.28)',
+    bottom: -50,
     right: -30,
   },
   logoArea: {
@@ -205,6 +263,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Shadow.small,
   },
   logoText: {
     fontSize: FontSize.xxl,
@@ -222,16 +281,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
   },
+  featureIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   featureText: {
+    flex: 1,
     fontSize: FontSize.md,
-    color: 'rgba(255,255,255,0.9)',
-    fontWeight: '500',
+    color: 'rgba(255,255,255,0.92)',
+    fontWeight: '600',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   bottomSection: {
     flex: 1,
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.background,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     marginTop: -20,
@@ -276,26 +344,28 @@ const styles = StyleSheet.create({
   },
   roleCard: {
     flex: 1,
-    backgroundColor: Colors.gray50,
+    backgroundColor: Colors.white,
     borderRadius: Radius.lg,
     padding: Spacing.md,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: Colors.border,
+    ...Shadow.small,
   },
-  roleCardActive: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primaryFaint,
+  roleIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.xs,
   },
   roleLabel: {
     fontSize: FontSize.md,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.textSecondary,
-    marginTop: Spacing.xs,
     textAlign: 'center',
     writingDirection: 'rtl',
   },
-  roleLabelActive: { color: Colors.primary },
   roleDesc: {
     fontSize: FontSize.xs,
     color: Colors.textMuted,
@@ -328,7 +398,7 @@ const styles = StyleSheet.create({
   loginText: {
     color: Colors.primary,
     fontSize: FontSize.md,
-    fontWeight: '600',
+    fontWeight: '700',
     writingDirection: 'rtl',
   },
   adminLink: {

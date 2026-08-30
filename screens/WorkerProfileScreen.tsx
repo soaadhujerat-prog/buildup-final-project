@@ -33,7 +33,11 @@ import {
   getWorkerContractorRelationship,
 } from '../services/assignmentService';
 import { Contractor, Worker } from '../types';
-import { workerProfessions, normalizeCertifications } from '../utils/normalize';
+import {
+  workerProfessions,
+  normalizeCertifications,
+  jobProfessions,
+} from '../utils/normalize';
 
 interface Props {
   workerId: string;
@@ -430,7 +434,7 @@ const WorkerProfileScreen: React.FC<Props> = ({
                     <View style={{ flex: 1 }}>
                       <Text style={styles.jobOptTitle}>{j.title}</Text>
                       <Text style={styles.jobOptMeta}>
-                        {j.profession} · {j.city}
+                        {jobProfessions(j).join(', ')} · {j.city}
                       </Text>
                     </View>
                   </TouchableOpacity>

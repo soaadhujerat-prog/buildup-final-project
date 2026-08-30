@@ -183,10 +183,13 @@ const SignUpScreen: React.FC<Props> = ({
       if (!companyT) e.companyName = 'שם החברה חובה';
       else if (companyT.length < 2) e.companyName = 'שם החברה קצר מדי';
 
+      // Format-only: digits, non-empty. We have no authorised source that
+      // proves a real contractor-registry number's length/checksum, so the
+      // message never claims one. Real verification is a future backend step.
       if (!contractorRegNumber.trim())
-        e.contractorRegNumber = 'מספר רישום קבלנים חובה';
-      else if (!/^\d{3,10}$/.test(contractorRegNumber.trim()))
-        e.contractorRegNumber = 'מספר רישום קבלנים חייב להכיל 3–10 ספרות';
+        e.contractorRegNumber = 'יש להזין מספר רישום קבלן';
+      else if (!/^\d+$/.test(contractorRegNumber.trim()))
+        e.contractorRegNumber = 'יש להזין מספר רישום קבלן תקין';
 
       const licT = licenseDetails.trim();
       if (!licT) e.licenseDetails = 'פרטי רישיון / סיווג חובה';

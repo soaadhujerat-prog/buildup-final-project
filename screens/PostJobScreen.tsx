@@ -22,6 +22,7 @@ import ProfessionSelectorModal from '../components/ProfessionSelectorModal';
 import WorksiteImagesField from '../components/WorksiteImagesField';
 import { formatRatePerUnit } from '../utils/helpers';
 import { PROFESSIONS_BY_CATEGORY } from '../data/mockData';
+import { jobProfessions } from '../utils/normalize';
 import { Contractor, ProfessionCategory } from '../types';
 
 interface Props {
@@ -84,7 +85,11 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
   const [profCategory, setProfCategory] = useState<ProfessionCategory | ''>(
     existingJob?.professionCategory ?? ''
   );
-  const [profession, setProfession] = useState(existingJob?.profession ?? '');
+  // Source of truth is the array. `job.profession` (legacy single field) is
+  // written on submit as a mirror of professions[0] for backward compatibility.
+  const [professions, setProfessions] = useState<string[]>(
+    existingJob ? jobProfessions(existingJob) : []
+  );
   const [city, setCity] = useState(existingJob?.city ?? '');
   const [address, setAddress] = useState(existingJob?.address ?? '');
   const [startDate, setStartDate] = useState(existingJob?.startDate ?? '');
@@ -124,7 +129,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
       title: existingJob?.title ?? '',
       description: existingJob?.description ?? '',
       profCategory: existingJob?.professionCategory ?? '',
-      profession: existingJob?.profession ?? '',
+      professions: existingJob ? jobProfessions(existingJob) : [],
       city: existingJob?.city ?? '',
       address: existingJob?.address ?? '',
       startDate: existingJob?.startDate ?? '',
@@ -145,7 +150,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
       title,
       description,
       profCategory,
-      profession,
+      professions,
       city,
       address,
       startDate,
@@ -159,14 +164,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
       worksiteImages,
     }) !== initialSnapshot;
 
-  // A category with no specific profession is an INCOMPLETE selection — show it
-  // as such, never as a finished value.
-  const professionLabel = profession
-    ? profession
-    : profCategory
-    ? `${profCategory} · יש לבחור מקצוע ספציפי`
-    : '';
-  const previewProfession = profession || profCategory || '';
+  const previewProfession = professions.join(' · ') || profCategory || '';
 
   const handleBackPress = () => {
     if (isDirty) {
@@ -194,15 +192,17 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
     else if (descT.length > 2000)
       next.description = 'התיאור ארוך מדי (עד 2000 תווים)';
 
-    // תחום + מקצוע ספציפי — source of truth is (profCategory, profession).
+    // תחום + מקצועות ספציפיים — source of truth is (profCategory, professions[]).
     if (!profCategory) {
       next.profession = 'יש לבחור תחום מקצועי';
-    } else if (!profession.trim()) {
-      next.profession = 'יש לבחור מקצוע ספציפי בתוך התחום';
+    } else if (professions.length === 0) {
+      next.profession = 'יש לבחור לפחות מקצוע אחד בתוך התחום';
     } else if (
-      !(PROFESSIONS_BY_CATEGORY[profCategory] ?? []).includes(profession)
+      professions.some(
+        (p) => !(PROFESSIONS_BY_CATEGORY[profCategory] ?? []).includes(p)
+      )
     ) {
-      next.profession = 'המקצוע שנבחר אינו תואם לתחום';
+      next.profession = 'אחד המקצועות שנבחרו אינו תואם לתחום';
     }
 
     if (!city.trim()) next.city = 'יש לבחור עיר';
@@ -276,7 +276,10 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
     const payload = {
       title: title.trim(),
       description: description.trim(),
-      profession,
+      // Array is the source of truth; `profession` mirrors index 0 for every
+      // legacy consumer that still reads a single trade.
+      professions,
+      profession: professions[0] ?? '',
       professionCategory: profCategory as ProfessionCategory,
       city,
       address: address.trim(),
@@ -390,7 +393,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
 
           <View style={styles.inputGroup}>
             <View style={styles.labelRow}>
-              <Text style={styles.label}>תחום מקצועי</Text>
+              <Text style={styles.label}>תחום ומקצועות</Text>
             </View>
             <TouchableOpacity
               style={[styles.selectorRow, errors.profession && styles.inputError]}
@@ -398,14 +401,32 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
               activeOpacity={0.7}
             >
               <Ionicons name="hammer-outline" size={20} color={Colors.textSecondary} />
-              <Text
-                style={[styles.selectorValue, !profession && styles.placeholder]}
-                numberOfLines={1}
-              >
-                {professionLabel || 'בחר תחום ומקצוע ספציפי'}
-              </Text>
+              {professions.length > 0 ? (
+                <View style={styles.selectorChips}>
+                  {professions.map((p) => (
+                    <View key={p} style={styles.selChip}>
+                      <Text style={styles.selChipText}>{p}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text
+                  style={[styles.selectorValue, styles.placeholder]}
+                  numberOfLines={1}
+                >
+                  בחר תחום ומקצוע אחד או יותר
+                </Text>
+              )}
               <Ionicons name="chevron-back" size={18} color={Colors.textMuted} />
             </TouchableOpacity>
+            {profCategory && professions.length > 0 && (
+              <Text style={styles.selectorHint}>
+                תחום: {profCategory} ·{' '}
+                {professions.length === 1
+                  ? 'מקצוע אחד'
+                  : `${professions.length} מקצועות`}
+              </Text>
+            )}
             {!!errors.profession && <Text style={styles.errorText}>{errors.profession}</Text>}
           </View>
         </Section>
@@ -581,11 +602,11 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
         visible={professionModalVisible}
         onClose={() => setProfessionModalVisible(false)}
         professionCategory={profCategory}
-        profession={profession}
-        allowAllInCategory={false}
-        onChange={(nextCategory, nextProfession) => {
+        multiple
+        selectedProfessions={professions}
+        onChangeMultiple={(nextCategory, nextProfessions) => {
           setProfCategory(nextCategory as ProfessionCategory | '');
-          setProfession(nextProfession);
+          setProfessions(nextProfessions);
         }}
       />
     </KeyboardAvoidingView>
@@ -773,6 +794,32 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   placeholder: { color: Colors.textMuted },
+  selectorChips: {
+    flex: 1,
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  selChip: {
+    backgroundColor: Colors.primaryFaint,
+    borderWidth: 1,
+    borderColor: Colors.primaryLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  selChipText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
+    writingDirection: 'rtl',
+  },
+  selectorHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    writingDirection: 'rtl',
+    textAlign: 'right',
+  },
 
   paymentGroup: { gap: Spacing.md },
 

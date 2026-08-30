@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { JobPost } from '../types';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { formatRatePerUnit } from '../utils/helpers';
+import { jobProfessions } from '../utils/normalize';
 import StatusBadge from './StatusBadge';
 
 interface JobCardProps {
@@ -52,7 +53,7 @@ const JobCard: React.FC<JobCardProps> = ({ job, contractorName, onPress }) => {
           <View style={styles.metaItem}>
             <Ionicons name="briefcase-outline" size={14} color={Colors.textSecondary} />
             <Text style={styles.metaText} numberOfLines={1}>
-              {job.profession}
+              {jobProfessions(job).join(' · ')}
             </Text>
           </View>
           <View style={styles.metaItem}>

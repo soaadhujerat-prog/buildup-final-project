@@ -17,6 +17,7 @@ import StaffingProgress from '../components/StaffingProgress';
 import { StaffingProgress as StaffingProgressData } from '../services/assignmentService';
 import { getJobHeaderBadge } from '../services/jobStatusService';
 import { Contractor, JobPost } from '../types';
+import { jobProfessions } from '../utils/normalize';
 import { useRememberedScroll } from '../utils/scrollMemory';
 
 interface Props {
@@ -233,7 +234,7 @@ const JobRow: React.FC<{
           {job.title}
         </Text>
         <Text style={styles.sub} numberOfLines={1}>
-          {job.profession} · {job.city}
+          {jobProfessions(job).join(', ')} · {job.city}
         </Text>
         <View style={styles.metaRow}>
           <View style={styles.metaItem}>

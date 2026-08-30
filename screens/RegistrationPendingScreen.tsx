@@ -66,8 +66,12 @@ const RegistrationPendingScreen: React.FC<Props> = ({
             {reg.role === 'worker' ? (
               <>
                 <Row
-                  label="מקצוע"
-                  value={(reg.data as WorkerRegistrationData).profession}
+                  label="מקצועות"
+                  value={
+                    (reg.data as WorkerRegistrationData).professions?.length
+                      ? (reg.data as WorkerRegistrationData).professions.join(', ')
+                      : (reg.data as WorkerRegistrationData).profession
+                  }
                 />
                 <Row
                   label="ניסיון"

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { JobPost } from '../types';
+import { jobProfessions, jobHasProfession } from '../utils/normalize';
 import CityPickerField from './CityPickerField';
 import ProfessionSelectorModal from './ProfessionSelectorModal';
 
@@ -67,7 +68,7 @@ export const filterJobs = (
     if (q) {
       const haystack = [
         j.title,
-        j.profession,
+        jobProfessions(j).join(' '),
         j.professionCategory,
         j.city,
         contractorLabelById[j.contractorId] ?? '',
@@ -81,7 +82,7 @@ export const filterJobs = (
     if (filters.professionCategory && j.professionCategory !== filters.professionCategory) {
       return false;
     }
-    if (filters.profession && j.profession !== filters.profession) return false;
+    if (filters.profession && !jobHasProfession(j, filters.profession)) return false;
     if (filters.city && j.city !== filters.city) return false;
     if (filters.urgentOnly && !j.urgent) return false;
     if (minRate !== undefined && !Number.isNaN(minRate)) {

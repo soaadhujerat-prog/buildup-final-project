@@ -19,6 +19,7 @@ import {
   RegistrationRecord,
   WorkerRegistrationData,
 } from '../types';
+import { workerProfessions } from '../utils/normalize';
 
 // Two independent filter axes that work together (e.g. "נדחו" + "עובדים").
 type StatusTab = 'pending' | 'approved' | 'rejected';
@@ -215,7 +216,7 @@ const RegistrationRow: React.FC<{
   const isApproved = record.status === 'approved';
 
   const subtitle = isWorker
-    ? `${(data as WorkerRegistrationData).profession} · ${(data as WorkerRegistrationData).experienceYears} שנות ניסיון`
+    ? `${workerProfessions(data as WorkerRegistrationData).join(', ')} · ${(data as WorkerRegistrationData).experienceYears} שנות ניסיון`
     : `${(data as ContractorRegistrationData).companyName} · רישום ${(data as ContractorRegistrationData).contractorRegistrationNumber}`;
 
   const badgeLabel = isRejected

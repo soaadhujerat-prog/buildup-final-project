@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp, LoginResult } from '../context/AppContext';
+import { isValidIsraeliIdFormat } from '../utils/helpers';
 
 type CustomerRole = 'contractor' | 'worker';
 
@@ -42,29 +43,32 @@ const LoginScreen: React.FC<Props> = ({
 
   // Login is always by ID number for both roles — a contractor registration
   // number is a professional/verification detail, not a login identifier.
+  // The placeholder never shows a real or sample ID number.
   const identifierLabel = 'תעודת זהות';
-  const identifierHint = 'למשל: 311223344';
+  const identifierHint = 'הזן תעודת זהות';
 
   const handleLogin = () => {
     setError(null);
+
+    // Format gate — 9 digits. This is not account enumeration (it never says
+    // whether such a user exists), just input validation.
+    if (!isValidIsraeliIdFormat(identifier)) {
+      setError('יש להזין תעודת זהות בת 9 ספרות');
+      return;
+    }
+
     setIsLoading(true);
 
     setTimeout(() => {
       const result = loginAsCustomer(identifier, password);
       setIsLoading(false);
 
-      if (!result.ok) {
-        // we still raise the result so navigator can show the proper screen
-        // for pending / rejected / blocked. "not_found" and "wrong_password"
-        // stay here as inline errors.
-        if (result.reason === 'not_found') {
-          setError('לא נמצא משתמש עם תעודת הזהות הזו');
-          return;
-        }
-        if (result.reason === 'wrong_password') {
-          setError('סיסמה שגויה');
-          return;
-        }
+      // Wrong ID and wrong password are indistinguishable to the user — one
+      // generic message, no enumeration. pending / rejected / blocked still
+      // flow through onLoginResult so the navigator shows the right screen.
+      if (!result.ok && (result.reason === 'not_found' || result.reason === 'wrong_password')) {
+        setError('פרטי ההתחברות אינם נכונים');
+        return;
       }
 
       onLoginResult(result);
@@ -132,10 +136,11 @@ const LoginScreen: React.FC<Props> = ({
               <TextInput
                 style={styles.input}
                 value={identifier}
-                onChangeText={setIdentifier}
+                onChangeText={(t) => setIdentifier(t.replace(/\D/g, '').slice(0, 9))}
                 placeholder={identifierHint}
                 placeholderTextColor={Colors.textMuted}
                 keyboardType="numeric"
+                maxLength={9}
                 returnKeyType="next"
                 autoCapitalize="none"
               />

@@ -16,7 +16,11 @@ import {
   MatchReason,
   ProfessionCategory,
 } from '../types';
-import { workerProfessions, workerPrimaryProfession } from './normalize';
+import {
+  workerProfessions,
+  workerPrimaryProfession,
+  jobProfessions,
+} from './normalize';
 
 // ---------------------------------------------------------------------------
 // City -> Area map. Used for locality scoring.
@@ -73,11 +77,14 @@ function scoreProfession(worker: Worker, job: JobPost): MatchReason {
   let score = 0;
   let label = 'מקצוע שונה';
 
-  const jobProfession = job.profession.trim();
-  const exact = workerProfessions(worker).some((p) => p.trim() === jobProfession);
-  if (exact) {
+  // A job may list several trades — a worker matches "exactly" if ANY of their
+  // trades is one the job asked for.
+  const jobProfs = jobProfessions(job).map((p) => p.trim()).filter(Boolean);
+  const workerProfs = workerProfessions(worker).map((p) => p.trim());
+  const matched = jobProfs.find((jp) => workerProfs.includes(jp));
+  if (matched) {
     score = w;
-    label = `מקצוע מדויק: ${jobProfession || workerPrimaryProfession(worker)}`;
+    label = `מקצוע מדויק: ${matched || workerPrimaryProfession(worker)}`;
   } else if (worker.professionCategory === job.professionCategory) {
     score = Math.round(w * 0.7);
     label = `אותו תחום: ${worker.professionCategory}`;

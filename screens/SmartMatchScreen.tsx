@@ -17,6 +17,7 @@ import StatusBadge from '../components/StatusBadge';
 import { rankWorkersForJob, matchBand } from '../utils/matching';
 import { isOpenForApplications } from '../services/jobStatusService';
 import { Contractor, JobPost, MatchResult } from '../types';
+import { jobProfessions } from '../utils/normalize';
 
 interface Props {
   initialJobId?: string;
@@ -175,7 +176,7 @@ const SmartMatchScreen: React.FC<Props> = ({
                           active && styles.jobChipMetaActive,
                         ]}
                       >
-                        {j.profession} · {j.city}
+                        {jobProfessions(j).join(', ')} · {j.city}
                       </Text>
                     </TouchableOpacity>
                   );

@@ -21,13 +21,22 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   professionCategory: string;
-  profession: string;
-  onChange: (professionCategory: string, profession: string) => void;
+  /** Single-select mode (filters). Ignored when `multiple`. */
+  profession?: string;
+  /** Single-select mode (filters). Ignored when `multiple`. */
+  onChange?: (professionCategory: string, profession: string) => void;
   /** Filter sheets allow "כל המקצועות ב<תחום>" (profession = ''). A job post
    *  must name a specific trade, so PostJobScreen passes `false` to drop that
    *  row — the user then always leaves with a concrete profession, and the
    *  "category chosen but profession empty" half-state can't happen. */
   allowAllInCategory?: boolean;
+  /** Multi-select mode (worker registration / post job): tapping a trade
+   *  toggles it and keeps the sheet open; an "אישור (N)" button commits. */
+  multiple?: boolean;
+  /** Multi-select mode: the trades already chosen (all within one category). */
+  selectedProfessions?: string[];
+  /** Multi-select mode: called on "אישור" with the final category + trades. */
+  onChangeMultiple?: (professionCategory: string, professions: string[]) => void;
 }
 
 type Step = 'category' | 'profession';
@@ -41,21 +50,30 @@ const ProfessionSelectorModal: React.FC<Props> = ({
   visible,
   onClose,
   professionCategory,
-  profession,
+  profession = '',
   onChange,
   allowAllInCategory = true,
+  multiple = false,
+  selectedProfessions,
+  onChangeMultiple,
 }) => {
   const [step, setStep] = useState<Step>('category');
   const [localCategory, setLocalCategory] = useState('');
   const [query, setQuery] = useState('');
+  // Multi-select working set — only meaningful when `multiple`.
+  const [selected, setSelected] = useState<string[]>([]);
 
   useEffect(() => {
     if (visible) {
       setLocalCategory(professionCategory);
       setStep(professionCategory ? 'profession' : 'category');
       setQuery('');
+      if (multiple) setSelected(selectedProfessions ?? []);
     }
-  }, [visible, professionCategory]);
+    // selectedProfessions is a fresh array each render — depend on its content,
+    // not identity, so re-opening seeds correctly without re-seeding mid-edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, professionCategory, multiple, (selectedProfessions ?? []).join('|')]);
 
   const filteredCategories = useMemo(() => {
     const q = normalize(query);
@@ -74,10 +92,30 @@ const ProfessionSelectorModal: React.FC<Props> = ({
     setLocalCategory(cat);
     setStep('profession');
     setQuery('');
+    if (multiple) {
+      // Keep only picks that belong to the newly chosen category — a job /
+      // worker profile stays within one category (same rule as the inline
+      // chip pickers elsewhere).
+      const list = PROFESSIONS_BY_CATEGORY[cat] ?? [];
+      setSelected((prev) => prev.filter((p) => list.includes(p)));
+    }
   };
 
   const selectProfession = (prof: string) => {
-    onChange(localCategory, prof === ALL_IN_CATEGORY ? '' : prof);
+    if (multiple) {
+      setSelected((prev) =>
+        prev.includes(prof)
+          ? prev.filter((p) => p !== prof)
+          : [...prev, prof]
+      );
+      return; // stays open
+    }
+    onChange?.(localCategory, prof === ALL_IN_CATEGORY ? '' : prof);
+    onClose();
+  };
+
+  const confirmMultiple = () => {
+    onChangeMultiple?.(localCategory, selected);
     onClose();
   };
 
@@ -87,7 +125,11 @@ const ProfessionSelectorModal: React.FC<Props> = ({
   };
 
   const clearAll = () => {
-    onChange('', '');
+    if (multiple) {
+      setSelected([]);
+      return; // stays open — the user can re-pick or press "אישור"
+    }
+    onChange?.('', '');
     onClose();
   };
 
@@ -177,44 +219,65 @@ const ProfessionSelectorModal: React.FC<Props> = ({
               }}
             />
           ) : (
-            <FlatList
-              data={
-                allowAllInCategory
-                  ? [ALL_IN_CATEGORY, ...filteredProfessions]
-                  : filteredProfessions
-              }
-              keyExtractor={(item) => item}
-              keyboardShouldPersistTaps="handled"
-              style={styles.list}
-              contentContainerStyle={styles.listContent}
-              ListEmptyComponent={<Text style={styles.emptyText}>לא נמצאו מקצועות תואמים</Text>}
-              renderItem={({ item }) => {
-                const isAllOption = item === ALL_IN_CATEGORY;
-                const selected = isAllOption ? !profession : item === profession;
-                return (
-                  <TouchableOpacity
-                    style={[styles.row, selected && styles.rowSelected]}
-                    onPress={() => selectProfession(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.rowText,
-                        isAllOption && styles.rowTextMuted,
-                        selected && styles.rowTextSelected,
-                      ]}
+            <>
+              <FlatList
+                data={
+                  allowAllInCategory && !multiple
+                    ? [ALL_IN_CATEGORY, ...filteredProfessions]
+                    : filteredProfessions
+                }
+                keyExtractor={(item) => item}
+                keyboardShouldPersistTaps="handled"
+                style={styles.list}
+                contentContainerStyle={styles.listContent}
+                ListEmptyComponent={<Text style={styles.emptyText}>לא נמצאו מקצועות תואמים</Text>}
+                renderItem={({ item }) => {
+                  const isAllOption = item === ALL_IN_CATEGORY;
+                  const isSelected = multiple
+                    ? selected.includes(item)
+                    : isAllOption
+                    ? !profession
+                    : item === profession;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.row, isSelected && styles.rowSelected]}
+                      onPress={() => selectProfession(item)}
+                      activeOpacity={0.7}
                     >
-                      {isAllOption ? `כל המקצועות ב${localCategory}` : item}
+                      <Text
+                        style={[
+                          styles.rowText,
+                          isAllOption && styles.rowTextMuted,
+                          isSelected && styles.rowTextSelected,
+                        ]}
+                      >
+                        {isAllOption ? `כל המקצועות ב${localCategory}` : item}
+                      </Text>
+                      {isSelected ? (
+                        <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
+                      ) : (
+                        <View style={styles.rowCheckSpacer} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+              {multiple && (
+                <View style={styles.footer}>
+                  <TouchableOpacity
+                    style={styles.confirmBtn}
+                    onPress={confirmMultiple}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.confirmBtnText}>
+                      {selected.length > 0
+                        ? `אישור (${selected.length})`
+                        : 'אישור'}
                     </Text>
-                    {selected ? (
-                      <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
-                    ) : (
-                      <View style={styles.rowCheckSpacer} />
-                    )}
                   </TouchableOpacity>
-                );
-              }}
-            />
+                </View>
+              )}
+            </>
           )}
         </View>
       </View>
@@ -316,6 +379,24 @@ const styles = StyleSheet.create({
   rowTextMuted: { color: Colors.textSecondary, fontWeight: '600' },
   rowTextSelected: { color: Colors.primaryDark, fontWeight: '700' },
   rowCheckSpacer: { width: 20 },
+  footer: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  confirmBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.full,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  confirmBtnText: {
+    color: Colors.white,
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    writingDirection: 'rtl',
+  },
   emptyText: {
     marginTop: Spacing.xl,
     fontSize: FontSize.md,

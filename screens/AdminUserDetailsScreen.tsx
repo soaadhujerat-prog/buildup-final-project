@@ -176,12 +176,8 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
   const handleRegEditConfirm = () => {
     if (!c || regEditSubmitting) return;
     const next = regEditValue.trim();
-    if (!next) {
-      Alert.alert('שגיאה', 'יש להזין מספר רישום.');
-      return;
-    }
-    if (!/^\d+$/.test(next)) {
-      Alert.alert('שגיאה', 'מספר הרישום חייב להכיל ספרות בלבד.');
+    if (!next || !/^\d+$/.test(next)) {
+      Alert.alert('שגיאה', 'יש להזין מספר רישום קבלן תקין');
       return;
     }
     if (next === c.contractorRegistrationNumber) {

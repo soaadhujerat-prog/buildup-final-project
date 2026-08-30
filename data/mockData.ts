@@ -436,6 +436,7 @@ export const MOCK_JOBS: JobPost[] = [
     description:
       'דרוש חשמלאי מוסמך לפרויקט בניין 8 קומות בתל אביב. עבודה כוללת תשתיות חשמל בכל הדירות ואזורים משותפים.',
     profession: 'חשמלאי',
+    professions: ['חשמלאי', 'חשמלאי מוסמך'],
     professionCategory: 'חשמל',
     city: 'תל אביב',
     address: 'רחוב הרצל 45, תל אביב',
@@ -500,6 +501,7 @@ export const MOCK_JOBS: JobPost[] = [
     description:
       'רצף מנוסה לפרויקט וילות יוקרה בהרצליה פיתוח. אריחים מיוחדים ועבודה ברמה גבוהה מאוד.',
     profession: 'רצף',
+    professions: ['רצף'],
     professionCategory: 'ריצוף',
     city: 'הרצליה',
     address: 'רחוב השרון 8, הרצליה פיתוח',

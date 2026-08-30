@@ -40,7 +40,7 @@ import {
   INVITATION_STATUS_TONE,
 } from '../utils/helpers';
 import { Application, Contractor, Invitation, Worker } from '../types';
-import { contractorAreas } from '../utils/normalize';
+import { contractorAreas, jobProfessions } from '../utils/normalize';
 
 interface Props {
   jobId: string;
@@ -671,7 +671,9 @@ const JobDetailsScreen: React.FC<Props> = ({
                 size={14}
                 color={Colors.textSecondary}
               />
-              <Text style={styles.heroMetaText}>{job.profession}</Text>
+              <Text style={styles.heroMetaText}>
+                {jobProfessions(job).join(' · ')}
+              </Text>
             </View>
             <View style={styles.heroMeta}>
               <Ionicons
@@ -825,6 +827,11 @@ const JobDetailsScreen: React.FC<Props> = ({
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>פרטים מעשיים</Text>
           </View>
+          <FieldRow
+            label={jobProfessions(job).length > 1 ? 'מקצועות' : 'מקצוע'}
+            value={jobProfessions(job).join(', ')}
+          />
+          <FieldRow label="תחום" value={job.professionCategory} />
           <FieldRow label="כתובת" value={job.address} />
           <FieldRow label="תאריך התחלה" value={job.startDate} ltr />
           <FieldRow label="משך" value={job.duration} />

@@ -22,7 +22,11 @@ import {
   INVITATION_STATUS_TONE,
 } from '../utils/helpers';
 import { Worker, ApplicationStatus } from '../types';
-import { workerHasProfession, workerPrimaryProfession } from '../utils/normalize';
+import {
+  workerHasProfession,
+  workerPrimaryProfession,
+  jobProfessions,
+} from '../utils/normalize';
 import { isOpenForApplications } from '../services/jobStatusService';
 
 interface Props {
@@ -117,7 +121,9 @@ const WorkerDashboard: React.FC<Props> = ({
       .filter(isOpenForApplications)
       .filter((j) => {
         const sameCategory = j.professionCategory === me.professionCategory;
-        const sameProfession = workerHasProfession(me, j.profession);
+        const sameProfession = jobProfessions(j).some((p) =>
+          workerHasProfession(me, p)
+        );
         const inMyAreas =
           me.preferredAreas.some((a) => a) &&
           (j.city === me.city || me.preferredAreas.length > 0);
@@ -310,7 +316,7 @@ const WorkerDashboard: React.FC<Props> = ({
                   {job.title}
                 </Text>
                 <Text style={styles.rowSub}>
-                  {job.profession} · {job.city} ·{' '}
+                  {jobProfessions(job).join(', ')} · {job.city} ·{' '}
                   <Text style={{ writingDirection: 'ltr' }}>
                     {formatJobRateCompact(job)}
                   </Text>

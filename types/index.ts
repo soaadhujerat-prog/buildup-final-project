@@ -300,7 +300,17 @@ export interface JobPost {
   contractorId: string;
   title: string;
   description: string;
+  /** @deprecated Legacy single-profession field. Source of truth is
+   *  `professions` (a job may call for several specific trades). Kept — and
+   *  always normalized to mirror `professions[0]` — so the many list rows /
+   *  cards / matchers that read one profession keep working unchanged. Read
+   *  through `jobProfessions()` / `jobPrimaryProfession()` in utils/normalize. */
   profession: string;
+  /** The specific trades this job calls for, e.g. ['חשמלאי', 'חשמלאי מוסמך'].
+   *  Non-empty after normalization; `profession` mirrors index 0. Filters /
+   *  Smart Match check membership here via `jobHasProfession()`. Optional only
+   *  so pre-change records still type-check. */
+  professions?: string[];
   professionCategory: ProfessionCategory;
   city: string;
   address: string;
