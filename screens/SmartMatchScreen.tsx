@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   FlatList,
   TouchableOpacity,
+  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,17 +14,38 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import StatusBadge from '../components/StatusBadge';
-import { rankWorkersForJob, matchBand } from '../utils/matching';
+import EmptyState from '../components/EmptyState';
+import SmartMatchJobSummary from '../components/SmartMatchJobSummary';
+import SmartMatchJobPicker from '../components/SmartMatchJobPicker';
+import SmartMatchWorkerCard from '../components/SmartMatchWorkerCard';
+import { getSmartMatches } from '../services/smartMatchService';
+import {
+  getWorkerContractorRelationship,
+  WorkerContractorRelationship,
+} from '../services/assignmentService';
 import { isOpenForApplications } from '../services/jobStatusService';
-import { Contractor, JobPost, MatchResult } from '../types';
-import { jobProfessions } from '../utils/normalize';
+import { Contractor, JobPost, SmartMatchResult, Worker } from '../types';
 
 interface Props {
   initialJobId?: string;
   onBack: () => void;
   onOpenWorkerProfile: (workerId: string) => void;
   onOpenJobDetails: (jobId: string) => void;
+  onOpenSearchWorkers?: () => void;
+}
+
+type SmartSort = 'best' | 'distance' | 'compensation';
+
+interface Filters {
+  available: boolean;
+  worked: boolean;
+  strong: boolean;
+}
+
+interface Row {
+  result: SmartMatchResult;
+  worker: Worker;
+  relationship: WorkerContractorRelationship;
 }
 
 const SmartMatchScreen: React.FC<Props> = ({
@@ -31,47 +53,92 @@ const SmartMatchScreen: React.FC<Props> = ({
   onBack,
   onOpenWorkerProfile,
   onOpenJobDetails,
+  onOpenSearchWorkers,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, jobs, workers, invitations, sendInvitation } = useApp();
-  const me = currentUser as Contractor | undefined;
+  const {
+    currentUser,
+    jobs,
+    workers,
+    invitations,
+    assignments,
+    sendInvitation,
+    getStaffingProgress,
+  } = useApp();
+  const me =
+    currentUser?.role === 'contractor' ? (currentUser as Contractor) : undefined;
 
-  // Canonical "open to registration" check — same source of truth every
-  // other screen uses. A job that filled its capacity is auto-closed
-  // (acceptingApplications === false) and correctly drops out here.
+  // Jobs the contractor can actually staff right now — same "open to
+  // registration" source of truth every other screen uses.
   const myOpenJobs = useMemo(
-    () =>
-      jobs.filter(
-        (j) => j.contractorId === me?.id && isOpenForApplications(j)
-      ),
+    () => jobs.filter((j) => j.contractorId === me?.id && isOpenForApplications(j)),
+    [jobs, me]
+  );
+  // All the contractor's jobs — so a deep link to a job that is momentarily
+  // closed still resolves.
+  const myJobs = useMemo(
+    () => jobs.filter((j) => j.contractorId === me?.id),
     [jobs, me]
   );
 
   const [selectedJobId, setSelectedJobId] = useState<string | null>(
-    initialJobId ?? myOpenJobs[0]?.id ?? null
+    initialJobId ?? null
   );
-
-  useEffect(() => {
-    if (!selectedJobId && myOpenJobs[0]) {
-      setSelectedJobId(myOpenJobs[0].id);
-    }
-  }, [myOpenJobs, selectedJobId]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    'idle'
+  );
+  const [results, setResults] = useState<SmartMatchResult[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [sort, setSort] = useState<SmartSort>('best');
+  const [filters, setFilters] = useState<Filters>({
+    available: false,
+    worked: false,
+    strong: false,
+  });
 
   const selectedJob = useMemo<JobPost | undefined>(
-    () => myOpenJobs.find((j) => j.id === selectedJobId),
-    [myOpenJobs, selectedJobId]
+    () => myJobs.find((j) => j.id === selectedJobId),
+    [myJobs, selectedJobId]
   );
 
-  const ranked = useMemo<MatchResult[]>(
-    () => (selectedJob ? rankWorkersForJob(workers, selectedJob) : []),
-    [workers, selectedJob]
-  );
+  // The sort/filter row is an RTL horizontal ScrollView: `row-reverse` puts
+  // the first chip ("ההתאמה הגבוהה ביותר") at the RIGHT edge, but the
+  // ScrollView still opens at offset 0 (the LEFT side of the content box).
+  // Anchor it to the right edge ONCE per job — never on filter taps or when
+  // the result count changes, and never fighting a manual scroll.
+  const controlScrollRef = useRef<ScrollView>(null);
+  const controlAnchoredRef = useRef(false);
+  useEffect(() => {
+    controlAnchoredRef.current = false;
+  }, [selectedJobId]);
 
-  // Only a still-live invitation (pending / accepted) marks a worker as
-  // "already invited" and hides the invite button. A historical
-  // declined / expired / cancelled record — including one auto-cancelled
-  // because the job was momentarily full — must NOT block a fresh invite
-  // once a seat frees up again.
+  // ---- run the match (local now, Supabase Edge Function later) ----
+  useEffect(() => {
+    if (!selectedJob) {
+      setStatus('idle');
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setStatus('loading');
+    getSmartMatches({ jobId: selectedJob.id, jobs, workers, assignments })
+      .then((r) => {
+        if (!cancelled) {
+          setResults(r);
+          setStatus('ready');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedJobId, reloadKey]);
+
+  // ---- live invitation / assignment state for this job ----
   const invitedWorkerIds = useMemo(() => {
     if (!selectedJobId) return new Set<string>();
     return new Set(
@@ -85,9 +152,81 @@ const SmartMatchScreen: React.FC<Props> = ({
     );
   }, [invitations, selectedJobId]);
 
+  const assignedWorkerIds = useMemo(() => {
+    if (!selectedJobId) return new Set<string>();
+    return new Set(
+      assignments
+        .filter((a) => a.jobId === selectedJobId && a.status === 'active')
+        .map((a) => a.workerId)
+    );
+  }, [assignments, selectedJobId]);
+
+  // ---- rows = result + worker + relationship ----
+  const rows = useMemo<Row[]>(() => {
+    if (!selectedJob || !me) return [];
+    const out: Row[] = [];
+    results.forEach((result) => {
+      const worker = workers.find((w) => w.id === result.workerId);
+      if (!worker) return;
+      out.push({
+        result,
+        worker,
+        relationship: getWorkerContractorRelationship(
+          assignments,
+          worker.id,
+          me.id
+        ),
+      });
+    });
+    return out;
+  }, [results, workers, assignments, selectedJob, me]);
+
+  const canSortDistance = rows.some((r) => r.result.distanceKm != null);
+  const canSortCompensation = rows.some(
+    (r) => r.result.compensationStatus !== 'unknown'
+  );
+  const filtersActive = filters.available || filters.worked || filters.strong;
+
+  const visible = useMemo<Row[]>(() => {
+    let list = rows;
+    if (filters.available) list = list.filter((r) => r.worker.isAvailable);
+    if (filters.worked) list = list.filter((r) => r.relationship !== 'never');
+    if (filters.strong) list = list.filter((r) => r.result.matchPercent >= 75);
+
+    const sorted = [...list];
+    if (sort === 'distance' && canSortDistance) {
+      sorted.sort(
+        (a, b) =>
+          (a.result.distanceKm ?? Number.POSITIVE_INFINITY) -
+          (b.result.distanceKm ?? Number.POSITIVE_INFINITY)
+      );
+    } else if (sort === 'compensation' && canSortCompensation) {
+      const rank: Record<string, number> = {
+        within_budget: 0,
+        slightly_above: 1,
+        above_budget: 2,
+        unknown: 3,
+      };
+      sorted.sort(
+        (a, b) =>
+          rank[a.result.compensationStatus] - rank[b.result.compensationStatus] ||
+          b.result.matchPercent - a.result.matchPercent
+      );
+    }
+    // 'best' — the service already ranked by matchPercent; keep that order.
+    return sorted;
+  }, [rows, filters, sort, canSortDistance, canSortCompensation]);
+
+  const staffingLabel = useMemo(() => {
+    if (!selectedJob) return undefined;
+    const p = getStaffingProgress(selectedJob.id);
+    return `${p.filled} מתוך ${p.needed} שובצו`;
+  }, [selectedJob, getStaffingProgress]);
+
+  // ---- actions ----
   const handleInvite = (workerId: string, workerName: string) => {
-    if (!selectedJobId || !me) return;
-    const created = sendInvitation(selectedJobId, me.id, workerId);
+    if (!selectedJob || !me) return;
+    const created = sendInvitation(selectedJob.id, me.id, workerId);
     if (!created) {
       Alert.alert('כל המקומות במשרה כבר אוישו.');
       return;
@@ -95,232 +234,321 @@ const SmartMatchScreen: React.FC<Props> = ({
     Alert.alert('הזמנה נשלחה', `ההזמנה נשלחה ל-${workerName}.`);
   };
 
-  return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.headerBar}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="chevron-forward" size={26} color={Colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} pointerEvents="none">התאמה חכמה</Text>
-      </View>
+  const resultsSubtitle =
+    sort === 'distance'
+      ? 'מסודרים לפי קרבה למיקום'
+      : sort === 'compensation'
+      ? 'מסודרים לפי התאמה לתקציב'
+      : 'מסודרים לפי רמת ההתאמה';
 
-      {myOpenJobs.length === 0 ? (
+  // -------------------------------------------------------------------------
+
+  const Header = (
+    <View style={styles.headerBar}>
+      <TouchableOpacity
+        onPress={onBack}
+        style={styles.backBtn}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityRole="button"
+        accessibilityLabel="חזרה"
+      >
+        <Ionicons name="chevron-forward" size={26} color={Colors.text} />
+      </TouchableOpacity>
+      <View style={styles.headerCenter} pointerEvents="none">
+        <View style={styles.headerTitleRow}>
+          <Ionicons name="sparkles" size={16} color={Colors.primary} />
+          <Text style={styles.headerTitle}>התאמה חכמה</Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  const Subtitle = (
+    <Text style={styles.subtitle}>
+      המערכת מנתחת את דרישות המשרה ונתוני העובדים כדי להציג את ההתאמות המתאימות
+      ביותר.
+    </Text>
+  );
+
+  const JobSelector = (
+    <TouchableOpacity
+      style={styles.selector}
+      onPress={() => setPickerOpen(true)}
+      activeOpacity={0.85}
+    >
+      <Ionicons name="briefcase-outline" size={18} color={Colors.primary} />
+      <Text style={styles.selectorText} numberOfLines={1}>
+        {selectedJob ? selectedJob.title : 'בחר משרה'}
+      </Text>
+      <Ionicons name="chevron-down" size={18} color={Colors.textSecondary} />
+    </TouchableOpacity>
+  );
+
+  // ---- no contractor session (defensive) ----
+  if (!me) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        {Header}
+        <EmptyState icon="lock-closed-outline" title="הרכיב זמין לקבלנים בלבד" />
+      </View>
+    );
+  }
+
+  // ---- state A: nothing selected ----
+  if (!selectedJob) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        {Header}
         <ScrollView
-          contentContainerStyle={{ paddingBottom: 60 }}
+          contentContainerStyle={styles.scrollBody}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.intro}>
-            <Ionicons name="sparkles" size={20} color={Colors.primary} />
-            <Text style={styles.introText}>
-              המערכת מדרגת עובדים מאושרים על פי מקצוע, מיקום, זמינות
-              והסמכות.
-            </Text>
-          </View>
-          <View style={styles.emptyWrap}>
-            <Ionicons
-              name="briefcase-outline"
-              size={56}
-              color={Colors.textMuted}
+          {Subtitle}
+          {myOpenJobs.length > 0 && JobSelector}
+          {myOpenJobs.length === 0 ? (
+            <EmptyState
+              icon="briefcase-outline"
+              title="אין משרות פתוחות"
+              description="פרסם משרה חדשה כדי להפעיל התאמה חכמה."
             />
-            <Text style={styles.emptyTitle}>אין משרות פתוחות</Text>
-            <Text style={styles.emptySub}>
-              פרסם משרה חדשה כדי להפעיל התאמה חכמה.
-            </Text>
-          </View>
-        </ScrollView>
-      ) : (
-        <FlatList
-          data={ranked}
-          keyExtractor={(m) => m.worker.id}
-          contentContainerStyle={{ paddingBottom: 60 }}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            <>
-              <View style={styles.intro}>
-                <Ionicons name="sparkles" size={20} color={Colors.primary} />
-                <Text style={styles.introText}>
-                  המערכת מדרגת עובדים מאושרים על פי מקצוע, מיקום, זמינות
-                  והסמכות.
-                </Text>
-              </View>
-
-              <View style={styles.sectionHead}>
-                <Text style={styles.sectionTitle}>בחר משרה</Text>
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.jobChipRow}
-              >
-                {myOpenJobs.map((j) => {
-                  const active = j.id === selectedJobId;
-                  return (
-                    <TouchableOpacity
-                      key={j.id}
-                      style={[styles.jobChip, active && styles.jobChipActive]}
-                      onPress={() => setSelectedJobId(j.id)}
-                      activeOpacity={0.85}
-                    >
-                      <Text
-                        style={[
-                          styles.jobChipTitle,
-                          active && styles.jobChipTitleActive,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {j.title}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.jobChipMeta,
-                          active && styles.jobChipMetaActive,
-                        ]}
-                      >
-                        {jobProfessions(j).join(', ')} · {j.city}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-
-              {selectedJob && (
-                <TouchableOpacity
-                  style={styles.jobDetailsLink}
-                  onPress={() => onOpenJobDetails(selectedJob.id)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons
-                    name="information-circle-outline"
-                    size={16}
-                    color={Colors.secondary}
-                  />
-                  <Text style={styles.jobDetailsLinkText}>
-                    הצג פרטי משרה
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              <View style={styles.sectionHead}>
-                <Text style={styles.sectionTitle}>
-                  {ranked.length} מועמדים מתאימים
-                </Text>
-              </View>
-            </>
-          }
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>
-                אין עובדים מתאימים כרגע. נסה משרה אחרת.
-              </Text>
-            </View>
-          }
-          renderItem={({ item: m }) => (
-            <MatchCard
-              match={m}
-              invited={invitedWorkerIds.has(m.worker.id)}
-              onPressWorker={() => onOpenWorkerProfile(m.worker.id)}
-              onInvite={() => handleInvite(m.worker.id, m.worker.fullName)}
+          ) : (
+            <EmptyState
+              icon="sparkles-outline"
+              title="בחר משרה כדי להתחיל התאמה חכמה"
+              description="נדרג עבורך את העובדים המתאימים ביותר לדרישות המשרה."
+              actionLabel="בחר משרה"
+              onAction={() => setPickerOpen(true)}
             />
           )}
+        </ScrollView>
+
+        <SmartMatchJobPicker
+          visible={pickerOpen}
+          jobs={myOpenJobs}
+          selectedJobId={selectedJobId}
+          onSelect={setSelectedJobId}
+          onClose={() => setPickerOpen(false)}
         />
+      </View>
+    );
+  }
+
+  // ---- states B–E: a job is selected ----
+  const ListHeader = (
+    <View style={styles.listHeader}>
+      {Subtitle}
+      {JobSelector}
+      <SmartMatchJobSummary
+        job={selectedJob}
+        staffingLabel={staffingLabel}
+        onPressDetails={() => onOpenJobDetails(selectedJob.id)}
+      />
+
+      {status === 'loading' && (
+        <View style={styles.loadingBlock}>
+          <ActivityIndicator color={Colors.primary} />
+          <Text style={styles.loadingText}>מנתחים את ההתאמות למשרה...</Text>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={styles.skeletonCard}>
+              <View style={styles.skeletonRow}>
+                <View style={styles.skeletonAvatar} />
+                <View style={styles.skeletonLines}>
+                  <View style={[styles.skeletonLine, { width: '55%' }]} />
+                  <View style={[styles.skeletonLine, { width: '40%' }]} />
+                </View>
+                <View style={styles.skeletonScore} />
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {status === 'error' && (
+        <View style={styles.errorBlock}>
+          <Ionicons name="cloud-offline-outline" size={40} color={Colors.textMuted} />
+          <Text style={styles.errorText}>
+            לא הצלחנו לטעון את ההתאמות. נסה שוב.
+          </Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => setReloadKey((k) => k + 1)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="refresh" size={16} color={Colors.white} />
+            <Text style={styles.retryText}>נסה שוב</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {status === 'ready' && (
+        <>
+          <ScrollView
+            ref={controlScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.controlRow}
+            onContentSizeChange={() => {
+              if (!controlAnchoredRef.current) {
+                controlAnchoredRef.current = true;
+                controlScrollRef.current?.scrollToEnd({ animated: false });
+              }
+            }}
+          >
+            <SortChip
+              label="ההתאמה הגבוהה ביותר"
+              active={sort === 'best'}
+              onPress={() => setSort('best')}
+            />
+            {canSortDistance && (
+              <SortChip
+                label="הקרובים ביותר"
+                active={sort === 'distance'}
+                onPress={() => setSort('distance')}
+              />
+            )}
+            {canSortCompensation && (
+              <SortChip
+                label="המתאימים ביותר לתקציב"
+                active={sort === 'compensation'}
+                onPress={() => setSort('compensation')}
+              />
+            )}
+
+            <View style={styles.controlDivider} />
+
+            <ToggleChip
+              label="זמינים עכשיו"
+              active={filters.available}
+              onPress={() =>
+                setFilters((f) => ({ ...f, available: !f.available }))
+              }
+            />
+            <ToggleChip
+              label="עבדנו יחד"
+              active={filters.worked}
+              onPress={() => setFilters((f) => ({ ...f, worked: !f.worked }))}
+            />
+            <ToggleChip
+              label="התאמה 75%+"
+              active={filters.strong}
+              onPress={() => setFilters((f) => ({ ...f, strong: !f.strong }))}
+            />
+          </ScrollView>
+
+          <View style={styles.resultsHead}>
+            <Text style={styles.resultsTitle}>
+              {visible.length === 1
+                ? 'מצאנו עובד אחד שמתאים למשרה'
+                : `מצאנו ${visible.length} עובדים שמתאימים למשרה`}
+            </Text>
+            {visible.length > 0 && (
+              <Text style={styles.resultsSub}>{resultsSubtitle}</Text>
+            )}
+          </View>
+        </>
       )}
     </View>
   );
-};
-
-// ---------- subcomponents ----------
-
-const MatchCard: React.FC<{
-  match: MatchResult;
-  invited: boolean;
-  onPressWorker: () => void;
-  onInvite: () => void;
-}> = ({ match, invited, onPressWorker, onInvite }) => {
-  const w = match.worker;
-  const band = matchBand(match.matchScore);
-  const tone =
-    band.tone === 'success'
-      ? Colors.success
-      : band.tone === 'info'
-      ? Colors.info
-      : band.tone === 'warning'
-      ? Colors.warning
-      : Colors.danger;
 
   return (
-    <View style={styles.card}>
-      <TouchableOpacity
-        style={styles.cardHead}
-        onPress={onPressWorker}
-        activeOpacity={0.85}
-      >
-        <View style={[styles.scoreRing, { borderColor: tone }]}>
-          <Text style={[styles.scoreValue, { color: tone }]}>
-            {match.matchScore}
-          </Text>
-          <Text style={styles.scoreLabel}>%</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={styles.nameRow}>
-            {w.isAvailable && <View style={styles.dot} />}
-            <Text style={styles.name}>{w.fullName}</Text>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {Header}
+      <FlatList
+        data={status === 'ready' ? visible : []}
+        keyExtractor={(r) => r.worker.id}
+        contentContainerStyle={styles.scrollBody}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={ListHeader}
+        ListEmptyComponent={
+          status === 'ready' ? (
+            filtersActive ? (
+              <EmptyState
+                icon="filter-outline"
+                title="אין עובדים שמתאימים לסינון שבחרת"
+                description="נסה להסיר חלק מהסינונים כדי לראות עוד התאמות."
+                actionLabel="נקה סינון"
+                onAction={() =>
+                  setFilters({ available: false, worked: false, strong: false })
+                }
+              />
+            ) : (
+              <EmptyState
+                icon="people-outline"
+                title="לא נמצאו כרגע עובדים שמתאימים לדרישות המשרה"
+                description="אפשר לחפש עובדים ידנית ולהזמין אותם למשרה."
+                actionLabel={onOpenSearchWorkers ? 'חפש עובדים' : undefined}
+                onAction={onOpenSearchWorkers}
+              />
+            )
+          ) : null
+        }
+        renderItem={({ item }) => (
+          <View style={styles.cardWrap}>
+            <SmartMatchWorkerCard
+              worker={item.worker}
+              result={item.result}
+              relationship={item.relationship}
+              jobCity={selectedJob.city}
+              invited={invitedWorkerIds.has(item.worker.id)}
+              assigned={assignedWorkerIds.has(item.worker.id)}
+              onPressProfile={() => onOpenWorkerProfile(item.worker.id)}
+              onInvite={() =>
+                handleInvite(item.worker.id, item.worker.fullName)
+              }
+            />
           </View>
-          <Text style={styles.profession}>
-            {w.profession} · {w.experienceYears} שנים · {w.city}
-          </Text>
-          <View style={{ marginTop: 4, alignItems: 'flex-end' }}>
-            <StatusBadge label={band.label} tone={band.tone} small />
-          </View>
-        </View>
-      </TouchableOpacity>
+        )}
+      />
 
-      {/* Reasons */}
-      <View style={styles.reasons}>
-        {match.reasons.map((r, idx) => (
-          <View key={idx} style={styles.reasonRow}>
-            <Text style={styles.reasonScore}>
-              {r.score >= 0 ? `+${r.score}` : r.score}
-            </Text>
-            <View style={{ flex: 1 }}>
-              <View style={styles.reasonBarBg}>
-                <View
-                  style={[
-                    styles.reasonBar,
-                    {
-                      width: `${Math.max(
-                        0,
-                        Math.min(100, (Math.abs(r.score) / r.weight) * 100)
-                      )}%`,
-                      backgroundColor:
-                        r.score >= 0 ? Colors.success : Colors.danger,
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-            <Text style={styles.reasonLabel}>{r.label}</Text>
-          </View>
-        ))}
-      </View>
-
-      <TouchableOpacity
-        style={[styles.inviteBtn, invited && styles.invitedBtn]}
-        onPress={onInvite}
-        disabled={invited}
-        activeOpacity={0.85}
-      >
-        <Ionicons
-          name={invited ? 'checkmark-circle' : 'paper-plane'}
-          size={16}
-          color={invited ? Colors.success : Colors.white}
-        />
-        <Text style={[styles.inviteText, invited && styles.invitedText]}>
-          {invited ? 'הוזמן' : 'הזמן לעבודה'}
-        </Text>
-      </TouchableOpacity>
+      <SmartMatchJobPicker
+        visible={pickerOpen}
+        jobs={myOpenJobs}
+        selectedJobId={selectedJobId}
+        onSelect={setSelectedJobId}
+        onClose={() => setPickerOpen(false)}
+      />
     </View>
   );
 };
+
+// ---------- small controls ----------
+
+const SortChip: React.FC<{
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}> = ({ label, active, onPress }) => (
+  <TouchableOpacity
+    style={[styles.chip, active && styles.chipActive]}
+    onPress={onPress}
+    activeOpacity={0.8}
+  >
+    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
+
+const ToggleChip: React.FC<{
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}> = ({ label, active, onPress }) => (
+  <TouchableOpacity
+    style={[styles.chip, active && styles.chipActive]}
+    onPress={onPress}
+    activeOpacity={0.8}
+  >
+    <Ionicons
+      name={active ? 'checkmark-circle' : 'add-circle-outline'}
+      size={14}
+      color={active ? Colors.white : Colors.textSecondary}
+    />
+    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
 // ---------- styles ----------
 
@@ -335,235 +563,158 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  backBtn: {
-    position: 'absolute',
-    right: Spacing.lg,
-    top: Spacing.md,
-    padding: 4,
+  backBtn: { position: 'absolute', right: Spacing.lg, top: Spacing.sm, padding: 6 },
+  headerCenter: { alignItems: 'center', justifyContent: 'center' },
+  headerTitleRow: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
   },
   headerTitle: {
     fontSize: FontSize.lg,
     fontWeight: '800',
     color: Colors.text,
-    textAlign: 'center',
     writingDirection: 'rtl',
   },
 
-  intro: {
-    flexDirection: 'row-reverse',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: Colors.primaryFaint,
-    margin: Spacing.lg,
-    padding: Spacing.md,
-    borderRadius: Radius.md,
+  scrollBody: {
+    flexGrow: 1,
+    padding: Spacing.lg,
+    paddingBottom: 60,
+    gap: Spacing.sm,
   },
-  introText: {
-    flex: 1,
+  listHeader: { gap: Spacing.sm, marginBottom: Spacing.sm },
+
+  subtitle: {
     fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+
+  selector: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.white,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+    ...Shadow.small,
+  },
+  selectorText: {
+    flex: 1,
+    fontSize: FontSize.md,
+    fontWeight: '700',
     color: Colors.text,
     textAlign: 'right',
     writingDirection: 'rtl',
-    lineHeight: 20,
   },
 
-  sectionHead: {
-    paddingHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    marginBottom: Spacing.sm,
-    alignItems: 'flex-end',
-  },
-  sectionTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: Colors.primary,
-    writingDirection: 'rtl',
-  },
-
-  jobChipRow: {
+  controlRow: {
+    minWidth: '100%',
     flexDirection: 'row-reverse',
-    paddingHorizontal: Spacing.lg,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
     gap: 8,
+    paddingVertical: 2,
   },
-  jobChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: Radius.md,
-    borderWidth: 1.5,
-    borderColor: Colors.textMuted,
-    backgroundColor: Colors.white,
-    minWidth: 180,
-    alignItems: 'flex-end',
+  controlDivider: {
+    width: 1,
+    height: 22,
+    backgroundColor: Colors.border,
+    marginHorizontal: 2,
   },
-  jobChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+  chip: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.gray100,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  jobChipTitle: {
-    fontSize: FontSize.sm,
-    fontWeight: '700',
-    color: Colors.text,
-    writingDirection: 'rtl',
-  },
-  jobChipTitleActive: { color: Colors.white },
-  jobChipMeta: {
+  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText: {
     fontSize: FontSize.xs,
+    fontWeight: '700',
     color: Colors.textSecondary,
     writingDirection: 'rtl',
-    marginTop: 2,
   },
-  jobChipMetaActive: { color: 'rgba(255,255,255,0.85)' },
+  chipTextActive: { color: Colors.white },
 
-  jobDetailsLink: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-end',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 4,
-    marginTop: 6,
+  resultsHead: { marginTop: Spacing.xs, gap: 2, alignItems: 'flex-end' },
+  resultsTitle: {
+    fontSize: FontSize.md,
+    fontWeight: '800',
+    color: Colors.text,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
-  jobDetailsLinkText: {
+  resultsSub: {
     fontSize: FontSize.xs,
-    color: Colors.secondary,
-    fontWeight: '700',
+    color: Colors.textSecondary,
+    textAlign: 'right',
     writingDirection: 'rtl',
   },
 
-  card: {
+  cardWrap: { marginTop: Spacing.sm },
+
+  loadingBlock: { gap: Spacing.sm, paddingTop: Spacing.md, alignItems: 'stretch' },
+  loadingText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  skeletonCard: {
     backgroundColor: Colors.white,
-    marginHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
-    padding: Spacing.md,
     borderRadius: Radius.md,
-    gap: 10,
-    ...Shadow.medium,
+    padding: Spacing.md,
+    ...Shadow.small,
   },
-  cardHead: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: Spacing.md,
+  skeletonRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: Spacing.sm },
+  skeletonAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.gray100,
   },
-  scoreRing: {
+  skeletonLines: { flex: 1, gap: 8 },
+  skeletonLine: { height: 10, borderRadius: 5, backgroundColor: Colors.gray100 },
+  skeletonScore: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    borderWidth: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.white,
-  },
-  scoreValue: { fontSize: FontSize.lg, fontWeight: '800' },
-  scoreLabel: { fontSize: 9, color: Colors.textMuted, marginTop: -3 },
-
-  nameRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 6,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.success,
-  },
-  name: {
-    fontSize: FontSize.md,
-    fontWeight: '700',
-    color: Colors.text,
-    writingDirection: 'rtl',
-  },
-  profession: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    writingDirection: 'rtl',
-    textAlign: 'right',
-    marginTop: 2,
-  },
-
-  reasons: { gap: 4 },
-  reasonRow: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    gap: 8,
-  },
-  reasonLabel: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    writingDirection: 'rtl',
-    width: 110,
-    textAlign: 'right',
-  },
-  reasonBarBg: {
-    height: 6,
     backgroundColor: Colors.gray100,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  reasonBar: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  reasonScore: {
-    fontSize: FontSize.xs,
-    fontWeight: '800',
-    color: Colors.text,
-    width: 30,
   },
 
-  inviteBtn: {
+  errorBlock: {
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xxl,
+  },
+  errorText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  retryBtn: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
     backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.lg,
     paddingVertical: 10,
     borderRadius: Radius.full,
   },
-  invitedBtn: {
-    backgroundColor: '#DCFCE7',
-  },
-  inviteText: {
-    color: Colors.white,
-    fontWeight: '700',
-    fontSize: FontSize.sm,
-  },
-  invitedText: {
-    color: Colors.success,
-  },
-
-  empty: {
-    marginHorizontal: Spacing.lg,
-    backgroundColor: Colors.white,
-    padding: Spacing.lg,
-    borderRadius: Radius.md,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    writingDirection: 'rtl',
-  },
-
-  emptyWrap: {
-    alignItems: 'center',
-    padding: Spacing.xxl,
-    gap: 8,
-  },
-  emptyTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '800',
-    color: Colors.text,
-    writingDirection: 'rtl',
-    marginTop: 8,
-  },
-  emptySub: {
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    writingDirection: 'rtl',
-  },
+  retryText: { color: Colors.white, fontWeight: '800', fontSize: FontSize.sm },
 });
 
 export default SmartMatchScreen;

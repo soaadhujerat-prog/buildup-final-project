@@ -516,6 +516,76 @@ export interface MatchResult {
 }
 
 // ---------------------------------------------------------------------------
+// Smart Match — backend-ready result shape (contractor picks a job, the
+// system ranks workers). The SmartMatch SCREEN renders ONLY this shape.
+//
+// Today it is produced locally by services/smartMatchService.ts from real
+// Worker / JobPost / Assignment fields. Later the identical shape will be
+// returned by a Supabase Edge Function (`smart-match`) that runs the
+// weighted 100-point algorithm plus an OpenAI semantic pass — the UI does
+// not change when that swap happens. `MatchResult` above stays as the old
+// contractor matcher; this type is the one Smart Match uses.
+// ---------------------------------------------------------------------------
+
+/** Band of `matchPercent`, mapped in smartMatchService.levelForPercent:
+ *  high 80–100 · good 60–79 · partial 40–59 · low 0–39. */
+export type SmartMatchLevel = 'high' | 'good' | 'partial' | 'low';
+
+/** Whether the worker's rate fits the job's rate. `unknown` when the two
+ *  sides have no comparable rate field — never guessed. */
+export type CompensationStatus =
+  | 'within_budget'
+  | 'slightly_above'
+  | 'above_budget'
+  | 'unknown';
+
+/** Per-factor sub-scores. Each value is already normalized to that factor's
+ *  own maximum on the future 100-point scale:
+ *    profession 30 · experience 13 · availability 12 · compensation 12 ·
+ *    skills 12 · distance 11 · sharedHistory 5 · semantic 5.
+ *  Profession carries the most weight AND acts as a gate — a worker whose
+ *  trade is not one the job asked for is capped well below a real match
+ *  (see smartMatchService.computeSmartMatch).
+ *
+ *  A `null` factor means "not assessable" — either no real data for it
+ *  (e.g. no coordinates → distance stays city-level, no comparable rate →
+ *  compensation) or no backend for it yet (semantic). A null factor is
+ *  EXCLUDED from `matchPercent`, never scored as a zero, so a worker is
+ *  never punished for data the app does not have. */
+export interface SmartMatchBreakdown {
+  profession: number | null;
+  skills: number | null;
+  experience: number | null;
+  availability: number | null;
+  compensation: number | null;
+  distance: number | null;
+  sharedHistory: number | null;
+  semantic: number | null;
+}
+
+export interface SmartMatchResult {
+  workerId: string;
+  /** 0..100, computed over the factors that could actually be assessed
+   *  (see SmartMatchBreakdown). */
+  matchPercent: number;
+  matchLevel: SmartMatchLevel;
+  breakdown: SmartMatchBreakdown;
+  /** Plain-language "why he fits" bullets — only data-backed statements. */
+  strengths: string[];
+  /** Plain-language "what to consider" bullets — only data-backed. */
+  concerns: string[];
+  /** Free-text summary from the future OpenAI semantic pass. `undefined`
+   *  until a real backend exists — the UI then shows NO explanation rather
+   *  than a fabricated one. */
+  aiSummary?: string;
+  /** Real geo/road distance in km. `undefined` until coordinates + a
+   *  distance provider exist; until then the UI falls back to
+   *  same-city / other-city wording only. */
+  distanceKm?: number;
+  compensationStatus: CompensationStatus;
+}
+
+// ---------------------------------------------------------------------------
 // Messaging
 // ---------------------------------------------------------------------------
 

@@ -837,6 +837,9 @@ const AppNavigator: React.FC = () => {
             onOpenJobDetails={(jobId) =>
               push({ name: 'ContractorJobDetails', jobId })
             }
+            onOpenSearchWorkers={() =>
+              push({ name: 'ContractorSearchWorkers' })
+            }
           />
         );
       case 'ContractorSentInvitations':
