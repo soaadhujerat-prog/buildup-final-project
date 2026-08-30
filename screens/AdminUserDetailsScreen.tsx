@@ -25,6 +25,10 @@ import ContractorAvatar from '../components/ContractorAvatar';
 import AttachedDocument from '../components/AttachedDocument';
 import { Contractor, Worker } from '../types';
 import {
+  getWorkerAssignmentStats,
+  getContractorWorkforceStats,
+} from '../services/assignmentService';
+import {
   workerProfessions,
   workerPrimaryProfession,
   contractorAreas,
@@ -93,20 +97,20 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
       const invitationsCount = invitations.filter(
         (i) => i.workerId === user.id
       ).length;
-      // "שיפוצים ששובץ אליהם" — unique jobs with a real Assignment for this
-      // worker. Never derived from applications/invitations. De-duped by jobId.
-      const assignedJobsCount = new Set(
-        assignments
-          .filter((a) => a.workerId === user.id)
-          .map((a) => a.jobId)
-      ).size;
+      // Staffing split — effective/latest assignment per unique job (shared
+      // selector). completed is NOT active; cancelled is neither.
+      const { activeJobs, completedJobs } = getWorkerAssignmentStats(
+        assignments,
+        user.id
+      );
       const ticketsCount = supportTickets.filter(
         (t) => t.userId === user.id
       ).length;
       return {
         applicationsCount,
         invitationsCount,
-        assignedJobsCount,
+        activeJobs,
+        completedJobs,
         ticketsCount,
       };
     }
@@ -117,21 +121,21 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
       const applicationsCount = applications.filter((a) =>
         myJobIds.has(a.jobId)
       ).length;
-      // "עובדים ששובצו" — unique worker+job pairs among this contractor's
-      // Assignment records (de-duped so the same worker on the same job is
-      // counted once).
-      const assignedWorkersCount = new Set(
-        assignments
-          .filter((a) => a.contractorId === user.id)
-          .map((a) => `${a.workerId}:${a.jobId}`)
-      ).size;
+      // Workforce split — effective/latest assignment per (worker, job),
+      // de-duped to unique workers across ALL of the contractor's jobs
+      // (shared selector). cancelled-only worker counts in neither.
+      const { activeWorkers, everWorkedWorkers } = getContractorWorkforceStats(
+        assignments,
+        user.id
+      );
       const ticketsCount = supportTickets.filter(
         (t) => t.userId === user.id
       ).length;
       return {
         jobsCount: myJobs.length,
         applicationsCount,
-        assignedWorkersCount,
+        activeWorkers,
+        everWorkedWorkers,
         ticketsCount,
       };
     }
@@ -379,8 +383,12 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
                   value={(activity as any).invitationsCount}
                 />
                 <StatChip
-                  label="שיפוצים ששובץ אליהם"
-                  value={(activity as any).assignedJobsCount}
+                  label="שיבוצים פעילים"
+                  value={(activity as any).activeJobs}
+                />
+                <StatChip
+                  label="עבודות שהסתיימו"
+                  value={(activity as any).completedJobs}
                 />
                 <StatChip
                   label="פניות תמיכה"
@@ -403,8 +411,12 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
                   value={(activity as any).applicationsCount}
                 />
                 <StatChip
-                  label="עובדים ששובצו"
-                  value={(activity as any).assignedWorkersCount}
+                  label="עובדים פעילים כרגע"
+                  value={(activity as any).activeWorkers}
+                />
+                <StatChip
+                  label="עובדים שעבדו עם הקבלן"
+                  value={(activity as any).everWorkedWorkers}
                 />
                 <StatChip
                   label="פניות תמיכה"

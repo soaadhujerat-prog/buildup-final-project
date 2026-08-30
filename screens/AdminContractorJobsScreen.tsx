@@ -15,8 +15,20 @@ import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import { formatDate } from '../utils/helpers';
 import { getRegistrationStatus } from '../services/jobStatusService';
+import { getEffectiveJobAssignments } from '../services/assignmentService';
 import { Contractor, JobPost, Worker } from '../types';
 import { workerPrimaryProfession } from '../utils/normalize';
+
+type TeamStatus = 'active' | 'completed';
+interface TeamMember {
+  worker: Worker;
+  status: TeamStatus;
+}
+
+const TEAM_BADGE: Record<TeamStatus, { label: string; tone: 'success' | 'info' }> = {
+  active: { label: 'עובד כרגע', tone: 'success' },
+  completed: { label: 'סיים את עבודתו', tone: 'info' },
+};
 
 interface Props {
   contractorId: string;
@@ -86,24 +98,28 @@ const AdminContractorJobsScreen: React.FC<Props> = ({
           showsVerticalScrollIndicator={false}
         >
           {myJobs.map((job) => {
-            // Assigned workers = ACTIVE Assignment records only, de-duped by
-            // workerId so the same person can never be counted twice.
-            const seen = new Set<string>();
-            const assignedWorkers: Worker[] = [];
-            assignments
-              .filter((a) => a.jobId === job.id && a.status === 'active')
-              .forEach((a) => {
-                if (seen.has(a.workerId)) return;
-                seen.add(a.workerId);
-                const w = workers.find((x) => x.id === a.workerId);
-                if (w) assignedWorkers.push(w);
-              });
+            // The job TEAM = effective/latest assignment per unique worker,
+            // keeping active + completed (a worker who finished was still on
+            // the team). Only a worker whose effective assignment is
+            // 'cancelled' drops off. Never the raw records — no double count.
+            const team: TeamMember[] = getEffectiveJobAssignments(
+              assignments,
+              job.id
+            )
+              .filter(
+                (a) => a.status === 'active' || a.status === 'completed'
+              )
+              .map((a) => ({
+                worker: workers.find((x) => x.id === a.workerId),
+                status: a.status as TeamStatus,
+              }))
+              .filter((m): m is TeamMember => !!m.worker);
             return (
               <JobCard
                 key={job.id}
                 job={job}
                 progress={getStaffingProgress(job.id)}
-                assignedWorkers={assignedWorkers}
+                team={team}
                 onOpenUser={onOpenUser}
               />
             );
@@ -117,9 +133,9 @@ const AdminContractorJobsScreen: React.FC<Props> = ({
 const JobCard: React.FC<{
   job: JobPost;
   progress: { filled: number; needed: number; label: string };
-  assignedWorkers: Worker[];
+  team: TeamMember[];
   onOpenUser: (userId: string) => void;
-}> = ({ job, progress, assignedWorkers, onOpenUser }) => {
+}> = ({ job, progress, team, onOpenUser }) => {
   const reg = getRegistrationStatus(job);
   return (
     <View style={styles.card}>
@@ -146,10 +162,11 @@ const JobCard: React.FC<{
         </Text>
       </View>
 
-      {/* Actual assigned workers — Assignment records only */}
-      {assignedWorkers.length > 0 ? (
+      {/* Job team — Assignment records only. Keeps completed workers (they
+          were part of the team); a cancelled staffing is dropped. */}
+      {team.length > 0 ? (
         <View style={styles.assignedWrap}>
-          {assignedWorkers.map((w) => (
+          {team.map(({ worker: w, status }) => (
             <TouchableOpacity
               key={w.id}
               style={styles.workerRow}
@@ -158,7 +175,14 @@ const JobCard: React.FC<{
             >
               <WorkerAvatar worker={w} size={36} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.workerName}>{w.fullName}</Text>
+                <View style={styles.workerTopline}>
+                  <StatusBadge
+                    label={TEAM_BADGE[status].label}
+                    tone={TEAM_BADGE[status].tone}
+                    small
+                  />
+                  <Text style={styles.workerName}>{w.fullName}</Text>
+                </View>
                 <Text style={styles.workerSub}>
                   {workerPrimaryProfession(w)}
                 </Text>
@@ -288,6 +312,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gray50,
     borderRadius: Radius.sm,
     padding: Spacing.sm,
+  },
+  workerTopline: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
   },
   workerName: {
     fontSize: FontSize.sm,

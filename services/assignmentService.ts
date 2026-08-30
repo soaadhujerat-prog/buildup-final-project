@@ -140,6 +140,70 @@ export const getAssignmentsByWorker = (
   workerId: string
 ): Assignment[] => assignments.filter((a) => a.workerId === workerId);
 
+// =============================================================================
+// Admin statistics — same effective/latest-per-(worker,job) rule as staffing.
+// Never counts a (worker, job) pair twice; `cancelled` counts as neither
+// "active" nor "worked". Screens must call these, not re-derive.
+// =============================================================================
+
+/** For an admin viewing a WORKER: how many unique jobs the worker is on right
+ *  now vs. has finished. `activeJobs` = jobs whose effective assignment is
+ *  'active'; `completedJobs` = jobs whose effective assignment is 'completed'.
+ *  A job whose effective assignment is 'cancelled' is in neither. */
+export const getWorkerAssignmentStats = (
+  assignments: Assignment[],
+  workerId: string
+): { activeJobs: number; completedJobs: number } => {
+  const scoped = assignments.filter((a) => a.workerId === workerId);
+  const jobIds = new Set(scoped.map((a) => a.jobId));
+  let activeJobs = 0;
+  let completedJobs = 0;
+  jobIds.forEach((jobId) => {
+    const eff = getWorkerJobAssignment(scoped, jobId, workerId);
+    if (!eff) return;
+    if (eff.status === 'active') activeJobs += 1;
+    else if (eff.status === 'completed') completedJobs += 1;
+  });
+  return { activeJobs, completedJobs };
+};
+
+/** For an admin viewing a CONTRACTOR: unique workers across all of that
+ *  contractor's jobs. `activeWorkers` = workers with ≥1 effective 'active'
+ *  assignment on any of the contractor's jobs; `everWorkedWorkers` = workers
+ *  with ≥1 effective 'active' OR 'completed' assignment. A worker who only
+ *  ever had a 'cancelled' assignment with this contractor counts in neither.
+ *  The same worker on several of the contractor's jobs is still one worker. */
+export const getContractorWorkforceStats = (
+  assignments: Assignment[],
+  contractorId: string
+): { activeWorkers: number; everWorkedWorkers: number } => {
+  const scoped = assignments.filter((a) => a.contractorId === contractorId);
+  const jobsByWorker = new Map<string, Set<string>>();
+  scoped.forEach((a) => {
+    if (!jobsByWorker.has(a.workerId)) jobsByWorker.set(a.workerId, new Set());
+    jobsByWorker.get(a.workerId)!.add(a.jobId);
+  });
+  let activeWorkers = 0;
+  let everWorkedWorkers = 0;
+  jobsByWorker.forEach((jobIds, workerId) => {
+    let isActive = false;
+    let hasWorked = false;
+    jobIds.forEach((jobId) => {
+      const eff = getWorkerJobAssignment(scoped, jobId, workerId);
+      if (!eff) return;
+      if (eff.status === 'active') {
+        isActive = true;
+        hasWorked = true;
+      } else if (eff.status === 'completed') {
+        hasWorked = true;
+      }
+    });
+    if (isActive) activeWorkers += 1;
+    if (hasWorked) everWorkedWorkers += 1;
+  });
+  return { activeWorkers, everWorkedWorkers };
+};
+
 export type StaffingStatus = 'not_started' | 'in_progress' | 'completed';
 
 export interface StaffingProgress {
