@@ -1,15 +1,23 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   FlatList,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import {
+  Colors,
+  Spacing,
+  Radius,
+  FontSize,
+  Shadow,
+  FilterChip as FC,
+} from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import ResponseDialog from '../components/ResponseDialog';
@@ -39,6 +47,24 @@ interface AssignmentRow {
 const STATUS_LABEL = ASSIGNMENT_STATUS_LABEL;
 const STATUS_TONE = ASSIGNMENT_STATUS_TONE;
 
+// The worker-side filter maps 1:1 onto Assignment.status — never inferred from
+// job status, and it never creates a new status.
+type AssignmentFilter = 'all' | Assignment['status'];
+
+const FILTER_TABS: { key: AssignmentFilter; label: string }[] = [
+  { key: 'all', label: 'הכל' },
+  { key: 'active', label: 'פעילים' },
+  { key: 'completed', label: 'העבודה הסתיימה' },
+  { key: 'cancelled', label: 'השיבוץ בוטל' },
+];
+
+const EMPTY_FOR_FILTER: Record<AssignmentFilter, string> = {
+  all: 'אין לך עדיין שיבוצים',
+  active: 'אין לך שיבוצים פעילים כרגע',
+  completed: 'עדיין לא סיימת עבודה במשרה כלשהי',
+  cancelled: 'אין שיבוצים שבוטלו',
+};
+
 const MyAssignmentsScreen: React.FC<Props> = ({
   onBack,
   onOpenJobDetails,
@@ -54,7 +80,15 @@ const MyAssignmentsScreen: React.FC<Props> = ({
   } = useApp();
   const me = currentUser as Worker | undefined;
 
+  const [filter, setFilter] = useState<AssignmentFilter>('all');
   const [cancelTarget, setCancelTarget] = useState<AssignmentRow | null>(null);
+
+  // The filter row is laid out RTL (row-reverse), so "הכל" is the right-most
+  // chip. A horizontal ScrollView still opens anchored at its left edge, which
+  // would hide "הכל" whenever the chips overflow — so we anchor the initial
+  // scroll to the right edge once. No data / order is touched.
+  const chipScrollRef = useRef<ScrollView>(null);
+  const chipAnchored = useRef(false);
 
   const submitCancel = (message: string) => {
     if (!cancelTarget) return;
@@ -82,6 +116,26 @@ const MyAssignmentsScreen: React.FC<Props> = ({
       );
   }, [me, getAssignmentsForWorker, getJobById]);
 
+  const counts = useMemo(
+    () => ({
+      all: assignments.length,
+      active: assignments.filter((a) => a.assignment.status === 'active').length,
+      completed: assignments.filter((a) => a.assignment.status === 'completed')
+        .length,
+      cancelled: assignments.filter((a) => a.assignment.status === 'cancelled')
+        .length,
+    }),
+    [assignments]
+  );
+
+  const filtered = useMemo(
+    () =>
+      filter === 'all'
+        ? assignments
+        : assignments.filter((a) => a.assignment.status === filter),
+    [assignments, filter]
+  );
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
@@ -91,22 +145,56 @@ const MyAssignmentsScreen: React.FC<Props> = ({
         <Text style={styles.headerTitle} pointerEvents="none">השיבוצים שלי</Text>
       </View>
 
-      {assignments.length === 0 ? (
+      <ScrollView
+        ref={chipScrollRef}
+        horizontal
+        style={styles.filterScroll}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipRow}
+        onContentSizeChange={() => {
+          if (chipAnchored.current) return;
+          chipAnchored.current = true;
+          // row-reverse content → the right edge is where "הכל" sits.
+          chipScrollRef.current?.scrollToEnd({ animated: false });
+        }}
+      >
+        {FILTER_TABS.map((tab) => (
+          <Chip
+            key={tab.key}
+            label={`${tab.label} (${counts[tab.key]})`}
+            active={filter === tab.key}
+            tone={
+              tab.key === 'active'
+                ? 'success'
+                : tab.key === 'completed'
+                ? 'info'
+                : tab.key === 'cancelled'
+                ? 'neutral'
+                : undefined
+            }
+            onPress={() => setFilter(tab.key)}
+          />
+        ))}
+      </ScrollView>
+
+      {filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons
             name="briefcase-outline"
             size={64}
             color={Colors.textMuted}
           />
-          <Text style={styles.emptyTitle}>אין לך עדיין שיבוצים פעילים</Text>
+          <Text style={styles.emptyTitle}>{EMPTY_FOR_FILTER[filter]}</Text>
           <Text style={styles.emptySub}>
-            שיבוץ נוצר כאשר קבלן מאשר בקשה שהגשת, או כשאתה מאשר הזמנה שקיבלת.
+            {counts.all === 0
+              ? 'שיבוץ נוצר כאשר קבלן מאשר בקשה שהגשת, או כשאתה מאשר הזמנה שקיבלת.'
+              : 'החלף סינון כדי לראות שיבוצים אחרים.'}
           </Text>
         </View>
       ) : (
         <FlatList
           style={styles.results}
-          data={assignments}
+          data={filtered}
           keyExtractor={(a) => a.assignment.id}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
@@ -279,8 +367,65 @@ const MyAssignmentsScreen: React.FC<Props> = ({
   );
 };
 
+const Chip: React.FC<{
+  label: string;
+  active: boolean;
+  tone?: 'success' | 'info' | 'neutral';
+  onPress: () => void;
+}> = ({ label, active, tone, onPress }) => {
+  const activeBg =
+    tone === 'success'
+      ? Colors.success
+      : tone === 'info'
+      ? Colors.info
+      : tone === 'neutral'
+      ? Colors.textSecondary
+      : Colors.primary;
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[
+        styles.chip,
+        active && { backgroundColor: activeBg, borderColor: activeBg },
+      ]}
+      activeOpacity={0.85}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+};
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+
+  filterScroll: { flexGrow: 0, flexShrink: 0 },
+  chipRow: {
+    flexDirection: 'row-reverse',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    gap: FC.gap,
+    alignItems: 'center',
+  },
+  chip: {
+    height: FC.height,
+    paddingHorizontal: FC.paddingHorizontal,
+    borderRadius: FC.borderRadius,
+    borderWidth: FC.borderWidth,
+    borderColor: Colors.textMuted,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+    lineHeight: FontSize.sm + 4,
+  },
+  chipTextActive: { color: Colors.white },
 
   headerBar: {
     position: 'relative',

@@ -92,6 +92,17 @@ export const normalizePhone = (raw: string): string => {
 export const isValidIsraeliPhone = (raw: string): boolean =>
   /^0\d{8,9}$/.test(normalizePhone(raw));
 
+/** FORMAT-only check for an Israeli ID field: exactly 9 digits, nothing else.
+ *  This is NOT a government lookup and NOT a checksum — real verification stays
+ *  an external step. Use it to stop obviously malformed input at sign-up. */
+export const isValidIsraeliIdFormat = (raw: string): boolean =>
+  /^\d{9}$/.test((raw ?? '').trim());
+
+/** Loose but real email format check (trimmed). No lowercasing here — callers
+ *  decide whether to normalize case. */
+export const isValidEmail = (raw: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((raw ?? '').trim());
+
 export const formatCurrency = (amount: number): string => {
   return `${amount.toLocaleString('he-IL')} ₪`;
 };

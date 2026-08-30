@@ -85,6 +85,8 @@ const JobDetailsScreen: React.FC<Props> = ({
     cancelInvitation,
     sendInvitation,
     setJobAcceptingApplications,
+    deleteJob,
+    canDeleteJob,
     isFavoriteContractor,
     toggleFavoriteContractor,
   } = useApp();
@@ -92,6 +94,7 @@ const JobDetailsScreen: React.FC<Props> = ({
   const job = getJobById(jobId);
   const [applying, setApplying] = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [candidateDialog, setCandidateDialog] = useState<
     { mode: 'accept' | 'reject'; app: Application } | null
@@ -163,6 +166,11 @@ const JobDetailsScreen: React.FC<Props> = ({
   const jobOpen = isOpenForApplications(job);
   const staffing = getStaffingProgress(job.id);
   const fullyStaffed = isJobFullyStaffed(job.id);
+
+  // Hard delete is allowed only for a job that never generated any activity.
+  // Anything else (applications / invitations / assignments) → the job is part
+  // of someone's history and can only be CLOSED to registration.
+  const canHardDelete = isContractorOwner && canDeleteJob(job.id);
 
   // Worker viewing this contractor — professional-history relationship,
   // derived only from real Assignments (same badge the contractor sees on the
@@ -481,6 +489,63 @@ const JobDetailsScreen: React.FC<Props> = ({
     );
   };
 
+  // Menu → "מחק משרה". Only reachable when canHardDelete is true. Closing
+  // registration, cancelling a staffing and completing a job are all separate
+  // actions and are never triggered from here.
+  const handleDeleteJob = () => {
+    setMenuOpen(false);
+    Alert.alert(
+      'מחיקת משרה',
+      'המשרה תימחק ולא ניתן יהיה לשחזר אותה.',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'מחק משרה',
+          style: 'destructive',
+          onPress: () => {
+            deleteJob(job.id);
+            onBack();
+          },
+        },
+      ]
+    );
+  };
+
+  // Menu → shown instead of delete when the job already has activity.
+  const handleCloseRegistrationFromMenu = () => {
+    setMenuOpen(false);
+    Alert.alert(
+      'סגירת המשרה להרשמה',
+      'המשרה תיסגר לקבלת מועמדויות חדשות. השיבוצים, המועמדויות וההיסטוריה הקיימים יישמרו ללא שינוי.',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'סגור משרה להרשמה',
+          onPress: () => setJobAcceptingApplications(job.id, false),
+        },
+      ]
+    );
+  };
+
+  // Menu → explanation when the contractor taps a delete affordance on a job
+  // that can't be hard-deleted.
+  const explainCannotDelete = () => {
+    setMenuOpen(false);
+    Alert.alert(
+      'לא ניתן למחוק משרה זו',
+      'לא ניתן למחוק משרה שכבר קיימת בה פעילות. ניתן לסגור את המשרה להרשמה.',
+      job.acceptingApplications
+        ? [
+            { text: 'סגור', style: 'cancel' },
+            {
+              text: 'סגור משרה להרשמה',
+              onPress: () => setJobAcceptingApplications(job.id, false),
+            },
+          ]
+        : [{ text: 'הבנתי', style: 'cancel' }]
+    );
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.headerBar}>
@@ -488,7 +553,98 @@ const JobDetailsScreen: React.FC<Props> = ({
           <Ionicons name="chevron-forward" size={26} color={Colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} pointerEvents="none">פרטי המשרה</Text>
+        {isContractorOwner && (
+          <TouchableOpacity
+            onPress={() => setMenuOpen(true)}
+            style={styles.menuBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="פעולות נוספות למשרה"
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={Colors.text} />
+          </TouchableOpacity>
+        )}
       </View>
+
+      {isContractorOwner && (
+        <Modal
+          visible={menuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuOpen(false)}
+        >
+          <TouchableOpacity
+            style={styles.menuBackdrop}
+            activeOpacity={1}
+            onPress={() => setMenuOpen(false)}
+          >
+            <View style={[styles.menuCard, { top: insets.top + 44 }]}>
+              {onOpenEditJob && (
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    onOpenEditJob(job.id);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="pencil" size={18} color={Colors.text} />
+                  <Text style={styles.menuItemText}>עריכת משרה</Text>
+                </TouchableOpacity>
+              )}
+
+              <View style={styles.menuDivider} />
+
+              {canHardDelete ? (
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleDeleteJob}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+                  <Text style={[styles.menuItemText, { color: Colors.danger }]}>
+                    מחק משרה
+                  </Text>
+                </TouchableOpacity>
+              ) : job.acceptingApplications ? (
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleCloseRegistrationFromMenu}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={18}
+                    color={Colors.danger}
+                  />
+                  <Text style={[styles.menuItemText, { color: Colors.danger }]}>
+                    סגור משרה להרשמה
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={explainCannotDelete}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={18}
+                    color={Colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      { color: Colors.textSecondary },
+                    ]}
+                  >
+                    המשרה סגורה להרשמה
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
       <ScrollView
         contentContainerStyle={{
@@ -1004,6 +1160,24 @@ const JobDetailsScreen: React.FC<Props> = ({
                           <Text style={styles.timelineText}>{cancelLine}</Text>
                         )}
                       </View>
+
+                      {w && (
+                        <TouchableOpacity
+                          style={styles.invViewProfileBtn}
+                          onPress={() => onOpenWorkerProfile(w.id)}
+                          activeOpacity={0.85}
+                          accessibilityLabel={`צפה בפרופיל של ${w.fullName}`}
+                        >
+                          <Ionicons
+                            name="person-circle-outline"
+                            size={16}
+                            color={Colors.primary}
+                          />
+                          <Text style={styles.invViewProfileText}>
+                            צפה בפרופיל
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   );
                 })
@@ -1201,12 +1375,50 @@ const styles = StyleSheet.create({
     top: Spacing.md,
     padding: 4,
   },
+  menuBtn: {
+    position: 'absolute',
+    left: Spacing.lg,
+    top: Spacing.md,
+    padding: 4,
+  },
   headerTitle: {
     fontSize: FontSize.lg,
     fontWeight: '800',
     color: Colors.text,
     textAlign: 'center',
     writingDirection: 'rtl',
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  menuCard: {
+    position: 'absolute',
+    left: Spacing.lg,
+    minWidth: 220,
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    paddingVertical: 6,
+    ...Shadow.medium,
+  },
+  menuItem: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+  },
+  menuItemText: {
+    fontSize: FontSize.md,
+    fontWeight: '600',
+    color: Colors.text,
+    writingDirection: 'rtl',
+    textAlign: 'right',
+  },
+  menuDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.border,
+    marginVertical: 4,
   },
 
   notFound: {
@@ -1655,6 +1867,24 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     fontWeight: '700',
     color: Colors.white,
+    writingDirection: 'rtl',
+  },
+
+  invViewProfileBtn: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  invViewProfileText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.primary,
     writingDirection: 'rtl',
   },
 

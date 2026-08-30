@@ -23,6 +23,11 @@ interface Props {
   professionCategory: string;
   profession: string;
   onChange: (professionCategory: string, profession: string) => void;
+  /** Filter sheets allow "כל המקצועות ב<תחום>" (profession = ''). A job post
+   *  must name a specific trade, so PostJobScreen passes `false` to drop that
+   *  row — the user then always leaves with a concrete profession, and the
+   *  "category chosen but profession empty" half-state can't happen. */
+  allowAllInCategory?: boolean;
 }
 
 type Step = 'category' | 'profession';
@@ -38,6 +43,7 @@ const ProfessionSelectorModal: React.FC<Props> = ({
   professionCategory,
   profession,
   onChange,
+  allowAllInCategory = true,
 }) => {
   const [step, setStep] = useState<Step>('category');
   const [localCategory, setLocalCategory] = useState('');
@@ -172,7 +178,11 @@ const ProfessionSelectorModal: React.FC<Props> = ({
             />
           ) : (
             <FlatList
-              data={[ALL_IN_CATEGORY, ...filteredProfessions]}
+              data={
+                allowAllInCategory
+                  ? [ALL_IN_CATEGORY, ...filteredProfessions]
+                  : filteredProfessions
+              }
               keyExtractor={(item) => item}
               keyboardShouldPersistTaps="handled"
               style={styles.list}

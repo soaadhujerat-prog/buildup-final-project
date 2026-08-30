@@ -67,12 +67,14 @@ const SharedWorkHistorySheet: React.FC<Props> = ({
         activeOpacity={onOpenJob && job ? 0.85 : 1}
         onPress={() => onOpenJob && job && onOpenJob(job.id)}
       >
-        <View style={styles.entryTop}>
+        {/* Clear hierarchy: status badge first, on its own row, then the job
+            name as the entry heading below it. */}
+        <View style={styles.entryBadgeRow}>
           <StatusBadge label={badge.label} tone={badge.tone} small />
-          <Text style={styles.entryTitle} numberOfLines={1}>
-            {job?.title ?? 'משרה שאינה זמינה עוד'}
-          </Text>
         </View>
+        <Text style={styles.entryTitle} numberOfLines={2}>
+          {job?.title ?? 'משרה שאינה זמינה עוד'}
+        </Text>
         {job && (
           <Text style={styles.entryMeta}>
             {[job.profession, job.professionCategory, job.city]
@@ -109,14 +111,16 @@ const SharedWorkHistorySheet: React.FC<Props> = ({
               style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}
             >
               <View style={styles.handle} />
+              {/* RTL screen: the close (X) control sits on the LEFT edge. */}
               <View style={styles.headerRow}>
+                <Text style={styles.title}>היסטוריית עבודות משותפות</Text>
                 <TouchableOpacity
                   onPress={onClose}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityLabel="סגור"
                 >
                   <Ionicons name="close" size={22} color={Colors.textSecondary} />
                 </TouchableOpacity>
-                <Text style={styles.title}>היסטוריית עבודות משותפות</Text>
               </View>
               <Text style={styles.summary}>
                 {sharedWorkCountLabel(history.count)}
@@ -213,15 +217,14 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     gap: 4,
   },
-  entryTop: {
+  entryBadgeRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: 8,
+    marginBottom: 2,
   },
   entryTitle: {
-    flex: 1,
     fontSize: FontSize.md,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.text,
     writingDirection: 'rtl',
     textAlign: 'right',

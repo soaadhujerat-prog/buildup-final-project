@@ -21,6 +21,7 @@ import CityPickerField from '../components/CityPickerField';
 import ProfessionSelectorModal from '../components/ProfessionSelectorModal';
 import WorksiteImagesField from '../components/WorksiteImagesField';
 import { formatRatePerUnit } from '../utils/helpers';
+import { PROFESSIONS_BY_CATEGORY } from '../data/mockData';
 import { Contractor, ProfessionCategory } from '../types';
 
 interface Props {
@@ -108,7 +109,10 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
     existingJob?.worksiteImages ?? []
   );
 
-  const [errors, setErrors] = useState<FormErrors>({});
+  // Errors are DERIVED from the current form values once the user has tried to
+  // submit — so a field's error disappears the moment its value becomes valid,
+  // and a field that is already valid never shows one.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [professionModalVisible, setProfessionModalVisible] = useState(false);
 
@@ -155,7 +159,14 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
       worksiteImages,
     }) !== initialSnapshot;
 
-  const professionLabel = profession || profCategory || '';
+  // A category with no specific profession is an INCOMPLETE selection — show it
+  // as such, never as a finished value.
+  const professionLabel = profession
+    ? profession
+    : profCategory
+    ? `${profCategory} · יש לבחור מקצוע ספציפי`
+    : '';
+  const previewProfession = profession || profCategory || '';
 
   const handleBackPress = () => {
     if (isDirty) {
@@ -170,54 +181,93 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
 
   const validate = (): FormErrors => {
     const next: FormErrors = {};
-    if (!title.trim() || title.trim().length < 4) {
-      next.title = 'כותרת המשרה חובה (לפחות 4 תווים)';
+
+    const titleT = title.trim();
+    if (!titleT) next.title = 'כותרת המשרה חובה';
+    else if (titleT.length < 4) next.title = 'כותרת קצרה מדי (לפחות 4 תווים)';
+    else if (titleT.length > 80) next.title = 'כותרת ארוכה מדי (עד 80 תווים)';
+
+    const descT = description.trim();
+    if (!descT) next.description = 'תיאור המשרה חובה';
+    else if (descT.length < 20)
+      next.description = 'התיאור קצר מדי (לפחות 20 תווים)';
+    else if (descT.length > 2000)
+      next.description = 'התיאור ארוך מדי (עד 2000 תווים)';
+
+    // תחום + מקצוע ספציפי — source of truth is (profCategory, profession).
+    if (!profCategory) {
+      next.profession = 'יש לבחור תחום מקצועי';
+    } else if (!profession.trim()) {
+      next.profession = 'יש לבחור מקצוע ספציפי בתוך התחום';
+    } else if (
+      !(PROFESSIONS_BY_CATEGORY[profCategory] ?? []).includes(profession)
+    ) {
+      next.profession = 'המקצוע שנבחר אינו תואם לתחום';
     }
-    if (!description.trim() || description.trim().length < 20) {
-      next.description = 'תיאור המשרה חובה (לפחות 20 תווים)';
-    }
-    if (!profCategory || !profession.trim()) {
-      next.profession = 'יש לבחור תחום ומקצוע';
-    }
-    if (!city.trim()) {
-      next.city = 'יש לבחור עיר';
-    }
-    if (!address.trim()) {
-      next.address = 'כתובת מדויקת חובה';
-    }
+
+    if (!city.trim()) next.city = 'יש לבחור עיר';
+
+    const addrT = address.trim();
+    if (!addrT) next.address = 'כתובת מדויקת חובה';
+    else if (addrT.length < 3) next.address = 'הכתובת שהוזנה קצרה מדי';
+
     if (!startDate.trim()) {
       next.startDate = 'תאריך התחלה חובה';
+    } else if (!parseDDMMYYYY(startDate)) {
+      next.startDate = 'תאריך ההתחלה אינו תקין';
     } else if (isPastDate(startDate)) {
       next.startDate = 'תאריך ההתחלה לא יכול להיות בעבר';
     }
-    if (!duration.trim()) {
-      next.duration = 'משך העבודה המשוער חובה';
-    }
+
+    const durT = duration.trim();
+    if (!durT) next.duration = 'משך העבודה המשוער חובה';
+    else if (durT.length < 2) next.duration = 'יש לפרט את משך העבודה המשוער';
+    else if (durT.length > 60) next.duration = 'הערך שהוזן ארוך מדי';
+
     const hourlyTrim = hourlyRate.trim();
     const dailyTrim = dailyRate.trim();
     if (!hourlyTrim && !dailyTrim) {
       next.payment = 'יש להזין לפחות תעריף שעתי או תעריף יומי';
-    } else {
-      if (hourlyTrim && (isNaN(Number(hourlyTrim)) || Number(hourlyTrim) <= 0)) {
-        next.payment = 'תעריף שעתי חייב להיות מספר גדול מ-0';
-      }
-      if (dailyTrim && (isNaN(Number(dailyTrim)) || Number(dailyTrim) <= 0)) {
-        next.payment = 'תעריף יומי חייב להיות מספר גדול מ-0';
-      }
+    } else if (
+      hourlyTrim &&
+      (isNaN(Number(hourlyTrim)) || Number(hourlyTrim) <= 0)
+    ) {
+      next.payment = 'תעריף שעתי חייב להיות מספר גדול מ-0';
+    } else if (hourlyTrim && Number(hourlyTrim) > 10000) {
+      next.payment = 'התעריף השעתי גבוה מהצפוי — בדוק/י את הערך';
+    } else if (
+      dailyTrim &&
+      (isNaN(Number(dailyTrim)) || Number(dailyTrim) <= 0)
+    ) {
+      next.payment = 'תעריף יומי חייב להיות מספר גדול מ-0';
+    } else if (dailyTrim && Number(dailyTrim) > 100000) {
+      next.payment = 'התעריף היומי גבוה מהצפוי — בדוק/י את הערך';
     }
-    if (!workersNeeded.trim() || isNaN(Number(workersNeeded)) || Number(workersNeeded) < 1) {
-      next.workersNeeded = 'מספר העובדים הדרוש חייב להיות 1 ומעלה';
+
+    const wn = Number(workersNeeded);
+    if (
+      !workersNeeded.trim() ||
+      isNaN(wn) ||
+      !Number.isInteger(wn) ||
+      wn < 1
+    ) {
+      next.workersNeeded =
+        'מספר העובדים הדרוש חייב להיות מספר שלם, 1 ומעלה';
+    } else if (wn > 100) {
+      next.workersNeeded = 'מספר העובדים הדרוש חייב להיות עד 100';
     }
     return next;
   };
+
+  const errors: FormErrors = submitAttempted ? validate() : {};
 
   const handleSubmit = () => {
     if (!me) {
       Alert.alert('שגיאה', 'לא ניתן לפרסם משרה — אין משתמש מחובר');
       return;
     }
+    setSubmitAttempted(true);
     const foundErrors = validate();
-    setErrors(foundErrors);
     if (Object.keys(foundErrors).length > 0) {
       scrollRef.current?.scrollTo({ y: 0, animated: true });
       return;
@@ -349,7 +399,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
             >
               <Ionicons name="hammer-outline" size={20} color={Colors.textSecondary} />
               <Text
-                style={[styles.selectorValue, !professionLabel && styles.placeholder]}
+                style={[styles.selectorValue, !profession && styles.placeholder]}
                 numberOfLines={1}
               >
                 {professionLabel || 'בחר תחום ומקצוע ספציפי'}
@@ -479,7 +529,9 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
             {title.trim() || 'כותרת המשרה'}
           </Text>
           <View style={styles.previewRow}>
-            {!!professionLabel && <PreviewChip icon="briefcase-outline" text={professionLabel} />}
+            {!!previewProfession && (
+              <PreviewChip icon="briefcase-outline" text={previewProfession} />
+            )}
             {!!city && <PreviewChip icon="location-outline" text={city} />}
             {!!startDate && <PreviewChip icon="calendar-outline" text={startDate} />}
             {urgent && <PreviewChip icon="flash" text="דחוף" tone="danger" />}
@@ -530,6 +582,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
         onClose={() => setProfessionModalVisible(false)}
         professionCategory={profCategory}
         profession={profession}
+        allowAllInCategory={false}
         onChange={(nextCategory, nextProfession) => {
           setProfCategory(nextCategory as ProfessionCategory | '');
           setProfession(nextProfession);

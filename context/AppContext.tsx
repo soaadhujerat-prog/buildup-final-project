@@ -212,6 +212,17 @@ interface AppState {
     jobId: string,
     patch: Partial<Omit<JobPost, 'id' | 'contractorId' | 'postedAt'>>
   ) => void;
+  /** HARD delete — permanently removes the job from state. Allowed ONLY when
+   *  the job never generated any activity: no applications, no invitations and
+   *  no assignments (of any status) reference it. Guarded here too, so a call
+   *  for a job that has any activity is a silent no-op — the UI must offer
+   *  "close registration" instead. Never touches applications / invitations /
+   *  assignments (a clean job has none by definition). */
+  deleteJob: (jobId: string) => void;
+  /** True when `deleteJob` would actually delete this job (i.e. it has zero
+   *  applications / invitations / assignments). The UI uses this to decide
+   *  between "מחק משרה" and "סגור משרה להרשמה". */
+  canDeleteJob: (jobId: string) => boolean;
 
   // Applications (worker -> job)
   applyToJob: (jobId: string, workerId: string, message?: string) => Application;
@@ -1205,6 +1216,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updateJob = useCallback<AppState['updateJob']>((jobId, patch) => {
     setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, ...patch } : j)));
   }, []);
+
+  // A job is "clean" (hard-deletable) only when nothing points at it. Any
+  // application / invitation / assignment — of ANY status, including
+  // withdrawn / declined / cancelled — makes it part of someone's history and
+  // it must be kept.
+  const canDeleteJob = useCallback<AppState['canDeleteJob']>(
+    (jobId) =>
+      !applications.some((a) => a.jobId === jobId) &&
+      !invitations.some((i) => i.jobId === jobId) &&
+      !assignments.some((a) => a.jobId === jobId),
+    [applications, invitations, assignments]
+  );
+
+  const deleteJob = useCallback<AppState['deleteJob']>(
+    (jobId) => {
+      if (!canDeleteJob(jobId)) return; // has activity — keep it
+      setJobs((prev) => prev.filter((j) => j.id !== jobId));
+    },
+    [canDeleteJob]
+  );
 
   // The contractor's manual open/close switch. Closing stamps
   // registrationClosureReason 'manual' so the capacity reconciler will NOT
@@ -2347,6 +2378,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       postJob,
       updateJob,
+      deleteJob,
+      canDeleteJob,
       setJobAcceptingApplications,
       applyToJob,
       respondToApplication,
@@ -2433,6 +2466,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       unblockUser,
       postJob,
       updateJob,
+      deleteJob,
+      canDeleteJob,
       setJobAcceptingApplications,
       applyToJob,
       respondToApplication,

@@ -33,7 +33,13 @@ import {
   WorkerRegistrationData,
 } from '../types';
 import CertificationsField from '../components/CertificationsField';
-import { isValidIsraeliPhone, normalizePhone, dmyToIso } from '../utils/helpers';
+import {
+  isValidIsraeliPhone,
+  normalizePhone,
+  dmyToIso,
+  isValidIsraeliIdFormat,
+  isValidEmail,
+} from '../utils/helpers';
 
 type Role = 'worker' | 'contractor';
 
@@ -90,7 +96,10 @@ const SignUpScreen: React.FC<Props> = ({
   const [licenseValidUntil, setLicenseValidUntil] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]);
+  // Per-field errors, DERIVED from the current values after the first submit
+  // attempt — an error clears as soon as its field becomes valid, and a valid
+  // field never shows one. Keys match the field identifiers below.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const profCategories = useMemo(
     () => PROFESSION_CATEGORIES.filter((c) => c !== 'כל המקצועות'),
@@ -119,55 +128,93 @@ const SignUpScreen: React.FC<Props> = ({
     );
   };
 
-  const validate = (): string[] => {
-    const errs: string[] = [];
-    if (!fullName.trim()) errs.push('שם מלא חובה');
-    if (!idNumber.trim() || idNumber.trim().length < 5)
-      errs.push('תעודת זהות חובה (לפחות 5 ספרות)');
-    if (!idDocument) errs.push('יש לצרף צילום או קובץ של תעודת זהות');
-    if (!phone.trim()) errs.push('מספר טלפון חובה');
-    else if (!isValidIsraeliPhone(phone)) errs.push('מספר טלפון לא תקין');
-    if (!email.trim() || !email.includes('@')) errs.push('כתובת אימייל לא תקינה');
-    if (!city.trim()) errs.push('יש לבחור עיר');
-    if (password.length < 4) errs.push('סיסמה חייבת לפחות 4 תווים');
-    if (password !== confirmPwd) errs.push('הסיסמאות אינן תואמות');
+  const validate = (): Record<string, string> => {
+    const e: Record<string, string> = {};
+
+    const nameT = fullName.trim();
+    if (!nameT) e.fullName = 'שם מלא חובה';
+    else if (nameT.length < 2) e.fullName = 'השם קצר מדי';
+    else if (/^\d+$/.test(nameT)) e.fullName = 'שם לא יכול להיות מספרים בלבד';
+
+    if (!idNumber.trim()) e.idNumber = 'תעודת זהות חובה';
+    else if (!isValidIsraeliIdFormat(idNumber))
+      e.idNumber = 'תעודת זהות חייבת להכיל בדיוק 9 ספרות';
+
+    if (!idDocument) e.idDocument = 'יש לצרף צילום או קובץ של תעודת זהות';
+
+    if (!phone.trim()) e.phone = 'מספר טלפון חובה';
+    else if (!isValidIsraeliPhone(phone))
+      e.phone = 'מספר טלפון ישראלי לא תקין';
+
+    if (!email.trim()) e.email = 'כתובת אימייל חובה';
+    else if (!isValidEmail(email)) e.email = 'כתובת אימייל לא תקינה';
+
+    if (!city.trim()) e.city = 'יש לבחור עיר';
+
+    if (password.length < 4) e.password = 'סיסמה חייבת לפחות 4 תווים';
+    if (!confirmPwd) e.confirmPwd = 'יש לאמת את הסיסמה';
+    else if (password !== confirmPwd) e.confirmPwd = 'הסיסמאות אינן תואמות';
 
     if (role === 'worker') {
-      if (professions.length === 0) errs.push('יש לבחור לפחות מקצוע אחד');
-      if (!experienceYears || isNaN(Number(experienceYears)))
-        errs.push('שנות ניסיון חייב להיות מספר');
-      if (!hourlyRate || isNaN(Number(hourlyRate)))
-        errs.push('תעריף שעתי חייב להיות מספר');
-      if (!dailyRate || isNaN(Number(dailyRate)))
-        errs.push('תעריף יומי חייב להיות מספר');
+      if (professions.length === 0)
+        e.professions = 'יש לבחור לפחות מקצוע אחד';
+
+      const exp = Number(experienceYears);
+      if (!experienceYears.trim())
+        e.experienceYears = 'שנות ניסיון חובה';
+      else if (isNaN(exp) || !Number.isInteger(exp) || exp < 0)
+        e.experienceYears = 'שנות ניסיון חייב להיות מספר שלם';
+      else if (exp > 70) e.experienceYears = 'הערך שהוזן גבוה מדי';
+
+      const hr = Number(hourlyRate);
+      if (!hourlyRate.trim()) e.hourlyRate = 'תעריף שעתי חובה';
+      else if (isNaN(hr) || hr <= 0)
+        e.hourlyRate = 'תעריף שעתי חייב להיות מספר גדול מ-0';
+
+      const dr = Number(dailyRate);
+      if (!dailyRate.trim()) e.dailyRate = 'תעריף יומי חובה';
+      else if (isNaN(dr) || dr <= 0)
+        e.dailyRate = 'תעריף יומי חייב להיות מספר גדול מ-0';
+
       if (preferredAreas.length === 0)
-        errs.push('יש לבחור לפחות אזור עבודה אחד');
+        e.preferredAreas = 'יש לבחור לפחות אזור עבודה אחד';
     } else {
-      if (!companyName.trim()) errs.push('שם החברה חובה');
+      const companyT = companyName.trim();
+      if (!companyT) e.companyName = 'שם החברה חובה';
+      else if (companyT.length < 2) e.companyName = 'שם החברה קצר מדי';
+
       if (!contractorRegNumber.trim())
-        errs.push('מספר רישום קבלנים חובה');
-      if (!licenseDetails.trim()) errs.push('פרטי רישיון/סיווג חובה');
-      if (!licenseDocument) errs.push('יש לצרף רישיון קבלן / תעודת קבלן');
+        e.contractorRegNumber = 'מספר רישום קבלנים חובה';
+      else if (!/^\d{3,10}$/.test(contractorRegNumber.trim()))
+        e.contractorRegNumber = 'מספר רישום קבלנים חייב להכיל 3–10 ספרות';
+
+      const licT = licenseDetails.trim();
+      if (!licT) e.licenseDetails = 'פרטי רישיון / סיווג חובה';
+      else if (licT.length < 3) e.licenseDetails = 'יש לפרט את הסיווג';
+
+      if (!licenseDocument)
+        e.licenseDocument = 'יש לצרף רישיון קבלן / תעודת קבלן';
+
       if (!licenseValidUntil.trim())
-        errs.push('יש להזין את תאריך התוקף של הרישיון');
+        e.licenseValidUntil = 'יש להזין את תאריך התוקף של הרישיון';
       else if (!dmyToIso(licenseValidUntil))
-        errs.push('תאריך תוקף הרישיון אינו תקין');
+        e.licenseValidUntil = 'תאריך תוקף הרישיון אינו תקין';
+
       if (areasOfOperation.length === 0)
-        errs.push('יש לבחור לפחות אזור פעילות אחד');
+        e.areasOfOperation = 'יש לבחור לפחות אזור פעילות אחד';
       if (projectTypes.length === 0)
-        errs.push('יש לבחור לפחות סוג פרויקט אחד');
+        e.projectTypes = 'יש לבחור לפחות סוג פרויקט אחד';
     }
-    return errs;
+    return e;
   };
 
+  const errors: Record<string, string> = submitAttempted ? validate() : {};
+
   const handleSubmit = () => {
+    setSubmitAttempted(true);
     const errs = validate();
-    if (errs.length > 0) {
-      setErrors(errs);
-      return;
-    }
+    if (Object.keys(errs).length > 0) return;
     if (!idDocument) return; // validate() already guarantees this — narrows the type below
-    setErrors([]);
     setSubmitting(true);
 
     setTimeout(() => {
@@ -263,16 +310,23 @@ const SignUpScreen: React.FC<Props> = ({
             onChange={setFullName}
             placeholder="לדוגמה: דניאל כהן"
             icon="person-outline"
+            error={errors.fullName}
           />
           <Field
             label="תעודת זהות"
             value={idNumber}
-            onChange={setIdNumber}
+            onChange={(v) => setIdNumber(v.replace(/\D/g, '').slice(0, 9))}
             placeholder="9 ספרות"
             keyboardType="numeric"
             icon="card-outline"
+            error={errors.idNumber}
           />
-          <DocumentUploadField value={idDocument} onChange={setIdDocument} />
+          <View style={styles.inputGroup}>
+            <DocumentUploadField value={idDocument} onChange={setIdDocument} />
+            {!!errors.idDocument && (
+              <Text style={styles.fieldErrorText}>{errors.idDocument}</Text>
+            )}
+          </View>
           <Field
             label="טלפון"
             value={phone}
@@ -280,6 +334,7 @@ const SignUpScreen: React.FC<Props> = ({
             placeholder="050-1234567"
             keyboardType="phone-pad"
             icon="call-outline"
+            error={errors.phone}
           />
           <Field
             label="אימייל"
@@ -288,8 +343,14 @@ const SignUpScreen: React.FC<Props> = ({
             placeholder="name@example.com"
             keyboardType="email-address"
             icon="mail-outline"
+            error={errors.email}
           />
-          <CityPickerField label="עיר מגורים" value={city} onChange={setCity} />
+          <CityPickerField
+            label="עיר מגורים"
+            value={city}
+            onChange={setCity}
+            error={errors.city}
+          />
         </Section>
 
         {/* Role-specific */}
@@ -349,14 +410,20 @@ const SignUpScreen: React.FC<Props> = ({
                     );
                   })}
                 </View>
+                {!!errors.professions && (
+                  <Text style={styles.chipGroupError}>{errors.professions}</Text>
+                )}
               </View>
               <Field
                 label="שנות ניסיון"
                 value={experienceYears}
-                onChange={setExperienceYears}
+                onChange={(v) =>
+                  setExperienceYears(v.replace(/\D/g, '').slice(0, 2))
+                }
                 placeholder="למשל 5"
                 keyboardType="numeric"
                 icon="time-outline"
+                error={errors.experienceYears}
               />
               <Field
                 label="מיומנויות (מופרד בפסיקים)"
@@ -375,18 +442,20 @@ const SignUpScreen: React.FC<Props> = ({
               <Field
                 label="תעריף שעתי (₪)"
                 value={hourlyRate}
-                onChange={setHourlyRate}
+                onChange={(v) => setHourlyRate(v.replace(/\D/g, '').slice(0, 5))}
                 placeholder="120"
                 keyboardType="numeric"
                 icon="cash-outline"
+                error={errors.hourlyRate}
               />
               <Field
                 label="תעריף יומי (₪)"
                 value={dailyRate}
-                onChange={setDailyRate}
+                onChange={(v) => setDailyRate(v.replace(/\D/g, '').slice(0, 6))}
                 placeholder="800"
                 keyboardType="numeric"
                 icon="cash-outline"
+                error={errors.dailyRate}
               />
 
               <View style={styles.switchRow}>
@@ -424,6 +493,11 @@ const SignUpScreen: React.FC<Props> = ({
                   );
                 })}
               </View>
+              {!!errors.preferredAreas && (
+                <Text style={styles.chipGroupError}>
+                  {errors.preferredAreas}
+                </Text>
+              )}
             </Section>
           </>
         ) : (
@@ -434,14 +508,18 @@ const SignUpScreen: React.FC<Props> = ({
               onChange={setCompanyName}
               placeholder="לדוגמה: בנייה פרו בע״מ"
               icon="business-outline"
+              error={errors.companyName}
             />
             <Field
               label="מספר רישום קבלנים"
               value={contractorRegNumber}
-              onChange={setContractorRegNumber}
+              onChange={(v) =>
+                setContractorRegNumber(v.replace(/\D/g, '').slice(0, 10))
+              }
               placeholder="למשל 101234"
               keyboardType="numeric"
               icon="document-text-outline"
+              error={errors.contractorRegNumber}
             />
             <Field
               label="פרטי רישיון / סיווג"
@@ -449,20 +527,29 @@ const SignUpScreen: React.FC<Props> = ({
               onChange={setLicenseDetails}
               placeholder="ק100 – בניה 2 – עד 5 קומות"
               icon="shield-checkmark-outline"
+              error={errors.licenseDetails}
             />
-            <DocumentUploadField
-              value={licenseDocument}
-              onChange={setLicenseDocument}
-              label="רישיון קבלן / תעודת קבלן"
-              documentType="contractor_license"
-              sheetTitle="הוספת רישיון קבלן"
-              emptyHint="צילום, גלריה או קובץ PDF של רישיון הקבלן"
-            />
+            <View style={styles.inputGroup}>
+              <DocumentUploadField
+                value={licenseDocument}
+                onChange={setLicenseDocument}
+                label="רישיון קבלן / תעודת קבלן"
+                documentType="contractor_license"
+                sheetTitle="הוספת רישיון קבלן"
+                emptyHint="צילום, גלריה או קובץ PDF של רישיון הקבלן"
+              />
+              {!!errors.licenseDocument && (
+                <Text style={styles.fieldErrorText}>
+                  {errors.licenseDocument}
+                </Text>
+              )}
+            </View>
             <DatePickerField
               label="הרישיון בתוקף עד"
               value={licenseValidUntil}
               onChange={setLicenseValidUntil}
               minimumDate={new Date()}
+              error={errors.licenseValidUntil}
             />
             <View style={styles.inputGroup}>
               <View style={styles.labelRow}>
@@ -490,6 +577,11 @@ const SignUpScreen: React.FC<Props> = ({
                   );
                 })}
               </View>
+              {!!errors.areasOfOperation && (
+                <Text style={styles.chipGroupError}>
+                  {errors.areasOfOperation}
+                </Text>
+              )}
             </View>
 
             <Text style={styles.label}>סוגי פרויקטים</Text>
@@ -512,6 +604,9 @@ const SignUpScreen: React.FC<Props> = ({
                 );
               })}
             </View>
+            {!!errors.projectTypes && (
+              <Text style={styles.chipGroupError}>{errors.projectTypes}</Text>
+            )}
           </Section>
         )}
 
@@ -541,6 +636,7 @@ const SignUpScreen: React.FC<Props> = ({
             placeholder="לפחות 4 תווים"
             secure
             icon="lock-closed-outline"
+            error={errors.password}
           />
           <Field
             label="אימות סיסמה"
@@ -549,21 +645,18 @@ const SignUpScreen: React.FC<Props> = ({
             placeholder="הקלד שוב"
             secure
             icon="lock-closed-outline"
+            error={errors.confirmPwd}
           />
         </Section>
 
-        {errors.length > 0 && (
+        {Object.keys(errors).length > 0 && (
           <View style={styles.errorBox}>
-            {errors.map((e, i) => (
-              <View key={i} style={styles.errorRow}>
-                <Ionicons
-                  name="alert-circle"
-                  size={16}
-                  color={Colors.danger}
-                />
-                <Text style={styles.errorText}>{e}</Text>
-              </View>
-            ))}
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle" size={16} color={Colors.danger} />
+              <Text style={styles.errorText}>
+                יש שדות שדורשים תיקון — ראה/י את ההודעות המסומנות למעלה.
+              </Text>
+            </View>
           </View>
         )}
 
@@ -611,6 +704,7 @@ interface FieldProps {
   keyboardType?: 'default' | 'numeric' | 'email-address' | 'phone-pad';
   secure?: boolean;
   icon?: keyof typeof Ionicons.glyphMap;
+  error?: string;
 }
 
 const Field: React.FC<FieldProps> = ({
@@ -621,12 +715,13 @@ const Field: React.FC<FieldProps> = ({
   keyboardType = 'default',
   secure = false,
   icon,
+  error,
 }) => (
   <View style={styles.inputGroup}>
     <View style={styles.labelRow}>
       <Text style={styles.label}>{label}</Text>
     </View>
-    <View style={styles.inputWrapper}>
+    <View style={[styles.inputWrapper, !!error && styles.inputWrapperError]}>
       {icon && <Ionicons name={icon} size={18} color={Colors.textMuted} />}
       <TextInput
         style={styles.input}
@@ -639,6 +734,7 @@ const Field: React.FC<FieldProps> = ({
         autoCapitalize="none"
       />
     </View>
+    {!!error && <Text style={styles.fieldErrorText}>{error}</Text>}
   </View>
 );
 
@@ -700,6 +796,23 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     paddingHorizontal: Spacing.md,
     gap: Spacing.sm,
+  },
+  inputWrapperError: { borderColor: Colors.danger },
+  fieldErrorText: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    fontWeight: '600',
+    writingDirection: 'rtl',
+    textAlign: 'right',
+    marginTop: 2,
+  },
+  chipGroupError: {
+    fontSize: FontSize.xs,
+    color: Colors.danger,
+    fontWeight: '600',
+    writingDirection: 'rtl',
+    textAlign: 'right',
+    marginTop: 4,
   },
   textarea: { alignItems: 'flex-start' },
   input: {
