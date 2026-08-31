@@ -357,10 +357,16 @@ export interface JobPost {
    *  posting — undefined means "never edited". postedAt itself never
    *  changes after creation. */
   updatedAt?: string;
-  /** Local file URIs for now (picked via expo-image-picker) — a future
-   *  Supabase Storage migration swaps these for storage paths/URLs without
-   *  changing how any screen reads this field. Max 5, enforced in the UI. */
+  /** Display URIs for the job's worksite photos. Mock path: local
+   *  `file://` URIs. Backend path (Phase 4B): short-lived SIGNED URLs from the
+   *  private `worksite-images` bucket (resolved by jobsService.getJobById). In
+   *  an in-progress PostJobScreen draft it is a mix of the two. Max 5. */
   worksiteImages?: string[];
+  /** Phase 4B, backend only: the storage object PATH for each entry of
+   *  `worksiteImages`, in the same order — so an edit can round-trip which
+   *  existing images were kept. `undefined` on the mock path and in list
+   *  reads (images are resolved only in getJobById). */
+  worksiteImagePaths?: string[];
   /** When false, workers cannot submit new applications.
    *  Controlled by the contractor from JobDetails. Defaults to true on creation.
    *  Also flipped automatically by AppContext when staffing capacity is
@@ -375,6 +381,11 @@ export interface JobPost {
    *                  later removed and capacity frees up.
    *  Undefined whenever the job is open. */
   registrationClosureReason?: 'manual' | 'capacity';
+  /** Phase 4: the job's current recruitment cycle (jobs.recruitment_cycle).
+   *  Read-only, informational — a rejected/withdrawn worker may re-apply only
+   *  after the cycle advances (enforced server-side; the frontend never sets
+   *  this). Present only on the real backend path; undefined on the mock path. */
+  recruitmentCycle?: number;
 }
 
 /** Legacy alias for screens that still import { Job }. */

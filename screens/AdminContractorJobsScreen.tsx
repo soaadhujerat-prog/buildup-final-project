@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,8 +47,14 @@ const AdminContractorJobsScreen: React.FC<Props> = ({
   onOpenUser,
 }) => {
   const insets = useSafeAreaInsets();
-  const { getUserById, jobs, assignments, workers, getStaffingProgress } =
-    useApp();
+  const {
+    getUserById,
+    jobs,
+    jobsLoading,
+    assignments,
+    workers,
+    getStaffingProgress,
+  } = useApp();
 
   const contractor = getUserById(contractorId) as Contractor | undefined;
 
@@ -84,7 +91,12 @@ const AdminContractorJobsScreen: React.FC<Props> = ({
         </Text>
       </View>
 
-      {myJobs.length === 0 ? (
+      {myJobs.length === 0 && jobsLoading && jobs.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.emptySub}>טוען משרות…</Text>
+        </View>
+      ) : myJobs.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="briefcase-outline" size={56} color={Colors.textMuted} />
           <Text style={styles.emptyTitle}>אין משרות</Text>

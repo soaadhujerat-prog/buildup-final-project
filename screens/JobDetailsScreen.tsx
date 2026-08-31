@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,15 @@ import {
   Image,
   Modal,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import { isBackendEnabled } from '../config/env';
 import { useApp } from '../context/AppContext';
+import * as jobsService from '../services/jobsService';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
@@ -39,7 +42,7 @@ import {
   INVITATION_STATUS_LABEL,
   INVITATION_STATUS_TONE,
 } from '../utils/helpers';
-import { Application, Contractor, Invitation, Worker } from '../types';
+import { Application, Contractor, Invitation, JobPost, Worker } from '../types';
 import { contractorAreas, jobProfessions } from '../utils/normalize';
 
 interface Props {
@@ -59,7 +62,11 @@ const formatDateHe = (dateLike: string): string => {
   return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
 
-const JobDetailsScreen: React.FC<Props> = ({
+// The full detail view. Receives an already-resolved `job` so every hook below
+// runs unconditionally on every render (no hook-count change between a
+// "loading" and a "loaded" render — see the JobDetailsScreen gate at the end).
+const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
+  job,
   jobId,
   onBack,
   onOpenWorkerProfile,
@@ -72,7 +79,6 @@ const JobDetailsScreen: React.FC<Props> = ({
   const insets = useSafeAreaInsets();
   const {
     currentUser,
-    getJobById,
     getUserById,
     getApplicationsForJob,
     getStaffingProgress,
@@ -91,7 +97,6 @@ const JobDetailsScreen: React.FC<Props> = ({
     toggleFavoriteContractor,
   } = useApp();
 
-  const job = getJobById(jobId);
   const [applying, setApplying] = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -100,17 +105,6 @@ const JobDetailsScreen: React.FC<Props> = ({
     { mode: 'accept' | 'reject'; app: Application } | null
   >(null);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
-
-  if (!job) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.notFound}>המשרה לא נמצאה</Text>
-        <TouchableOpacity onPress={onBack} style={styles.backLink}>
-          <Text style={styles.backLinkText}>חזרה</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
 
   const contractor = getUserById(job.contractorId) as Contractor | undefined;
   const candidates = getApplicationsForJob(jobId);
@@ -1363,10 +1357,95 @@ const FieldRow: React.FC<{ label: string; value: string; ltr?: boolean }> = ({
   </View>
 );
 
+// ---------------------------------------------------------------------------
+// Gate: resolve the job first, then render the full detail view.
+//
+// Mock path: `getJobById` (a synchronous AppContext selector) is the only
+// source — behaviour is unchanged.
+// Backend path (Phase 4A): if the id is not in the currently loaded `jobs`
+// set (deep link / notification / route param to a job outside the loaded
+// pool), fall back to jobsService.getJobById() with real loading / not-found
+// / error states. No UI redesign — the not-found view is the original one.
+// ---------------------------------------------------------------------------
+const JobDetailsScreen: React.FC<Props> = (props) => {
+  const insets = useSafeAreaInsets();
+  const { getJobById } = useApp();
+  const fromContext = getJobById(props.jobId);
+
+  const [fetched, setFetched] = useState<JobPost | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'loading' | 'error' | 'notfound'>(
+    'idle'
+  );
+
+  useEffect(() => {
+    if (fromContext) {
+      setPhase('idle');
+      return;
+    }
+    if (!isBackendEnabled()) {
+      setPhase('notfound');
+      return;
+    }
+    let alive = true;
+    setPhase('loading');
+    jobsService
+      .getJobById(props.jobId)
+      .then((j) => {
+        if (!alive) return;
+        if (j) {
+          setFetched(j);
+          setPhase('idle');
+        } else {
+          setPhase('notfound');
+        }
+      })
+      .catch(() => {
+        if (alive) setPhase('error');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [props.jobId, fromContext]);
+
+  const job = fromContext ?? fetched ?? undefined;
+  if (job) return <JobDetailsContent {...props} job={job} />;
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+      {phase === 'loading' ? (
+        <View style={styles.gateCenter}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.gateText}>טוען את פרטי המשרה…</Text>
+        </View>
+      ) : phase === 'error' ? (
+        <>
+          <Text style={styles.notFound}>לא ניתן לטעון את המשרה כרגע</Text>
+          <TouchableOpacity onPress={props.onBack} style={styles.backLink}>
+            <Text style={styles.backLinkText}>חזרה</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <Text style={styles.notFound}>המשרה לא נמצאה</Text>
+          <TouchableOpacity onPress={props.onBack} style={styles.backLink}>
+            <Text style={styles.backLinkText}>חזרה</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+};
+
 // ---------- styles ----------
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  gateCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  gateText: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+  },
 
   headerBar: {
     position: 'relative',

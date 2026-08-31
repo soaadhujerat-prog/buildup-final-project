@@ -90,6 +90,7 @@ import {
 import * as notificationService from '../services/notificationService';
 import * as adminUserService from '../services/adminUserService';
 import * as licenseService from '../services/licenseService';
+import * as jobsService from '../services/jobsService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -168,6 +169,15 @@ interface AppState {
   jobSearchState: JobSearchState;
   updateJobSearchState: (patch: Partial<JobSearchState>) => void;
 
+  /** Phase 4A: true while a backend job fetch is in flight. Lets screens show
+   *  a loading state instead of their "no jobs" empty state during the initial
+   *  load. Always `false` on the mock path. */
+  jobsLoading: boolean;
+  /** Phase 4A: re-pull `jobs` from Supabase for the current user (worker →
+   *  open pool, contractor → own, admin → all). No-op on the mock path. 4B/4C
+   *  call this after a job mutation; in 4A it runs from the load effect. */
+  refreshJobs: () => Promise<void>;
+
   // Auth
   /** True only while the backend session is being restored on cold start
    *  (`EXPO_PUBLIC_USE_BACKEND=true`). The navigator holds on the splash until
@@ -239,7 +249,7 @@ interface AppState {
     job: Omit<JobPost, 'id' | 'postedAt' | 'status' | 'acceptingApplications'> & {
       acceptingApplications?: boolean;
     }
-  ) => JobPost;
+  ) => Promise<JobPost>;
   setJobAcceptingApplications: (jobId: string, accepting: boolean) => void;
   /** Edits an existing job in place — same id, same contractorId, same
    *  postedAt (none of those three are patchable, by type). A plain merge —
@@ -251,7 +261,7 @@ interface AppState {
   updateJob: (
     jobId: string,
     patch: Partial<Omit<JobPost, 'id' | 'contractorId' | 'postedAt'>>
-  ) => void;
+  ) => Promise<void>;
   /** HARD delete — permanently removes the job from state. Allowed ONLY when
    *  the job never generated any activity: no applications, no invitations and
    *  no assignments (of any status) reference it. Guarded here too, so a call
@@ -623,7 +633,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     MOCK_REGISTRATIONS
   );
 
-  const [jobs, setJobs] = useState<JobPost[]>(MOCK_JOBS);
+  // Phase 4A: on the real backend path jobs are loaded from Supabase (see
+  // refreshJobs / the load effect below), so they start empty; the mock path
+  // is unchanged (MOCK_JOBS).
+  const [jobs, setJobs] = useState<JobPost[]>(
+    isBackendEnabled() ? [] : MOCK_JOBS
+  );
+  // True while a backend job fetch is in flight — lets screens show a loading
+  // state instead of their "no jobs" empty state during the initial load.
+  // Always false on the mock path.
+  const [jobsLoading, setJobsLoading] = useState<boolean>(isBackendEnabled());
   const [applications, setApplications] = useState<Application[]>(MOCK_APPLICATIONS);
   const [invitations, setInvitations] = useState<Invitation[]>(MOCK_INVITATIONS);
 
@@ -658,7 +677,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   //   • closed manually -> never touched here.
   // This is the ONE place that keeps job.acceptingApplications honest, so
   // every screen can keep trusting isOpenForApplications(job) alone.
+  //
+  // BACKEND (Phase 4A): DISABLED. On the real path `acceptingApplications` is
+  // a read-through projection of job_registration_state.open_for_applications
+  // (the server-side source of truth) — this client-side reconciler must never
+  // run, or it would become a second, conflicting source of truth.
   useEffect(() => {
+    if (isBackendEnabled()) return;
     setJobs((prevJobs) => {
       let changed = false;
       const next = prevJobs.map((j) => {
@@ -797,7 +822,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // (reason 'capacity_full') and notify each worker that the seat is gone —
   // NOT phrased as if the contractor cancelled them personally. Guarded by
   // `status === 'pending'` so it only fires once per invitation.
+  //
+  // BACKEND (Phase 4A): DISABLED — this is the second client-side capacity
+  // reconciler. Invitations are still mock in Phase 4; the server-side
+  // assignments_reconcile trigger owns this behaviour on the real path.
   useEffect(() => {
+    if (isBackendEnabled()) return;
     const toClose = invitations.filter((inv) => {
       if (inv.status !== 'pending') return false;
       const job = jobs.find((j) => j.id === inv.jobId);
@@ -1147,6 +1177,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
     void refreshLicenseRequests();
   }, [currentUser?.id, currentUser?.role, currentUser?.status, refreshLicenseRequests]);
+
+  // ---------------------------------------------------------------------
+  // Jobs — real backend READ layer (Phase 4A)
+  // ---------------------------------------------------------------------
+  // Loads `jobs` from Supabase once the authenticated user is known:
+  //   worker     -> jobsService.listOpenJobs()          (open + visible pool)
+  //   contractor -> jobsService.listContractorJobs(id)  (all own jobs)
+  //   admin      -> jobsService.listContractorJobs()    (every job, via RLS)
+  // job_registration_state is the sole source of truth for acceptingApplications
+  // (see jobsService). No-op on the mock path — `jobs` stays MOCK_JOBS. Writes
+  // (postJob / updateJob / deleteJob / setJobAcceptingApplications) are NOT
+  // routed to the backend yet — that is Phase 4B/4C.
+  const refreshJobs = useCallback(async () => {
+    if (!isBackendEnabled() || !currentUser) return;
+    setJobsLoading(true);
+    try {
+      const list =
+        currentUser.role === 'worker'
+          ? await jobsService.listOpenJobs()
+          : currentUser.role === 'contractor'
+          ? await jobsService.listContractorJobs(currentUser.id)
+          : await jobsService.listContractorJobs();
+      setJobs(list);
+    } catch {
+      // No silent mock fallback — keep whatever is on screen; screens show a
+      // real empty/error state.
+    } finally {
+      setJobsLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setJobs([]);
+      setJobsLoading(false);
+      return;
+    }
+    void refreshJobs();
+  }, [currentUser?.id, currentUser?.role, refreshJobs]);
 
   // ---------------------------------------------------------------------
   // Admin actions
@@ -1509,27 +1580,77 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Jobs
   // ---------------------------------------------------------------------
 
-  const postJob = useCallback<AppState['postJob']>((j) => {
-    const job: JobPost = {
-      ...j,
-      id: newId('j'),
-      status: 'open',
-      postedAt: nowIso(),
-      acceptingApplications:
-        (j as Partial<JobPost>).acceptingApplications ?? true,
-    };
-    setJobs((prev) => [job, ...prev]);
-    return job;
-  }, []);
+  const postJob = useCallback<AppState['postJob']>(
+    async (j) => {
+      if (isBackendEnabled()) {
+        // Phase 4B: create_job RPC (contractor_id forced to auth.uid()) +
+        // worksite-image upload, then rebuild from the authoritative read path.
+        const { worksiteImages, ...rest } = j as typeof j & {
+          worksiteImages?: string[];
+        };
+        const jobId = await jobsService.createJobBackend(
+          rest as Parameters<typeof jobsService.createJobBackend>[0],
+          worksiteImages ?? []
+        );
+        await refreshJobs();
+        const fresh = await jobsService.getJobById(jobId);
+        if (fresh) {
+          setJobs((prev) =>
+            prev.some((p) => p.id === fresh.id) ? prev : [fresh, ...prev]
+          );
+          return fresh;
+        }
+        return {
+          ...(j as Omit<JobPost, 'id' | 'postedAt' | 'status' | 'acceptingApplications'>),
+          id: jobId,
+          status: 'open',
+          postedAt: nowIso(),
+          acceptingApplications: true,
+        } as JobPost;
+      }
+
+      const job: JobPost = {
+        ...j,
+        id: newId('j'),
+        status: 'open',
+        postedAt: nowIso(),
+        acceptingApplications:
+          (j as Partial<JobPost>).acceptingApplications ?? true,
+      };
+      setJobs((prev) => [job, ...prev]);
+      return job;
+    },
+    [refreshJobs]
+  );
 
   // Plain merge — does NOT stamp updatedAt itself. "עודכן לאחרונה" must only
   // reflect a real content edit, never a technical/operational change, so
   // the decision of whether this call counts as one belongs to the caller
   // (PostJobScreen's save passes updatedAt explicitly; a future
   // technical-only caller simply wouldn't).
-  const updateJob = useCallback<AppState['updateJob']>((jobId, patch) => {
-    setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, ...patch } : j)));
-  }, []);
+  const updateJob = useCallback<AppState['updateJob']>(
+    async (jobId, patch) => {
+      if (isBackendEnabled()) {
+        // Phase 4B: update_job RPC (owner/admin only; content columns + child
+        // collections; never contractor_id / status / closed_manually /
+        // recruitment_cycle / created_at / derived state) + worksite images.
+        await jobsService.updateJobBackend(
+          jobId,
+          patch as Parameters<typeof jobsService.updateJobBackend>[1]
+        );
+        await refreshJobs();
+        const fresh = await jobsService.getJobById(jobId);
+        if (fresh) {
+          setJobs((prev) => prev.map((p) => (p.id === jobId ? fresh : p)));
+        }
+        return;
+      }
+      setJobs((prev) =>
+        prev.map((j) => (j.id === jobId ? { ...j, ...patch } : j))
+      );
+    },
+    [refreshJobs]
+  );
 
   // A job is "clean" (hard-deletable) only when nothing points at it. Any
   // application / invitation / assignment — of ANY status, including
@@ -2749,6 +2870,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       clearPasswordRecovery,
       jobSearchState,
       updateJobSearchState,
+      jobsLoading,
+      refreshJobs,
       admins,
       workers,
       contractors,
@@ -2847,6 +2970,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       clearPasswordRecovery,
       jobSearchState,
       updateJobSearchState,
+      jobsLoading,
+      refreshJobs,
       admins,
       workers,
       contractors,

@@ -722,6 +722,80 @@ export const isoToDmy = (iso?: string): string => {
   return `${dd}/${mm}/${d.getFullYear()}`;
 };
 
+// ---------------------------------------------------------------------------
+// Job / availability calendar dates — the app holds a start date in one of two
+// shapes: "DD/MM/YYYY" (what DatePickerField reads and writes) or "YYYY-MM-DD"
+// (Postgres `date` columns, and the mock seed data). These helpers are the ONE
+// place that understands BOTH shapes and converts between them WITHOUT ever
+// constructing a Date from the raw string — parsing is purely lexical, so a
+// date-only value can never shift a calendar day across a timezone.
+// ---------------------------------------------------------------------------
+
+/** Lexically parse "DD/MM/YYYY" or "YYYY-MM-DD" into numeric parts. Returns
+ *  null for empty / malformed input or a value that is not a real calendar day
+ *  (e.g. 31/02/2026). No timezone math on the input. */
+export const parseCalendarDateParts = (
+  value?: string
+): { year: number; month: number; day: number } | null => {
+  const s = (value ?? '').trim();
+  let year: number;
+  let month: number;
+  let day: number;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (iso) {
+    year = Number(iso[1]);
+    month = Number(iso[2]);
+    day = Number(iso[3]);
+  } else {
+    const dmy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+    if (!dmy) return null;
+    day = Number(dmy[1]);
+    month = Number(dmy[2]);
+    year = Number(dmy[3]);
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  // Real-calendar-day check (local constructor — no TZ shift for a plain date).
+  const probe = new Date(year, month - 1, day);
+  if (
+    probe.getFullYear() !== year ||
+    probe.getMonth() !== month - 1 ||
+    probe.getDate() !== day
+  ) {
+    return null;
+  }
+  return { year, month, day };
+};
+
+/** Canonical backend form "YYYY-MM-DD" for either input shape. '' when the
+ *  value is empty or not a real date. Idempotent — safe on an already-canonical
+ *  value. This is what job start dates are persisted as. */
+export const toCanonicalDateOnly = (value?: string): string => {
+  const p = parseCalendarDateParts(value);
+  if (!p) return '';
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+};
+
+/** DatePickerField form "DD/MM/YYYY" for either input shape. '' when the value
+ *  is empty or not a real date. Used to seed the picker from a stored value. */
+export const toPickerDate = (value?: string): string => {
+  const p = parseCalendarDateParts(value);
+  if (!p) return '';
+  return `${String(p.day).padStart(2, '0')}/${String(p.month).padStart(2, '0')}/${p.year}`;
+};
+
+/** True when `value` (either shape) is a real date strictly before today
+ *  (local midnight). False for empty / malformed — callers surface those
+ *  separately as "invalid". */
+export const isPastCalendarDate = (value?: string): boolean => {
+  const p = parseCalendarDateParts(value);
+  if (!p) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(p.year, p.month - 1, p.day);
+  target.setHours(0, 0, 0, 0);
+  return target.getTime() < today.getTime();
+};
+
 export const getAvatarBackground = (name: string): string => {
   const colors = [
     '#F97316', '#1E3A5F', '#22C55E', '#3B82F6',

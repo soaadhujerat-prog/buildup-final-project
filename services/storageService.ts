@@ -97,27 +97,39 @@ export interface OwnFolderUpload {
 }
 
 /**
- * Upload one local file into `${bucket}/${uid}/…`. The bucket policies already
- * require the first path segment to equal the caller's uid, so this can only
- * ever write the caller's own folder. Returns the stored object PATH (never a
- * URL) — that path is what belongs in the DB.
+ * Upload one local file into `${bucket}/${folder}/…`. `folder` is the first
+ * path segment the bucket's RLS policy checks — the caller's uid for the
+ * per-user buckets, or a job id for `worksite-images` (RLS: job_owner).
+ * Returns the stored object PATH (never a URL) — that path is what belongs in
+ * the DB.
  */
-export async function uploadToOwnFolder(
+export async function uploadToFolder(
   bucket: PrivateBucket,
-  uid: string,
+  folder: string,
   localUri: string,
   opts: { kind: string; mimeType?: string }
 ): Promise<string> {
   const ext = extForUpload(opts.mimeType, localUri);
   const contentType = guessContentType(ext);
   const { bytes } = await readBytes(localUri);
-  const path = `${uid}/${opts.kind}-${randomStamp()}.${ext}`;
+  const path = `${folder}/${opts.kind}-${randomStamp()}.${ext}`;
 
   const { error } = await getSupabase()
     .storage.from(bucket)
     .upload(path, bytes, { contentType, upsert: true });
   if (error) throw error;
   return path;
+}
+
+/** Upload into the caller's own `${bucket}/${uid}/…` folder (avatars, ID docs,
+ *  certificates, licences). Thin wrapper over uploadToFolder. */
+export async function uploadToOwnFolder(
+  bucket: PrivateBucket,
+  uid: string,
+  localUri: string,
+  opts: { kind: string; mimeType?: string }
+): Promise<string> {
+  return uploadToFolder(bucket, uid, localUri, opts);
 }
 
 /**
@@ -165,16 +177,23 @@ export async function getSignedUrl(
   }
 }
 
-/** Best-effort delete of one object in the caller's own folder (e.g. the
- *  previous avatar after a new one is saved). Never throws. */
-export async function removeOwn(bucket: PrivateBucket, path: string | null | undefined): Promise<void> {
+/** Best-effort delete of one storage object the caller is authorised to
+ *  remove (own {uid}/ folder, or a job folder they own for worksite-images).
+ *  Never throws — an orphaned private object is harmless. */
+export async function removeObject(
+  bucket: PrivateBucket,
+  path: string | null | undefined
+): Promise<void> {
   if (!path) return;
   try {
     await getSupabase().storage.from(bucket).remove([path]);
   } catch {
-    /* ignore — an orphan private object is harmless */
+    /* ignore */
   }
 }
+
+/** @deprecated name — kept for existing Phase 3B call sites. Use removeObject. */
+export const removeOwn = removeObject;
 
 /** True when a string looks like a stored Storage path (uid/…) rather than a
  *  freshly-picked local file URI. */

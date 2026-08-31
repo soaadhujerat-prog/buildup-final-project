@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -43,6 +43,7 @@ const AvailableJobsScreen: React.FC<Props> = ({
   const {
     currentUser,
     jobs,
+    jobsLoading,
     getUserById,
     getFavoriteContractorIds,
     jobSearchState,
@@ -301,7 +302,12 @@ const AvailableJobsScreen: React.FC<Props> = ({
         </Text>
       </View>
 
-      {results.length === 0 ? (
+      {results.length === 0 && jobsLoading && jobs.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.emptySub}>טוען משרות…</Text>
+        </View>
+      ) : results.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons name="search-outline" size={56} color={Colors.textMuted} />
           <Text style={styles.emptyTitle}>לא מצאנו משרות שמתאימות לחיפוש</Text>

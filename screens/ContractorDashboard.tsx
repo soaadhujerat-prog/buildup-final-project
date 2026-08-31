@@ -58,6 +58,7 @@ const ContractorDashboard: React.FC<Props> = ({
   const {
     currentUser,
     jobs,
+    jobsLoading,
     applications,
     invitations,
     assignments,
@@ -322,7 +323,13 @@ const ContractorDashboard: React.FC<Props> = ({
           onAction={onOpenMyJobs}
         />
         {recentJobs.length === 0 ? (
-          <EmptyRow text="עדיין לא פרסמת משרות" />
+          <EmptyRow
+            text={
+              jobsLoading && jobs.length === 0
+                ? 'טוען משרות…'
+                : 'עדיין לא פרסמת משרות'
+            }
+          />
         ) : (
           recentJobs.map((job) => {
             const candidatesCount = applications.filter(

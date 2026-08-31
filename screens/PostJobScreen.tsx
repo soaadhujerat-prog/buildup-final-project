@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,20 +10,29 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import { isBackendEnabled } from '../config/env';
 import { useApp } from '../context/AppContext';
+import * as jobsService from '../services/jobsService';
 import DatePickerField from '../components/DatePickerField';
 import CityPickerField from '../components/CityPickerField';
 import ProfessionSelectorModal from '../components/ProfessionSelectorModal';
 import WorksiteImagesField from '../components/WorksiteImagesField';
-import { formatRatePerUnit } from '../utils/helpers';
+import {
+  formatRatePerUnit,
+  isPastCalendarDate,
+  parseCalendarDateParts,
+  toCanonicalDateOnly,
+  toPickerDate,
+} from '../utils/helpers';
 import { PROFESSIONS_BY_CATEGORY } from '../data/mockData';
 import { jobProfessions } from '../utils/normalize';
-import { Contractor, ProfessionCategory } from '../types';
+import { Contractor, JobPost, ProfessionCategory } from '../types';
 
 interface Props {
   onBack: () => void;
@@ -34,6 +43,8 @@ interface Props {
   /** Presence of jobId switches the whole screen into edit mode. */
   jobId?: string;
 }
+
+type FormProps = Props & { existingJob?: JobPost };
 
 interface FormErrors {
   title?: string;
@@ -47,38 +58,38 @@ interface FormErrors {
   workersNeeded?: string;
 }
 
-// DD/MM/YYYY (DatePickerField's stored format) → Date, local-safe.
-const parseDDMMYYYY = (value: string): Date | null => {
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
-  if (!m) return null;
-  const [, dd, mm, yyyy] = m;
-  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
-  return isNaN(d.getTime()) ? null : d;
-};
-
-const isPastDate = (value: string): boolean => {
-  const d = parseDDMMYYYY(value);
-  if (!d) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return d.getTime() < today.getTime();
-};
-
 const formatPostedAt = (iso: string): string => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
 
-const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) => {
+// The form. `existingJob` is already resolved by the PostJobScreen gate below
+// (sync AppContext selector on the mock path; a full jobsService.getJobById
+// fetch — which also resolves worksite-image URLs + paths — on the backend
+// edit path), so every hook here runs unconditionally.
+const PostJobForm: React.FC<FormProps> = ({
+  onBack,
+  onPosted,
+  onSaved,
+  jobId,
+  existingJob,
+}) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, postJob, updateJob, getJobById } = useApp();
+  const { currentUser, postJob, updateJob } = useApp();
   const me = currentUser as Contractor | undefined;
   const scrollRef = useRef<ScrollView>(null);
 
   const isEditMode = !!jobId;
-  const existingJob = jobId ? getJobById(jobId) : undefined;
   const canEdit = !isEditMode || (!!existingJob && existingJob.contractorId === me?.id);
+
+  // A backend job's startDate arrives as ISO date-only ("YYYY-MM-DD"); the mock
+  // seed data uses the same shape, while DatePickerField reads/writes
+  // "DD/MM/YYYY". Normalise once, lexically (no timezone math), to the picker
+  // format so display, validation and the dirty-check all speak one language.
+  // handleSubmit re-normalises to canonical "YYYY-MM-DD" for persistence, so an
+  // untouched date round-trips to the exact same stored value.
+  const initialStartDate = toPickerDate(existingJob?.startDate ?? '');
 
   const [title, setTitle] = useState(existingJob?.title ?? '');
   const [description, setDescription] = useState(existingJob?.description ?? '');
@@ -92,7 +103,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
   );
   const [city, setCity] = useState(existingJob?.city ?? '');
   const [address, setAddress] = useState(existingJob?.address ?? '');
-  const [startDate, setStartDate] = useState(existingJob?.startDate ?? '');
+  const [startDate, setStartDate] = useState(initialStartDate);
   const [duration, setDuration] = useState(existingJob?.duration ?? '');
   const [hourlyRate, setHourlyRate] = useState(
     existingJob?.hourlyRate ? String(existingJob.hourlyRate) : ''
@@ -132,7 +143,7 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
       professions: existingJob ? jobProfessions(existingJob) : [],
       city: existingJob?.city ?? '',
       address: existingJob?.address ?? '',
-      startDate: existingJob?.startDate ?? '',
+      startDate: initialStartDate,
       duration: existingJob?.duration ?? '',
       hourlyRate: existingJob?.hourlyRate ? String(existingJob.hourlyRate) : '',
       dailyRate: existingJob?.dailyRate ? String(existingJob.dailyRate) : '',
@@ -213,9 +224,9 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
 
     if (!startDate.trim()) {
       next.startDate = 'תאריך התחלה חובה';
-    } else if (!parseDDMMYYYY(startDate)) {
+    } else if (!parseCalendarDateParts(startDate)) {
       next.startDate = 'תאריך ההתחלה אינו תקין';
-    } else if (isPastDate(startDate)) {
+    } else if (isPastCalendarDate(startDate)) {
       next.startDate = 'תאריך ההתחלה לא יכול להיות בעבר';
     }
 
@@ -261,7 +272,8 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
 
   const errors: FormErrors = submitAttempted ? validate() : {};
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (submitting) return;
     if (!me) {
       Alert.alert('שגיאה', 'לא ניתן לפרסם משרה — אין משתמש מחובר');
       return;
@@ -283,7 +295,10 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
       professionCategory: profCategory as ProfessionCategory,
       city,
       address: address.trim(),
-      startDate: startDate.trim(),
+      // Persist the canonical date-only shape regardless of what the picker
+      // handed us; a value the user never touched normalises straight back to
+      // the same "YYYY-MM-DD" already in the database.
+      startDate: toCanonicalDateOnly(startDate),
       duration: duration.trim(),
       hourlyRate: hourlyRate.trim() ? Number(hourlyRate) : undefined,
       dailyRate: dailyRate.trim() ? Number(dailyRate) : undefined,
@@ -301,19 +316,32 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
     };
 
     setSubmitting(true);
-    setTimeout(() => {
+    try {
+      // Mock path keeps its original ~0.5s "מפרסם…/שומר…" beat; the backend
+      // path is genuinely async so it doesn't need (or want) a fake delay.
+      if (!isBackendEnabled()) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
       if (isEditMode && jobId) {
         // This save is a real content edit — and only here, not for any
         // technical/operational change — so updatedAt is stamped explicitly.
-        updateJob(jobId, { ...payload, updatedAt: new Date().toISOString() });
-        setSubmitting(false);
+        await updateJob(jobId, {
+          ...payload,
+          updatedAt: new Date().toISOString(),
+        });
         (onSaved ?? onBack)(jobId);
       } else {
-        const newJob = postJob({ ...payload, contractorId: me.id });
-        setSubmitting(false);
+        const newJob = await postJob({ ...payload, contractorId: me.id });
         onPosted(newJob.id);
       }
-    }, 500);
+    } catch {
+      Alert.alert(
+        isEditMode ? 'שמירת המשרה נכשלה' : 'פרסום המשרה נכשל',
+        'אירעה שגיאה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (isEditMode && !canEdit) {
@@ -613,6 +641,70 @@ const PostJobScreen: React.FC<Props> = ({ onBack, onPosted, onSaved, jobId }) =>
   );
 };
 
+// ---------------------------------------------------------------------------
+// Gate: resolve `existingJob` before mounting the form so its many
+// `useState(existingJob?.x)` initialisers see the real value.
+//   • create mode                 -> render immediately (no existing job)
+//   • edit mode + mock            -> sync AppContext selector (unchanged)
+//   • edit mode + backend         -> jobsService.getJobById() (also resolves
+//                                    worksite-image signed URLs + paths) with
+//                                    a small loading / error state
+// ---------------------------------------------------------------------------
+const PostJobScreen: React.FC<Props> = (props) => {
+  const insets = useSafeAreaInsets();
+  const { getJobById } = useApp();
+  const fromContext = props.jobId ? getJobById(props.jobId) : undefined;
+
+  const needsFetch = !!props.jobId && isBackendEnabled();
+  const [fetched, setFetched] = useState<JobPost | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'loading' | 'error'>(
+    needsFetch ? 'loading' : 'idle'
+  );
+
+  useEffect(() => {
+    if (!needsFetch || !props.jobId) return;
+    let alive = true;
+    setPhase('loading');
+    jobsService
+      .getJobById(props.jobId)
+      .then((j) => {
+        if (!alive) return;
+        setFetched(j);
+        setPhase('idle');
+      })
+      .catch(() => {
+        if (alive) setPhase('error');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [needsFetch, props.jobId]);
+
+  if (needsFetch && phase === 'loading') {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+        <View style={styles.gateCenter}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.gateText}>טוען את המשרה לעריכה…</Text>
+        </View>
+      </View>
+    );
+  }
+  if (needsFetch && phase === 'error') {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+        <Text style={styles.notFound}>לא ניתן לטעון את המשרה לעריכה</Text>
+        <TouchableOpacity onPress={props.onBack} style={styles.backLink}>
+          <Text style={styles.backLinkText}>חזרה</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const existingJob = needsFetch ? fetched ?? undefined : fromContext;
+  return <PostJobForm {...props} existingJob={existingJob} />;
+};
+
 // ---------- subcomponents ----------
 
 const Section: React.FC<{
@@ -670,6 +762,12 @@ const PreviewChip: React.FC<{
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.screenTint },
+  gateCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  gateText: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+  },
 
   headerArea: {
     position: 'relative',

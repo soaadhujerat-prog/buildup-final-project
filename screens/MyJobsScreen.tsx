@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,8 +35,13 @@ const MyJobsScreen: React.FC<Props> = ({
   onOpenPostJob,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, jobs, getApplicationsForJob, getStaffingProgress } =
-    useApp();
+  const {
+    currentUser,
+    jobs,
+    jobsLoading,
+    getApplicationsForJob,
+    getStaffingProgress,
+  } = useApp();
   const me = currentUser as Contractor | undefined;
 
   const listRef = useRef<FlatList>(null);
@@ -102,7 +108,12 @@ const MyJobsScreen: React.FC<Props> = ({
         />
       </ScrollView>
 
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && jobsLoading && jobs.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.emptySub}>טוען משרות…</Text>
+        </View>
+      ) : filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons
             name="briefcase-outline"
