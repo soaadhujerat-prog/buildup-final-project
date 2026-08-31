@@ -1,0 +1,1 @@
+# Keeps the migrations/ directory in git. Phase 1 adds 001_extensions_enums_taxonomy.sql etc.
