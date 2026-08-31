@@ -426,7 +426,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
         {/* Identity */}
         <Section title="פרטי קשר">
           <FieldRow label="שם מלא" value={user.fullName} />
-          <FieldRow label="תעודת זהות" value={user.idNumber} mono ltr />
+          <FieldRow label="תעודת זהות" value={user.idNumber ?? ''} mono ltr />
           <FieldRow
             label="טלפון"
             value={user.phone}

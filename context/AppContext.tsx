@@ -78,6 +78,11 @@ import {
   dedupeConversations,
 } from '../services/conversationService';
 
+import { isBackendEnabled } from '../config/env';
+import * as authService from '../services/authService';
+import { bootstrapSessionUser, loginById } from '../services/authSession';
+import type { SessionUser, LoginResult } from '../types/auth';
+
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
 import { JobSortOption } from '../components/JobSortBottomSheet';
 import {
@@ -96,15 +101,11 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-export type SessionUser = Admin | Worker | Contractor | null;
-
-export interface LoginResult {
-  ok: boolean;
-  user?: SessionUser;
-  status?: CustomerStatus;         // if registration record matched
-  registration?: RegistrationRecord;
-  reason?: 'not_found' | 'wrong_password' | 'pending' | 'rejected' | 'blocked';
-}
+// SessionUser + LoginResult now live in types/auth.ts so the auth service layer
+// can use them without importing this React context. Re-exported here so every
+// existing `import { SessionUser, LoginResult } from '../context/AppContext'`
+// keeps working unchanged.
+export type { SessionUser, LoginResult };
 
 /** Result of any action that would create a new staffing slot (accepting an
  *  application / invitation). `ok: false, reason: 'full'` means the job had
@@ -159,8 +160,20 @@ interface AppState {
   updateJobSearchState: (patch: Partial<JobSearchState>) => void;
 
   // Auth
-  loginAsCustomer: (identifier: string, password: string) => LoginResult;
-  loginAsAdmin: (identifier: string, password: string) => LoginResult;
+  /** True only while the backend session is being restored on cold start
+   *  (`EXPO_PUBLIC_USE_BACKEND=true`). The navigator holds on the splash until
+   *  this clears, so Login / a dashboard never flash before we know who is
+   *  signed in. Always `false` when the backend flag is off. */
+  sessionLoading: boolean;
+  /** A Supabase PASSWORD_RECOVERY session is active (app was opened from the
+   *  emailed reset link). The navigator routes straight to ResetPassword. */
+  passwordRecoveryActive: boolean;
+  clearPasswordRecovery: () => void;
+  loginAsCustomer: (
+    identifier: string,
+    password: string
+  ) => Promise<LoginResult>;
+  loginAsAdmin: (identifier: string, password: string) => Promise<LoginResult>;
   logout: () => void;
 
   // Registration
@@ -485,9 +498,59 @@ const passwordOk = (pwd: string) => pwd.trim().length > 0;
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<SessionUser>(null);
+  // Backend-only: while a persisted Supabase session is being restored + its
+  // profile rebuilt on cold start. Starts true iff the backend flag is on.
+  const [sessionLoading, setSessionLoading] = useState<boolean>(isBackendEnabled());
+  const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
   const [jobSearchState, setJobSearchState] = useState<JobSearchState>(
     DEFAULT_JOB_SEARCH_STATE
   );
+
+  const clearPasswordRecovery = useCallback(
+    () => setPasswordRecoveryActive(false),
+    []
+  );
+
+  // ---------------------------------------------------------------------
+  // Backend session bootstrap + auth-event wiring (no-op when USE_BACKEND=false)
+  // ---------------------------------------------------------------------
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    let alive = true;
+
+    // Building the client throws if the public Supabase config is missing —
+    // don't let that crash the provider; just fall through to logged-out.
+    let unsubscribe: (() => void) | undefined;
+    try {
+      authService.initializeAuth();
+      unsubscribe = authService.onAuthStateChange((event) => {
+        if (!alive) return;
+        if (event === 'SIGNED_OUT') setCurrentUser(null);
+        else if (event === 'PASSWORD_RECOVERY') setPasswordRecoveryActive(true);
+      });
+    } catch {
+      setSessionLoading(false);
+      return;
+    }
+
+    bootstrapSessionUser()
+      .then((user) => {
+        if (alive) setCurrentUser(user);
+      })
+      .catch(() => {
+        // No silent mock fallback — just land logged-out; the user can retry.
+        if (alive) setCurrentUser(null);
+      })
+      .finally(() => {
+        if (alive) setSessionLoading(false);
+      });
+
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateJobSearchState = useCallback<AppState['updateJobSearchState']>(
     (patch) => setJobSearchState((prev) => ({ ...prev, ...patch })),
@@ -719,7 +782,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // ---------------------------------------------------------------------
 
   const loginAsCustomer = useCallback<AppState['loginAsCustomer']>(
-    (identifier, password) => {
+    async (identifier, password) => {
+      if (isBackendEnabled()) {
+        const result = await loginById(identifier, password, [
+          'worker',
+          'contractor',
+        ]);
+        // approved -> live session; blocked -> live (confined) session too,
+        // exactly like the mock path below.
+        if ((result.ok || result.reason === 'blocked') && result.user) {
+          setCurrentUser(result.user);
+        }
+        return result;
+      }
+
+      // Mock path (USE_BACKEND=false) — unchanged behaviour. The short delay
+      // preserves the "מתחבר..." moment the LoginScreen used to add itself.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
       const id = identifier.trim();
       if (!id) return { ok: false, reason: 'not_found' };
       if (!passwordOk(password)) return { ok: false, reason: 'wrong_password' };
@@ -792,7 +872,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const loginAsAdmin = useCallback<AppState['loginAsAdmin']>(
-    (identifier, password) => {
+    async (identifier, password) => {
+      if (isBackendEnabled()) {
+        const result = await loginById(identifier, password, ['admin']);
+        if (result.ok && result.user) setCurrentUser(result.user);
+        return result;
+      }
+
+      // Mock path (USE_BACKEND=false) — unchanged behaviour.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
       const id = identifier.trim();
       if (!id || !passwordOk(password)) {
         return { ok: false, reason: 'wrong_password' };
@@ -811,8 +900,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // worker logging in on the same device/session would inherit whatever
   // search/filter/sort the previous one left behind.
   const logout = useCallback(() => {
+    if (isBackendEnabled()) {
+      // Fire-and-forget: clears the persisted Supabase session + fires
+      // SIGNED_OUT (which also nulls currentUser). We still clear locally now
+      // so the UI reacts immediately.
+      void authService.signOut().catch(() => {});
+    }
     setCurrentUser(null);
     setJobSearchState(DEFAULT_JOB_SEARCH_STATE);
+    setPasswordRecoveryActive(false);
   }, []);
 
   // ---------------------------------------------------------------------
@@ -2345,6 +2441,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const value = useMemo<AppState>(
     () => ({
       currentUser,
+      sessionLoading,
+      passwordRecoveryActive,
+      clearPasswordRecovery,
       jobSearchState,
       updateJobSearchState,
       admins,
@@ -2437,6 +2536,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }),
     [
       currentUser,
+      sessionLoading,
+      passwordRecoveryActive,
+      clearPasswordRecovery,
       jobSearchState,
       updateJobSearchState,
       admins,

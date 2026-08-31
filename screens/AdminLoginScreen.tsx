@@ -30,17 +30,21 @@ const AdminLoginScreen: React.FC<Props> = ({ onBack }) => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setError(null);
     setLoading(true);
-    setTimeout(() => {
-      const r = loginAsAdmin(identifier, password);
-      setLoading(false);
-      // Deliberately generic regardless of the failure reason — never
-      // reveal whether the ID or the password was the wrong part.
+    try {
+      const r = await loginAsAdmin(identifier, password);
+      // Deliberately generic regardless of the failure reason — never reveal
+      // whether the ID/email or the password was the wrong part, nor that a
+      // non-admin account exists.
       if (!r.ok) setError('פרטי ההתחברות אינם נכונים');
       // success: AppNavigator will route via the currentUser effect.
-    }, 500);
+    } catch {
+      setError('אירעה שגיאה בהתחברות. נסה שוב.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

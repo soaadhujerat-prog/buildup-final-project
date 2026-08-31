@@ -27,7 +27,17 @@ export type ProfessionCategory =
 
 export interface BaseUser {
   id: string;
-  idNumber: string;          // government-style ID, unique per person
+  /**
+   * Government-style ID number, unique per person.
+   *
+   * OPTIONAL (Phase 2): a Supabase-backed `SessionUser` never carries a
+   * plaintext ID — the backend stores it only as a server-side HMAC on
+   * `user_identity` (Phase 1 decision #1) and never returns it to the client.
+   * The mock data + mock login path still populate and match on it, so nothing
+   * changes when `EXPO_PUBLIC_USE_BACKEND=false`. UI that shows this value must
+   * tolerate `undefined` (e.g. `value={user.idNumber ?? ''}`).
+   */
+  idNumber?: string;
   fullName: string;
   phone: string;
   email: string;

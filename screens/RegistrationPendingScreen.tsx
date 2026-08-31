@@ -45,10 +45,12 @@ const RegistrationPendingScreen: React.FC<Props> = ({
           תקבל הודעה בכתובת המייל שלך ברגע שהחשבון יאושר.
         </Text>
 
-        <View style={styles.refBox}>
-          <Text style={styles.refLabel}>מספר בקשה</Text>
-          <Text style={styles.refValue}>{registrationId}</Text>
-        </View>
+        {!!registrationId && (
+          <View style={styles.refBox}>
+            <Text style={styles.refLabel}>מספר בקשה</Text>
+            <Text style={styles.refValue}>{registrationId}</Text>
+          </View>
+        )}
 
         {reg && (
           <View style={styles.summaryBox}>

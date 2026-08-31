@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "scheme": "buildup",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.buildup.app"

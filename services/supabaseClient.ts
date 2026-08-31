@@ -7,10 +7,11 @@
 // or `MAIL_API_KEY` — those are server-side secrets used solely by Supabase
 // Edge Functions.
 //
-// Phase 0 status: the client is defined here but NOT wired into `AppContext`
-// or any screen. `EXPO_PUBLIC_USE_BACKEND` is `false`, so `getSupabase()` is
-// never called yet. Later phases introduce domain services
-// (authService / profileService / ...) that sit on top of this singleton.
+// Phase 2 status: consumed by the auth layer (services/authService.ts,
+// services/authSession.ts, services/profileService.ts) ONLY when
+// `isBackendEnabled()` is true. With `EXPO_PUBLIC_USE_BACKEND=false` nothing
+// here is reached and the app still runs entirely on mock data. Jobs / staffing
+// / chat / smart-match remain on mock data until their own phases.
 // =============================================================================
 
 import 'react-native-url-polyfill/auto';

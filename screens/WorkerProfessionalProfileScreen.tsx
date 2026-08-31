@@ -175,7 +175,7 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
 
         {/* Contact */}
         <Section title="פרטי קשר">
-          <FieldRow label="ת.ז" value={me.idNumber} mono ltr />
+          <FieldRow label="ת.ז" value={me.idNumber ?? ''} mono ltr />
           <FieldRow label="טלפון" value={me.phone} ltr />
           <FieldRow label="אימייל" value={me.email} ltr />
         </Section>

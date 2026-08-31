@@ -65,6 +65,10 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
     try {
       await updatePassword(newPassword);
       setSubmitted(true);
+    } catch {
+      // Backend enabled and the update genuinely failed (e.g. no live recovery
+      // session). Surface it — no silent success.
+      setError('לא ניתן לעדכן את הסיסמה כעת. פתח/י מחדש את הקישור שנשלח למייל ונסה/י שוב.');
     } finally {
       setSubmitting(false);
     }

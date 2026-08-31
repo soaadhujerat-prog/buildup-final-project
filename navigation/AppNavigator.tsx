@@ -175,6 +175,9 @@ type AdminTab =
 const AppNavigator: React.FC = () => {
   const {
     currentUser,
+    sessionLoading,
+    passwordRecoveryActive,
+    clearPasswordRecovery,
     logout,
     getOrCreateConversation,
     getJobById,
@@ -342,15 +345,18 @@ const AppNavigator: React.FC = () => {
       // useEffect on currentUser will route into the right home shell
       return;
     }
-    if (r.reason === 'pending' && r.registration) {
+    if (r.reason === 'pending') {
+      // With the mock backend `r.registration` carries the full snapshot; with
+      // Supabase (Phase 2, no registration table wired yet) it's absent and the
+      // status screen simply renders without the reference-number box.
       resetTo({
         name: 'RegistrationPending',
-        registrationId: r.registration.id,
+        registrationId: r.registration?.id ?? '',
       });
-    } else if (r.reason === 'rejected' && r.registration) {
+    } else if (r.reason === 'rejected') {
       resetTo({
         name: 'RegistrationRejected',
-        registrationId: r.registration.id,
+        registrationId: r.registration?.id ?? '',
       });
     }
     // reason === 'blocked': loginAsCustomer has already set the session user;
@@ -567,6 +573,27 @@ const AppNavigator: React.FC = () => {
   );
 
   // ---- Auth/status screens --------------------------------------------------
+
+  // Backend session restore in flight (USE_BACKEND=true only) — hold on the
+  // splash so we never flash Login or a dashboard before we know who, if
+  // anyone, is signed in. `onFinish` is a no-op: AppContext flips
+  // `sessionLoading` off when the restore settles.
+  if (sessionLoading) {
+    return <SplashScreen onFinish={() => {}} />;
+  }
+
+  // A Supabase PASSWORD_RECOVERY session is active (app opened from the emailed
+  // reset link) — go straight to the reset screen, regardless of the stack.
+  if (passwordRecoveryActive) {
+    return (
+      <ResetPasswordScreen
+        onBack={() => {
+          clearPasswordRecovery();
+          handleLogout();
+        }}
+      />
+    );
+  }
 
   if (route?.name === 'Splash') {
     return <SplashScreen onFinish={() => resetTo({ name: 'Welcome' })} />;

@@ -1,54 +1,66 @@
 // =============================================================================
-// Password reset service — placeholder that mirrors the shape a real backend
-// call will have (e.g. Supabase Auth's `resetPasswordForEmail`).
+// Password reset service
 // =============================================================================
-// The frontend has no backend yet, so this never actually sends an email and
-// never checks whether the address belongs to a real account — doing that
-// lookup here would let the UI (even indirectly, via timing or a branching
-// result) leak which emails are registered. It always resolves the same way
-// after a short delay, so ForgotPasswordScreen can show one generic message
-// no matter what. Swapping this implementation for a real call later (e.g.
-// `supabase.auth.resetPasswordForEmail(email, { redirectTo })`) requires no
-// changes to the screen — only this function's body.
+// Thin adapter used by ForgotPasswordScreen / ResetPasswordScreen. Behaviour
+// is gated on `EXPO_PUBLIC_USE_BACKEND`:
+//
+//   backend ON  -> real Supabase Auth (authService.requestPasswordReset /
+//                  authService.updatePassword)
+//   backend OFF -> the original frontend-only simulation (no email, no lookup,
+//                  always the same generic outcome)
+//
+// Either way `requestPasswordReset` resolves the same `{ ok: true }` regardless
+// of whether the address is registered, so the UI can't be used to enumerate
+// accounts. The screens are unchanged apart from awaiting these Promises.
 // =============================================================================
+
+import { isBackendEnabled } from '../config/env';
+import * as authService from './authService';
 
 export interface PasswordResetResult {
   ok: true;
 }
-
-/**
- * Requests a password-reset link for `email`. Always resolves `{ ok: true }`
- * regardless of whether the address is registered — callers must always
- * show the same generic "if this email exists..." message and never branch
- * on the result to reveal account existence.
- */
-export const requestPasswordReset = (email: string): Promise<PasswordResetResult> => {
-  void email; // placeholder — no lookup, no network call, no logging
-  return new Promise((resolve) => {
-    setTimeout(() => resolve({ ok: true }), 600);
-  });
-};
 
 export interface UpdatePasswordResult {
   ok: true;
 }
 
 /**
- * Sets a new password from ResetPasswordScreen. This is a Frontend-only
- * placeholder — it never touches the mock users and never performs a real
- * password change; it just simulates the round trip so the screen's
- * loading/success states behave like they will once wired up.
- *
- * Once a real backend exists, this becomes the one place that changes:
- * ResetPasswordScreen is only reachable there via a genuine Supabase
- * password-recovery session (established from the emailed deep link), and
- * this function's body becomes
- * `supabase.auth.updateUser({ password: newPassword })` — no redesign of
- * the screen or its validation is needed.
+ * Request a password-recovery link for `email`. Always resolves `{ ok: true }`
+ * — callers must show the same generic "if this email exists…" message and
+ * never branch on the result. A backend failure is swallowed here on purpose
+ * (enumeration safety); it is logged without the address.
  */
-export const updatePassword = (newPassword: string): Promise<UpdatePasswordResult> => {
-  void newPassword; // placeholder — no real password change, no logging
-  return new Promise((resolve) => {
-    setTimeout(() => resolve({ ok: true }), 600);
-  });
+export const requestPasswordReset = async (
+  email: string
+): Promise<PasswordResetResult> => {
+  if (isBackendEnabled()) {
+    try {
+      await authService.requestPasswordReset(email);
+    } catch {
+      // eslint-disable-next-line no-console
+      console.warn('[auth] password-reset request failed');
+    }
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  return { ok: true };
+};
+
+/**
+ * Set a new password. With the backend on, this is
+ * `supabase.auth.updateUser({ password })` on the current session (a
+ * PASSWORD_RECOVERY session established from the emailed link, or a normally
+ * signed-in user). It rejects on failure so ResetPasswordScreen can show a real
+ * error. With the backend off it is the original no-op simulation.
+ */
+export const updatePassword = async (
+  newPassword: string
+): Promise<UpdatePasswordResult> => {
+  if (isBackendEnabled()) {
+    await authService.updatePassword(newPassword);
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  return { ok: true };
 };

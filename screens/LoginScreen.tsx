@@ -47,7 +47,7 @@ const LoginScreen: React.FC<Props> = ({
   const identifierLabel = 'תעודת זהות';
   const identifierHint = 'הזן תעודת זהות';
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setError(null);
 
     // Format gate — 9 digits. This is not account enumeration (it never says
@@ -58,21 +58,28 @@ const LoginScreen: React.FC<Props> = ({
     }
 
     setIsLoading(true);
-
-    setTimeout(() => {
-      const result = loginAsCustomer(identifier, password);
-      setIsLoading(false);
+    try {
+      const result = await loginAsCustomer(identifier, password);
 
       // Wrong ID and wrong password are indistinguishable to the user — one
       // generic message, no enumeration. pending / rejected / blocked still
       // flow through onLoginResult so the navigator shows the right screen.
-      if (!result.ok && (result.reason === 'not_found' || result.reason === 'wrong_password')) {
+      if (
+        !result.ok &&
+        (result.reason === 'not_found' || result.reason === 'wrong_password')
+      ) {
         setError('פרטי ההתחברות אינם נכונים');
         return;
       }
 
       onLoginResult(result);
-    }, 600);
+    } catch {
+      // Backend enabled + a real transport/server failure. No silent fallback
+      // to mock — surface it plainly.
+      setError('אירעה שגיאה בהתחברות. בדוק את החיבור לאינטרנט ונסה שוב.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const isWorker = role === 'worker';

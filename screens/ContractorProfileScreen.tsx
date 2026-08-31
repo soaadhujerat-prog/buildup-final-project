@@ -110,7 +110,7 @@ const ContractorProfileScreen: React.FC<Props> = ({
 
         {/* Contact */}
         <Section title="פרטי קשר">
-          <FieldRow label="תעודת זהות" value={me.idNumber} mono ltr />
+          <FieldRow label="תעודת זהות" value={me.idNumber ?? ''} mono ltr />
           <FieldRow label="טלפון" value={me.phone} ltr />
           <FieldRow label="אימייל" value={me.email} ltr />
         </Section>
