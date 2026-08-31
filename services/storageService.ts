@@ -49,6 +49,14 @@ export const extForUpload = (mimeType?: string, uri?: string): string => {
   return 'jpg';
 };
 
+/** A concrete image/pdf mime for an upload — falls back to the file
+ *  extension when the picker gave nothing usable ('image/*', undefined, …). */
+export const mimeForUpload = (mimeType?: string, fileNameOrUri?: string): string => {
+  const m = (mimeType ?? '').toLowerCase().trim();
+  if (m && !m.includes('*') && m !== 'application/octet-stream') return m;
+  return guessContentType(extForUpload(undefined, fileNameOrUri));
+};
+
 const guessContentType = (ext: string): string => {
   switch (ext) {
     case 'png':

@@ -18,10 +18,17 @@ import type {
   RegistrationData,
   RegistrationRecord,
   RegistrationStatusEvent,
+  UploadedDocument,
   WorkerRegistrationData,
 } from '../types';
 
 import { getSupabase } from './supabaseClient';
+import {
+  getSignedUrl,
+  mimeForUpload,
+  SIGNED_URL_TTL,
+  uploadViaSignedUrl,
+} from './storageService';
 
 /** An expected registration failure the UI should show as a real message.
  *  `code`: 'invalid' | 'unavailable' | 'forbidden' | 'not_found' | 'conflict'
@@ -83,10 +90,66 @@ const buildLocalRecord = (
   data: { ...data, password: '' } as RegistrationData,
 });
 
+/**
+ * Phase 3B: the ID document is uploaded to Storage BEFORE `register`, using a
+ * one-shot signed-upload token minted by `register-upload-url` (no session, no
+ * service-role key, no base64 — bytes stream straight to Storage). `register`
+ * then verifies the object exists and ties it to the same registration id.
+ * Returns the reserved id + confirmed path, or {} when there is nothing to
+ * upload (no doc, or a doc that already lives in Storage).
+ */
+async function uploadIdDocument(
+  data: RegistrationData
+): Promise<{ reservedRegistrationId?: string; idDocumentPath?: string }> {
+  const doc = (data as { idDocument?: UploadedDocument }).idDocument;
+  if (!doc?.uri || doc.storagePath) return {};
+  if (/^https?:\/\//i.test(doc.uri)) return {};
+
+  const mimeType = mimeForUpload(doc.mimeType, doc.fileName || doc.uri);
+  const reserve = await callFn<{
+    ok: boolean;
+    registrationId: string;
+    path: string;
+    token: string;
+    error?: string;
+  }>('register-upload-url', {
+    fileName: doc.fileName ?? 'id-document',
+    mimeType,
+    size: doc.size ?? 0,
+  });
+  if (!reserve.ok || !reserve.token) {
+    throw new RegistrationError(reserve.error ?? 'id_upload_failed');
+  }
+  try {
+    await uploadViaSignedUrl('id-documents', reserve.path, reserve.token, doc.uri, mimeType);
+  } catch {
+    throw new RegistrationError('id_upload_failed');
+  }
+  return { reservedRegistrationId: reserve.registrationId, idDocumentPath: reserve.path };
+}
+
+/** Strip local-file document objects from the JSON payload sent to `register`
+ *  (the ID doc travels as a Storage path; licence docs are captured later). */
+const stripLocalDocs = (data: RegistrationData): Record<string, unknown> => {
+  const { idDocument, licenseDocument, ...rest } = data as unknown as Record<
+    string,
+    unknown
+  >;
+  void idDocument;
+  void licenseDocument;
+  return rest;
+};
+
 export async function submitWorkerRegistration(
   data: WorkerRegistrationData
 ): Promise<RegistrationRecord> {
-  const res = await callFn<RegisterResponse>('register', { role: 'worker', data });
+  const { reservedRegistrationId, idDocumentPath } = await uploadIdDocument(data);
+  const res = await callFn<RegisterResponse>('register', {
+    role: 'worker',
+    data: stripLocalDocs(data),
+    reservedRegistrationId,
+    idDocumentPath,
+  });
   if (!res.ok || !res.registrationId) {
     throw new RegistrationError(res.error ?? 'unavailable');
   }
@@ -96,7 +159,13 @@ export async function submitWorkerRegistration(
 export async function submitContractorRegistration(
   data: ContractorRegistrationData
 ): Promise<RegistrationRecord> {
-  const res = await callFn<RegisterResponse>('register', { role: 'contractor', data });
+  const { reservedRegistrationId, idDocumentPath } = await uploadIdDocument(data);
+  const res = await callFn<RegisterResponse>('register', {
+    role: 'contractor',
+    data: stripLocalDocs(data),
+    reservedRegistrationId,
+    idDocumentPath,
+  });
   if (!res.ok || !res.registrationId) {
     throw new RegistrationError(res.error ?? 'unavailable');
   }
@@ -120,6 +189,7 @@ interface AdminRegRow {
   approval_message: string | null;
   created_user_id: string | null;
   external_checks: RegistrationRecord['externalChecks'] | null;
+  id_document_path: string | null;
   data: Record<string, unknown> | null;
   email: string | null;
   events: Array<{
@@ -145,31 +215,63 @@ const mapEvent = (e: NonNullable<AdminRegRow['events']>[number]): RegistrationSt
   createdAt: e.createdAt,
 });
 
-const mapRow = (r: AdminRegRow): RegistrationRecord => ({
-  id: r.id,
-  role: r.role,
-  status: r.status,
-  submittedAt: r.submitted_at,
-  processedAt: r.processed_at ?? undefined,
-  processedBy: r.processed_by ?? undefined,
-  rejectionReason: r.rejection_reason ?? undefined,
-  rejectedAt: r.rejected_at ?? undefined,
-  approvedAt: r.approved_at ?? undefined,
-  approvalMessage: r.approval_message ?? undefined,
-  createdUserId: r.created_user_id ?? undefined,
-  statusHistory: (r.events ?? []).map(mapEvent),
-  externalChecks: r.external_checks ?? {},
-  // email is joined live from auth.users (never stored in `data`, decision #3);
-  // idNumber is intentionally absent (HMAC only).
-  data: { ...(r.data ?? {}), email: r.email ?? '' } as RegistrationData,
-});
+async function mapRow(r: AdminRegRow): Promise<RegistrationRecord> {
+  // id_document_path -> a short-lived signed URL the admin can open. The
+  // raw path is never surfaced in the UI (see RegistrationDetailsScreen).
+  let idDocument: UploadedDocument | undefined;
+  if (r.id_document_path) {
+    const url = await getSignedUrl(
+      'id-documents',
+      r.id_document_path,
+      SIGNED_URL_TTL.document
+    );
+    if (url) {
+      const ext = r.id_document_path.split('.').pop()?.toLowerCase() ?? '';
+      const mimeType =
+        ext === 'pdf'
+          ? 'application/pdf'
+          : ['jpg', 'jpeg', 'png', 'heic', 'webp'].includes(ext)
+          ? `image/${ext === 'jpg' ? 'jpeg' : ext}`
+          : undefined;
+      idDocument = {
+        uri: url,
+        fileName: `תעודת זהות.${ext || 'jpg'}`,
+        mimeType,
+        type: 'id_card',
+        storagePath: r.id_document_path,
+      };
+    }
+  }
+  return {
+    id: r.id,
+    role: r.role,
+    status: r.status,
+    submittedAt: r.submitted_at,
+    processedAt: r.processed_at ?? undefined,
+    processedBy: r.processed_by ?? undefined,
+    rejectionReason: r.rejection_reason ?? undefined,
+    rejectedAt: r.rejected_at ?? undefined,
+    approvedAt: r.approved_at ?? undefined,
+    approvalMessage: r.approval_message ?? undefined,
+    createdUserId: r.created_user_id ?? undefined,
+    statusHistory: (r.events ?? []).map(mapEvent),
+    externalChecks: r.external_checks ?? {},
+    // email is joined live from auth.users (never stored in `data`, decision #3);
+    // idNumber is intentionally absent (HMAC only); idDocument is a signed URL.
+    data: {
+      ...(r.data ?? {}),
+      email: r.email ?? '',
+      ...(idDocument ? { idDocument } : {}),
+    } as RegistrationData,
+  };
+}
 
 /** All registrations, for an admin. Returns `[]` for a non-admin caller. */
 export async function listRegistrationsForAdmin(): Promise<RegistrationRecord[]> {
   const { data, error } = await getSupabase().rpc('admin_list_registrations');
   if (error) throw new RegistrationError('server');
   const rows = (data ?? []) as AdminRegRow[];
-  return rows.map(mapRow);
+  return Promise.all(rows.map(mapRow));
 }
 
 // ---------------------------------------------------------------------------

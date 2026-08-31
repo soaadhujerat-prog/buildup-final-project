@@ -70,16 +70,24 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
     verifyContractorLicense,
     requestContractorLicenseRenewal,
     hasRenewalRequestBeenSent,
+    userHasIdOnFile,
+    revealUserIdNumber,
   } = useApp();
 
   const user = getUserById(userId);
   const [blockModalVisible, setBlockModalVisible] = useState(false);
   const [blockReason, setBlockReason] = useState('');
+  const [blockSubmitting, setBlockSubmitting] = useState(false);
   const [regEditVisible, setRegEditVisible] = useState(false);
   const [regEditValue, setRegEditValue] = useState('');
   const [regEditSubmitting, setRegEditSubmitting] = useState(false);
   const [licRejectVisible, setLicRejectVisible] = useState(false);
   const [licRejectReason, setLicRejectReason] = useState('');
+  const [licBusy, setLicBusy] = useState(false);
+  // Backend: the plaintext ID is never in the directory payload — an approved
+  // admin reveals it on demand via admin-reveal-id.
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState(false);
 
   // Every KPI is derived LIVE from the source arrays in AppContext — no
   // stored counters anywhere. sendInvitation / applyToJob / an Assignment
@@ -157,15 +165,35 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
   const w = isWorker ? (user as Worker) : null;
   const c = !isWorker ? (user as Contractor) : null;
 
-  const handleBlockConfirm = () => {
+  const handleBlockConfirm = async () => {
+    if (blockSubmitting) return;
     if (!blockReason.trim()) {
       Alert.alert('שגיאה', 'יש לציין סיבת חסימה');
       return;
     }
-    blockUser(user.id, currentUser?.id ?? 'adm1', blockReason.trim());
-    setBlockModalVisible(false);
-    setBlockReason('');
-    Alert.alert('המשתמש נחסם', `${user.fullName} נחסם/ה בהצלחה.`);
+    setBlockSubmitting(true);
+    try {
+      await blockUser(user.id, currentUser?.id ?? 'adm1', blockReason.trim());
+      setBlockModalVisible(false);
+      setBlockReason('');
+      Alert.alert('המשתמש נחסם', `${user.fullName} נחסם/ה בהצלחה.`);
+    } catch {
+      Alert.alert('שגיאה', 'חסימת המשתמש נכשלה. ייתכן שאין לך הרשאת חסימה.');
+    } finally {
+      setBlockSubmitting(false);
+    }
+  };
+
+  const revealId = async () => {
+    if (revealing || revealedId) return;
+    setRevealing(true);
+    try {
+      setRevealedId(await revealUserIdNumber(user.id));
+    } catch {
+      Alert.alert('שגיאה', 'לא ניתן להציג את מספר תעודת הזהות כרגע.');
+    } finally {
+      setRevealing(false);
+    }
   };
 
   const openRegEdit = () => {
@@ -173,7 +201,7 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
     setRegEditVisible(true);
   };
 
-  const handleRegEditConfirm = () => {
+  const handleRegEditConfirm = async () => {
     if (!c || regEditSubmitting) return;
     const next = regEditValue.trim();
     if (!next || !/^\d+$/.test(next)) {
@@ -186,11 +214,10 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
     }
     setRegEditSubmitting(true);
     try {
-      // Updates the ONE Contractor object in AppContext — same id, no new
-      // user, every other field untouched. All screens read this object, so
-      // the change shows everywhere immediately. This path also notifies the
-      // contractor that their registration number was changed.
-      updateContractorRegistrationNumber(
+      // Backend: admin-user-action -> admin_set_contractor_registration_number
+      // (server writes the guarded column + notifies the contractor). Mock:
+      // updates the one Contractor object + pushes the notification.
+      await updateContractorRegistrationNumber(
         c.id,
         next,
         currentUser?.id ?? 'adm1'
@@ -198,7 +225,10 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
       setRegEditVisible(false);
       Alert.alert('עודכן', 'מספר רישום הקבלנים עודכן.');
     } catch {
-      Alert.alert('שגיאה', 'עדכון מספר הרישום נכשל. נסה שוב.');
+      Alert.alert(
+        'שגיאה',
+        'עדכון מספר הרישום נכשל. ייתכן שהמספר כבר בשימוש.'
+      );
     } finally {
       setRegEditSubmitting(false);
     }
@@ -213,12 +243,16 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
         {
           text: 'בטל חסימה',
           style: 'default',
-          onPress: () => {
-            unblockUser(user.id, currentUser?.id ?? 'adm1');
-            Alert.alert(
-              'החסימה בוטלה',
-              `החסימה של ${user.fullName} בוטלה בהצלחה.`
-            );
+          onPress: async () => {
+            try {
+              await unblockUser(user.id, currentUser?.id ?? 'adm1');
+              Alert.alert(
+                'החסימה בוטלה',
+                `החסימה של ${user.fullName} בוטלה בהצלחה.`
+              );
+            } catch {
+              Alert.alert('שגיאה', 'ביטול החסימה נכשל. ייתכן שאין לך הרשאה מתאימה.');
+            }
           },
         },
       ]
@@ -249,9 +283,13 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
         { text: 'ביטול', style: 'cancel' },
         {
           text: 'שלח בקשה',
-          onPress: () => {
-            requestContractorLicenseRenewal(c.id, currentUser?.id ?? 'adm1');
-            Alert.alert('הבקשה נשלחה', 'נשלחה לקבלן בקשה לחידוש הרישיון.');
+          onPress: async () => {
+            try {
+              await requestContractorLicenseRenewal(c.id, currentUser?.id ?? 'adm1');
+              Alert.alert('הבקשה נשלחה', 'נשלחה לקבלן בקשה לחידוש הרישיון.');
+            } catch {
+              Alert.alert('שגיאה', 'שליחת הבקשה נכשלה. נסה שוב.');
+            }
           },
         },
       ]
@@ -270,12 +308,16 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
         { text: 'ביטול', style: 'cancel' },
         {
           text: 'אשר בדיקה',
-          onPress: () => {
-            verifyContractorLicense(c.id, currentUser?.id ?? 'adm1');
-            Alert.alert(
-              'הבדיקה נרשמה',
-              'מועד הבדיקה התקופתית הבאה נקבע לעוד שנה.'
-            );
+          onPress: async () => {
+            try {
+              await verifyContractorLicense(c.id, currentUser?.id ?? 'adm1');
+              Alert.alert(
+                'הבדיקה נרשמה',
+                'מועד הבדיקה התקופתית הבאה נקבע לעוד שנה.'
+              );
+            } catch {
+              Alert.alert('שגיאה', 'רישום הבדיקה נכשל. נסה שוב.');
+            }
           },
         },
       ]
@@ -291,37 +333,52 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
         { text: 'ביטול', style: 'cancel' },
         {
           text: 'אשר',
-          onPress: () => {
-            reviewContractorLicenseUpdate(
-              pendingLicenseReq.id,
-              currentUser?.id ?? 'adm1',
-              true
-            );
-            Alert.alert('אושר', 'הרישיון החדש עודכן ואומת.');
+          onPress: async () => {
+            if (licBusy) return;
+            setLicBusy(true);
+            try {
+              await reviewContractorLicenseUpdate(
+                pendingLicenseReq.id,
+                currentUser?.id ?? 'adm1',
+                true
+              );
+              Alert.alert('אושר', 'הרישיון החדש עודכן ואומת.');
+            } catch {
+              Alert.alert('שגיאה', 'אישור הרישיון נכשל. נסה שוב.');
+            } finally {
+              setLicBusy(false);
+            }
           },
         },
       ]
     );
   };
 
-  const handleLicenseRejectConfirm = () => {
-    if (!pendingLicenseReq) return;
+  const handleLicenseRejectConfirm = async () => {
+    if (!pendingLicenseReq || licBusy) return;
     if (!licRejectReason.trim()) {
       Alert.alert('שגיאה', 'יש לציין סיבת דחייה');
       return;
     }
-    reviewContractorLicenseUpdate(
-      pendingLicenseReq.id,
-      currentUser?.id ?? 'adm1',
-      false,
-      licRejectReason.trim()
-    );
-    setLicRejectVisible(false);
-    setLicRejectReason('');
-    Alert.alert(
-      'הבקשה נדחתה',
-      'בקשת עדכון הרישיון נדחתה. הרישיון הקודם נשאר בתוקף.'
-    );
+    setLicBusy(true);
+    try {
+      await reviewContractorLicenseUpdate(
+        pendingLicenseReq.id,
+        currentUser?.id ?? 'adm1',
+        false,
+        licRejectReason.trim()
+      );
+      setLicRejectVisible(false);
+      setLicRejectReason('');
+      Alert.alert(
+        'הבקשה נדחתה',
+        'בקשת עדכון הרישיון נדחתה. הרישיון הקודם נשאר בתוקף.'
+      );
+    } catch {
+      Alert.alert('שגיאה', 'דחיית הבקשה נכשלה. נסה שוב.');
+    } finally {
+      setLicBusy(false);
+    }
   };
 
   return (
@@ -426,7 +483,22 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
         {/* Identity */}
         <Section title="פרטי קשר">
           <FieldRow label="שם מלא" value={user.fullName} />
-          <FieldRow label="תעודת זהות" value={user.idNumber ?? ''} mono ltr />
+          <FieldRow
+            label="תעודת זהות"
+            value={user.idNumber ?? revealedId ?? '—'}
+            mono
+            ltr
+            onPress={
+              !user.idNumber && !revealedId && userHasIdOnFile(user.id)
+                ? revealId
+                : undefined
+            }
+          />
+          {!user.idNumber && !revealedId && userHasIdOnFile(user.id) && (
+            <Text style={styles.emptyLine}>
+              {revealing ? 'מפענח…' : 'הקש/י על השורה כדי להציג את מספר תעודת הזהות'}
+            </Text>
+          )}
           <FieldRow
             label="טלפון"
             value={user.phone}

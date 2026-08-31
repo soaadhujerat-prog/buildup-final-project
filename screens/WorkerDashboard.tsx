@@ -195,7 +195,11 @@ const WorkerDashboard: React.FC<Props> = ({
           <View style={styles.availabilityCard}>
             <Switch
               value={me.isAvailable}
-              onValueChange={(v) => setWorkerAvailability(me.id, v)}
+              onValueChange={(v) => {
+                // currentUser re-hydrates from the DB on success (backend) or
+                // updates in place (mock); a transient failure just no-ops.
+                void setWorkerAvailability(me.id, v).catch(() => {});
+              }}
               trackColor={{
                 false: 'rgba(255,255,255,0.3)',
                 true: Colors.success,

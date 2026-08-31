@@ -1,13 +1,3 @@
-// =============================================================================
-// BuildUp – Supabase generated database types
-// =============================================================================
-// GENERATED FILE — do not edit by hand.
-// Regenerate after every schema migration with:  npm run gen:types
-// (supabase gen types typescript --project-id rxoyzsrnlterhmyzpsnd --schema public)
-//
-// Generated from the Phase 1 schema (migrations 001..013).
-// =============================================================================
-
 export type Json =
   | string
   | number
@@ -1118,6 +1108,8 @@ export type Database = {
           external_checks: Json
           id: string
           id_document_path: string | null
+          id_number_enc: string | null
+          id_number_hash: string | null
           processed_at: string | null
           processed_by: string | null
           rejected_at: string | null
@@ -1137,6 +1129,8 @@ export type Database = {
           external_checks?: Json
           id?: string
           id_document_path?: string | null
+          id_number_enc?: string | null
+          id_number_hash?: string | null
           processed_at?: string | null
           processed_by?: string | null
           rejected_at?: string | null
@@ -1156,6 +1150,8 @@ export type Database = {
           external_checks?: Json
           id?: string
           id_document_path?: string | null
+          id_number_enc?: string | null
+          id_number_hash?: string | null
           processed_at?: string | null
           processed_by?: string | null
           rejected_at?: string | null
@@ -1586,6 +1582,43 @@ export type Database = {
     }
     Functions: {
       active_assignment_count: { Args: { p_job_id: string }; Returns: number }
+      admin_block_user: {
+        Args: { p_actor: string; p_reason: string; p_user: string }
+        Returns: undefined
+      }
+      admin_has_permission: {
+        Args: {
+          p_perm: Database["public"]["Enums"]["admin_permission"]
+          p_uid: string
+        }
+        Returns: boolean
+      }
+      admin_list_registrations: { Args: never; Returns: Json }
+      admin_set_admin_permission: {
+        Args: {
+          p_actor: string
+          p_grant: boolean
+          p_permission: Database["public"]["Enums"]["admin_permission"]
+          p_target: string
+        }
+        Returns: undefined
+      }
+      admin_set_contractor_registration_number: {
+        Args: { p_actor: string; p_contractor: string; p_number: string }
+        Returns: undefined
+      }
+      admin_unblock_user: {
+        Args: { p_actor: string; p_user: string }
+        Returns: undefined
+      }
+      approve_registration: {
+        Args: {
+          p_actor_id: string
+          p_message?: string
+          p_registration_id: string
+        }
+        Returns: string
+      }
       can_view_job: { Args: { p_job_id: string }; Returns: boolean }
       can_view_profile: { Args: { p_target: string }; Returns: boolean }
       can_worker_apply: {
@@ -1593,6 +1626,18 @@ export type Database = {
         Returns: boolean
       }
       conversation_pair_key: { Args: { a: string; b: string }; Returns: string }
+      create_registration: {
+        Args: {
+          p_auth_user_id: string
+          p_data: Json
+          p_id_document_path: string
+          p_id_enc: string
+          p_id_hash: string
+          p_registration_id: string
+          p_role: Database["public"]["Enums"]["registration_role"]
+        }
+        Returns: string
+      }
       current_user_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
@@ -1604,8 +1649,38 @@ export type Database = {
         Returns: boolean
       }
       is_job_fully_staffed: { Args: { p_job_id: string }; Returns: boolean }
+      is_live_admin: { Args: { p_uid: string }; Returns: boolean }
       job_owner: { Args: { p_job_id: string }; Returns: boolean }
       occupied_slot_count: { Args: { p_job_id: string }; Returns: number }
+      reject_registration: {
+        Args: {
+          p_actor_id: string
+          p_reason: string
+          p_registration_id: string
+        }
+        Returns: undefined
+      }
+      request_contractor_license_renewal: {
+        Args: { p_actor: string; p_contractor: string }
+        Returns: undefined
+      }
+      revert_registration_rejection: {
+        Args: { p_actor_id: string; p_registration_id: string }
+        Returns: undefined
+      }
+      review_contractor_license_update: {
+        Args: {
+          p_actor: string
+          p_approve: boolean
+          p_reason?: string
+          p_request: string
+        }
+        Returns: undefined
+      }
+      set_own_worker_availability: {
+        Args: { p_available_from?: string; p_is_available: boolean }
+        Returns: undefined
+      }
       staffing_progress: {
         Args: { p_job_id: string }
         Returns: {
@@ -1621,6 +1696,15 @@ export type Database = {
       storage_owns_registration: {
         Args: { p_registration_id: string }
         Returns: boolean
+      }
+      update_own_contractor_profile: {
+        Args: { p_data: Json }
+        Returns: undefined
+      }
+      update_own_worker_profile: { Args: { p_data: Json }; Returns: undefined }
+      verify_contractor_license: {
+        Args: { p_actor: string; p_contractor: string }
+        Returns: undefined
       }
       worker_contractor_relationship: {
         Args: { p_contractor_id: string; p_worker_id: string }
