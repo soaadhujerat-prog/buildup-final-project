@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { Colors, FontSize, Radius } from '../theme/colors';
+import AppText from './AppText';
 
 type Tone = 'success' | 'info' | 'warning' | 'danger' | 'neutral';
 
@@ -28,9 +29,12 @@ const StatusBadge: React.FC<Props> = ({ label, tone = 'neutral', small }) => {
         small && styles.badgeSmall,
       ]}
     >
-      <Text style={[styles.label, { color: t.fg }, small && styles.labelSmall]}>
+      <AppText
+        compact
+        style={[styles.label, { color: t.fg }, small && styles.labelSmall]}
+      >
         {label}
-      </Text>
+      </AppText>
     </View>
   );
 };

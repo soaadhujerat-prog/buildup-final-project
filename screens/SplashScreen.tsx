@@ -8,6 +8,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, FontSize } from '../theme/colors';
 import BuildUpLogo from '../components/BuildUpLogo';
 
@@ -21,6 +22,7 @@ interface Props {
 const HOLD_AFTER_ENTRANCE_MS = 1200 + 2000;
 
 const SplashScreen: React.FC<Props> = ({ onFinish }) => {
+  const insets = useSafeAreaInsets();
   const logoScale = useRef(new Animated.Value(0.94)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const textOpacity = useRef(new Animated.Value(0)).current;
@@ -201,7 +203,12 @@ const SplashScreen: React.FC<Props> = ({ onFinish }) => {
           מחברים בין קבלנים לעובדים{'\n'}בתחום הבנייה
         </Animated.Text>
 
-        <View style={styles.footer}>
+        <View
+          style={[
+            styles.footer,
+            { bottom: Math.max(60, insets.bottom + 24) },
+          ]}
+        >
           <View style={styles.loadingDots}>
             {dots.map((d, i) => (
               <Animated.View
@@ -293,8 +300,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   footer: {
+    // `bottom` is applied inline from the safe-area inset so the loading
+    // dots always clear the home indicator / Android navigation area.
     position: 'absolute',
-    bottom: 60,
   },
   loadingDots: {
     flexDirection: 'row',

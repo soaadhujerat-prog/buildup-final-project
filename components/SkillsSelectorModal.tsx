@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
+import Sheet from './Sheet';
 
 const normalize = (s: string) => s.trim().toLowerCase().replace(/[\s-]+/g, ' ');
 
@@ -41,12 +42,8 @@ const SkillsSelectorModal: React.FC<Props> = ({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-
-          <View style={styles.header}>
+    <Sheet visible={visible} onClose={onClose} avoidKeyboard maxHeightRatio={0.88}>
+      <View style={styles.header}>
             <TouchableOpacity
               onPress={onClose}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -113,40 +110,18 @@ const SkillsSelectorModal: React.FC<Props> = ({
             }}
           />
 
-          <View style={styles.footer}>
-            <TouchableOpacity style={styles.doneBtn} onPress={onClose} activeOpacity={0.85}>
-              <Text style={styles.doneText}>
-                {selected.length > 0 ? `אישור (${selected.length})` : 'אישור'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.doneBtn} onPress={onClose} activeOpacity={0.85}>
+          <Text style={styles.doneText}>
+            {selected.length > 0 ? `אישור (${selected.length})` : 'אישור'}
+          </Text>
+        </TouchableOpacity>
       </View>
-    </Modal>
+    </Sheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '88%',
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.border,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.xs,
-  },
   header: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -191,7 +166,9 @@ const styles = StyleSheet.create({
     padding: 0,
   },
 
-  list: { marginTop: Spacing.sm },
+  // flexShrink lets the list give up height (and become internally
+  // scrollable) when the sheet hits its max height, instead of overflowing.
+  list: { marginTop: Spacing.sm, flexShrink: 1 },
   listContent: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   row: {
     flexDirection: 'row-reverse',
@@ -220,7 +197,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xl,
+    paddingBottom: Spacing.sm,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
   },

@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
+import { Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
+import { Colors, Spacing, FontSize } from '../theme/colors';
 import { JobPost } from '../types';
+import Sheet from './Sheet';
 
 // 'default' = no explicit sort chosen — jobs.postedAt desc, same as
 // 'newest' produces, but silently (no chip). 'newest' is a real, honest
@@ -63,58 +64,32 @@ const JobSortBottomSheet: React.FC<Props> = ({ visible, onClose, value, onChange
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.handle} />
-          <Text style={styles.title}>מיון לפי</Text>
+    <Sheet visible={visible} onClose={onClose}>
+      <Text style={styles.title}>מיון לפי</Text>
 
-          {JOB_SORT_OPTIONS.map((opt) => {
-            const active = opt.value === value;
-            return (
-              <TouchableOpacity
-                key={opt.value}
-                style={styles.row}
-                onPress={() => select(opt.value)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.rowText, active && styles.rowTextActive]}>{opt.label}</Text>
-                <Ionicons
-                  name={active ? 'radio-button-on' : 'radio-button-off'}
-                  size={20}
-                  color={active ? Colors.primary : Colors.textMuted}
-                />
-              </TouchableOpacity>
-            );
-          })}
-        </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
+      {JOB_SORT_OPTIONS.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <TouchableOpacity
+            key={opt.value}
+            style={styles.row}
+            onPress={() => select(opt.value)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.rowText, active && styles.rowTextActive]}>{opt.label}</Text>
+            <Ionicons
+              name={active ? 'radio-button-on' : 'radio-button-off'}
+              size={20}
+              color={active ? Colors.primary : Colors.textMuted}
+            />
+          </TouchableOpacity>
+        );
+      })}
+    </Sheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xl,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.border,
-    marginBottom: Spacing.sm,
-  },
   title: {
     fontSize: FontSize.lg,
     fontWeight: '800',
@@ -122,12 +97,14 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
     marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
   },
   row: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 14,
+    paddingHorizontal: Spacing.lg,
     borderTopWidth: 1,
     borderTopColor: Colors.gray100,
   },

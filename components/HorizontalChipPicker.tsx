@@ -1,6 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import {
-  ScrollView,
   TouchableOpacity,
   Text,
   StyleSheet,
@@ -8,6 +7,7 @@ import {
   ViewStyle,
   TextStyle,
 } from 'react-native';
+import RtlScrollRow from './RtlScrollRow';
 
 interface Props {
   options: string[];
@@ -25,21 +25,11 @@ interface Props {
  * "options as chips" field (profession category, specific profession,
  * area of operation, ...).
  *
- * Why this exists: a plain `ScrollView horizontal` with a
- * `flexDirection: 'row-reverse'` content container gets RTL backwards.
- * RN's horizontal scroll offset is always anchored to the *start* of the
- * underlying (LTR) content box — row-reverse just reorders children
- * within that box, so options[0] ends up pushed to the far right of the
- * total content width instead of the visible edge. The result: on mount
- * (scrollX = 0) the user sees the *last* items of the array, with the
- * first item only reachable by scrolling all the way over, and often a
- * chip cut off at the right edge.
- *
- * The fix keeps `options` in its normal (non-reversed) order and
- * flexDirection: 'row', then mirrors the ScrollView (scaleX: -1) and
- * un-mirrors each chip (scaleX: -1 again). That keeps scrollX = 0
- * anchored to options[0] as usual, but paints it flush against the right
- * edge — exactly the RTL reading order — without touching data order.
+ * All of the RTL scroll mechanics now live in the shared `RtlScrollRow`
+ * primitive — options stay in their natural order (never reversed), the
+ * first option is painted flush against the right edge with no initial
+ * scroll, and the rest are reachable by swiping left. When the option set
+ * itself changes, `resetKey` snaps the row back to that start.
  */
 const HorizontalChipPicker: React.FC<Props> = ({
   options,
@@ -51,49 +41,34 @@ const HorizontalChipPicker: React.FC<Props> = ({
   textActiveStyle,
   activeOpacity = 0.85,
 }) => {
-  const scrollRef = useRef<ScrollView>(null);
-  const optionsKey = options.join('');
-  const prevOptionsKey = useRef(optionsKey);
-
-  // When the option set itself changes (e.g. "מקצוע ספציפי" swapping to a
-  // new list after "תחום מקצועי" changes), snap back to the start so the
-  // new list also opens on its own first item — instead of keeping the
-  // previous list's scroll position.
-  useEffect(() => {
-    if (prevOptionsKey.current !== optionsKey) {
-      prevOptionsKey.current = optionsKey;
-      scrollRef.current?.scrollTo({ x: 0, animated: false });
-    }
-  }, [optionsKey]);
+  const optionsKey = options.join('|');
 
   return (
-    <ScrollView
-      ref={scrollRef}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.mirror}
-      contentContainerStyle={styles.row}
-    >
+    <RtlScrollRow resetKey={optionsKey} contentContainerStyle={styles.row}>
       {options.map((o) => {
         const active = o === value;
         return (
           <TouchableOpacity
             key={o}
             onPress={() => onChange(o)}
-            style={[styles.mirror, chipStyle, active && chipActiveStyle]}
+            style={[chipStyle, active && chipActiveStyle]}
             activeOpacity={activeOpacity}
           >
-            <Text style={[textStyle, active && textActiveStyle]}>{o}</Text>
+            <Text style={[styles.chipText, textStyle, active && textActiveStyle]}>
+              {o}
+            </Text>
           </TouchableOpacity>
         );
       })}
-    </ScrollView>
+    </RtlScrollRow>
   );
 };
 
 const styles = StyleSheet.create({
-  mirror: { transform: [{ scaleX: -1 }] },
-  row: { flexDirection: 'row', gap: 8 },
+  row: { gap: 8 },
+  // Compact control text: no extra Android font padding so the label sits
+  // centred in the chip. Caller's textStyle still wins.
+  chipText: { includeFontPadding: false } as TextStyle,
 });
 
 export default HorizontalChipPicker;

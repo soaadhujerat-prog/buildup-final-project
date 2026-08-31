@@ -5,17 +5,14 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Modal,
-  Platform,
-  KeyboardAvoidingView,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { JobPost } from '../types';
 import { jobProfessions, jobHasProfession } from '../utils/normalize';
+import Sheet from './Sheet';
 import CityPickerField from './CityPickerField';
 import ProfessionSelectorModal from './ProfessionSelectorModal';
 
@@ -128,7 +125,6 @@ const JobFilterBottomSheet: React.FC<Props> = ({
   contractorLabelById,
   favoriteContractorIds,
 }) => {
-  const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<JobFilters>(filters);
   const [professionModalVisible, setProfessionModalVisible] = useState(false);
 
@@ -153,15 +149,8 @@ const JobFilterBottomSheet: React.FC<Props> = ({
   const professionLabel = draft.profession || draft.professionCategory || 'הכל';
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <KeyboardAvoidingView
-          style={styles.sheetWrap}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={styles.sheet}>
-            <View style={styles.handle} />
-
+    <>
+      <Sheet visible={visible} onClose={onClose} avoidKeyboard fill>
             <View style={styles.header}>
               <TouchableOpacity
                 onPress={onClose}
@@ -272,7 +261,7 @@ const JobFilterBottomSheet: React.FC<Props> = ({
               </View>
             </ScrollView>
 
-            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
+            <View style={styles.footer}>
               <TouchableOpacity
                 style={styles.clearAllBtn}
                 onPress={handleClearAll}
@@ -284,9 +273,7 @@ const JobFilterBottomSheet: React.FC<Props> = ({
                 <Text style={styles.applyText}>הצג {previewCount} משרות</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
+      </Sheet>
 
       <ProfessionSelectorModal
         visible={professionModalVisible}
@@ -297,32 +284,11 @@ const JobFilterBottomSheet: React.FC<Props> = ({
           setDraft((d) => ({ ...d, professionCategory, profession }))
         }
       />
-    </Modal>
+    </>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
-  },
-  sheetWrap: { maxHeight: '90%' },
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: '100%',
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.border,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.xs,
-  },
   header: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -422,6 +388,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
+    paddingBottom: Spacing.md,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.white,

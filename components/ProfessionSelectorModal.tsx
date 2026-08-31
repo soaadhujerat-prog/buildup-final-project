@@ -5,13 +5,13 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Modal,
   FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { PROFESSION_CATEGORIES, PROFESSIONS_BY_CATEGORY } from '../data/mockData';
+import Sheet from './Sheet';
 
 const CATEGORIES = PROFESSION_CATEGORIES.filter((c) => c !== 'כל המקצועות');
 
@@ -136,12 +136,8 @@ const ProfessionSelectorModal: React.FC<Props> = ({
   const title = step === 'category' ? 'תחום מקצועי' : 'מקצוע ספציפי';
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-
-          <View style={styles.header}>
+    <Sheet visible={visible} onClose={onClose} avoidKeyboard maxHeightRatio={0.88}>
+      <View style={styles.header}>
             {step === 'profession' ? (
               <TouchableOpacity
                 onPress={goBack}
@@ -279,34 +275,11 @@ const ProfessionSelectorModal: React.FC<Props> = ({
               )}
             </>
           )}
-        </View>
-      </View>
-    </Modal>
+    </Sheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: Spacing.xl,
-    maxHeight: '88%',
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.border,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.xs,
-  },
   header: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -359,7 +332,9 @@ const styles = StyleSheet.create({
     padding: 0,
   },
 
-  list: { marginTop: Spacing.sm },
+  // flexShrink lets the list give up height (and become internally
+  // scrollable) when the sheet hits its max height, instead of overflowing.
+  list: { marginTop: Spacing.sm, flexShrink: 1 },
   listContent: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   row: {
     flexDirection: 'row-reverse',

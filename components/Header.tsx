@@ -1,13 +1,13 @@
 import React from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, FontSize, Spacing } from '../theme/colors';
+import AppText from './AppText';
 
 interface HeaderProps {
   title: string;
@@ -62,24 +62,28 @@ const Header: React.FC<HeaderProps> = ({
         </View>
 
         <View style={styles.center}>
-          <Text
+          <AppText
+            compact
+            numberOfLines={1}
             style={[
               styles.title,
               isPrimary ? styles.titleWhite : styles.titleDark,
             ]}
           >
             {title}
-          </Text>
+          </AppText>
 
           {subtitle ? (
-            <Text
+            <AppText
+              compact
+              numberOfLines={1}
               style={[
                 styles.subtitle,
                 isPrimary ? styles.subtitleWhite : styles.subtitleGray,
               ]}
             >
               {subtitle}
-            </Text>
+            </AppText>
           ) : null}
         </View>
 
@@ -98,9 +102,9 @@ const Header: React.FC<HeaderProps> = ({
 
               {rightAction.badge !== undefined && rightAction.badge > 0 ? (
                 <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
+                  <AppText compact style={styles.badgeText}>
                     {rightAction.badge > 9 ? '9+' : rightAction.badge}
-                  </Text>
+                  </AppText>
                 </View>
               ) : null}
             </TouchableOpacity>
@@ -170,6 +174,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     writingDirection: 'rtl',
+    flexShrink: 1,
   },
 
   titleWhite: {

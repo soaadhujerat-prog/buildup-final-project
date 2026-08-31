@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import EmptyState from '../components/EmptyState';
 import SmartMatchJobSummary from '../components/SmartMatchJobSummary';
 import SmartMatchJobPicker from '../components/SmartMatchJobPicker';
 import SmartMatchWorkerCard from '../components/SmartMatchWorkerCard';
+import RtlScrollRow from '../components/RtlScrollRow';
 import { getSmartMatches } from '../services/smartMatchService';
 import {
   getWorkerContractorRelationship,
@@ -102,16 +103,9 @@ const SmartMatchScreen: React.FC<Props> = ({
     [myJobs, selectedJobId]
   );
 
-  // The sort/filter row is an RTL horizontal ScrollView: `row-reverse` puts
-  // the first chip ("ההתאמה הגבוהה ביותר") at the RIGHT edge, but the
-  // ScrollView still opens at offset 0 (the LEFT side of the content box).
-  // Anchor it to the right edge ONCE per job — never on filter taps or when
-  // the result count changes, and never fighting a manual scroll.
-  const controlScrollRef = useRef<ScrollView>(null);
-  const controlAnchoredRef = useRef(false);
-  useEffect(() => {
-    controlAnchoredRef.current = false;
-  }, [selectedJobId]);
+  // The sort/filter row is an RTL horizontal scroller — the shared
+  // `RtlScrollRow` primitive keeps the first chip ("ההתאמה הגבוהה ביותר")
+  // flush at the right edge with no initial scroll, on both platforms.
 
   // ---- run the match (local now, Supabase Edge Function later) ----
   useEffect(() => {
@@ -382,18 +376,7 @@ const SmartMatchScreen: React.FC<Props> = ({
 
       {status === 'ready' && (
         <>
-          <ScrollView
-            ref={controlScrollRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.controlRow}
-            onContentSizeChange={() => {
-              if (!controlAnchoredRef.current) {
-                controlAnchoredRef.current = true;
-                controlScrollRef.current?.scrollToEnd({ animated: false });
-              }
-            }}
-          >
+          <RtlScrollRow contentContainerStyle={styles.controlRow}>
             <SortChip
               label="ההתאמה הגבוהה ביותר"
               active={sort === 'best'}
@@ -433,7 +416,7 @@ const SmartMatchScreen: React.FC<Props> = ({
               active={filters.strong}
               onPress={() => setFilters((f) => ({ ...f, strong: !f.strong }))}
             />
-          </ScrollView>
+          </RtlScrollRow>
 
           <View style={styles.resultsHead}>
             <Text style={styles.resultsTitle}>
@@ -615,10 +598,6 @@ const styles = StyleSheet.create({
   },
 
   controlRow: {
-    minWidth: '100%',
-    flexDirection: 'row-reverse',
-    justifyContent: 'flex-start',
-    alignItems: 'center',
     gap: 8,
     paddingVertical: 2,
   },
@@ -645,6 +624,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textSecondary,
     writingDirection: 'rtl',
+    includeFontPadding: false,
   },
   chipTextActive: { color: Colors.white },
 

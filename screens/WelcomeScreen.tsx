@@ -4,16 +4,16 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Dimensions,
+  useWindowDimensions,
   Animated,
   Easing,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import BuildUpLogo from '../components/BuildUpLogo';
-
-const { height } = Dimensions.get('window');
+import Screen from '../components/Screen';
 
 type CustomerRole = 'contractor' | 'worker';
 
@@ -34,6 +34,10 @@ const VALUE_PROPS: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
 
 const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => {
   const [selectedRole, setSelectedRole] = useState<CustomerRole>('contractor');
+  // Read live — updates on rotation / fold / split-screen, unlike a
+  // module-load Dimensions.get() snapshot.
+  const { height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   // Two slow, gentle background blobs. Native-driver only (transform), looped,
   // and stopped on unmount so nothing keeps running after the screen is gone.
@@ -84,10 +88,16 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => 
   };
 
   return (
-    <View style={styles.container}>
+    <Screen scroll top={false} style={styles.container}>
       <LinearGradient
         colors={[Colors.primary, Colors.primaryDark, Colors.secondaryDark]}
-        style={styles.topSection}
+        style={[
+          styles.topSection,
+          {
+            minHeight: Math.round(windowHeight * 0.44),
+            paddingTop: insets.top + Spacing.xl,
+          },
+        ]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
@@ -121,7 +131,12 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => 
         </View>
       </LinearGradient>
 
-      <View style={styles.bottomSection}>
+      <View
+        style={[
+          styles.bottomSection,
+          { paddingBottom: Spacing.xxl + insets.bottom },
+        ]}
+      >
         <Text style={styles.welcomeTitle}>ברוכים הבאים ל-BuildUp</Text>
         <Text style={styles.welcomeSubtitle}>
           הפלטפורמה לניהול עבודה, שיבוצים ותקשורת בין אנשי מקצוע בענף הבנייה
@@ -183,7 +198,7 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin, onSignUp, onAdminLogin }) => 
           <Text style={styles.adminLinkText}>כניסת מנהל מערכת</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </Screen>
   );
 };
 
@@ -226,8 +241,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   topSection: {
-    height: height * 0.44,
-    paddingTop: 60,
+    // minHeight + paddingTop are applied inline from useWindowDimensions /
+    // safe-area insets so the hero keeps its proportion on every device
+    // without a hard height that could clip content on a short screen.
     paddingHorizontal: Spacing.xxl,
     overflow: 'hidden',
   },
@@ -298,7 +314,10 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   bottomSection: {
-    flex: 1,
+    // flexGrow (not flex:1) so it fills the space left under the hero on a
+    // tall screen, but on a short one it just takes its content height and
+    // the whole Screen scrolls — the CTA / role cards can never be clipped.
+    flexGrow: 1,
     backgroundColor: Colors.background,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,

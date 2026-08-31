@@ -4,14 +4,14 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Modal,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { Colors, FontSize, Radius, Spacing } from '../theme/colors';
+import { Colors, FontSize, Spacing } from '../theme/colors';
 import { JobPost } from '../types';
 import { jobProfessions } from '../utils/normalize';
+import Sheet from './Sheet';
 
 interface Props {
   visible: boolean;
@@ -36,75 +36,44 @@ const SmartMatchJobPicker: React.FC<Props> = ({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity
-          activeOpacity={1}
-          style={styles.sheet}
-          onPress={(e) => e.stopPropagation()}
-        >
-          <View style={styles.handle} />
-          <Text style={styles.title}>בחר משרה</Text>
+    <Sheet visible={visible} onClose={onClose} maxHeightRatio={0.72}>
+      <Text style={styles.title}>בחר משרה</Text>
 
-          <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-            {jobs.map((j) => {
-              const active = j.id === selectedJobId;
-              return (
-                <TouchableOpacity
-                  key={j.id}
-                  style={styles.row}
-                  onPress={() => pick(j.id)}
-                  activeOpacity={0.7}
+      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+        {jobs.map((j) => {
+          const active = j.id === selectedJobId;
+          return (
+            <TouchableOpacity
+              key={j.id}
+              style={styles.row}
+              onPress={() => pick(j.id)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowBody}>
+                <Text
+                  style={[styles.rowTitle, active && styles.rowTitleActive]}
+                  numberOfLines={1}
                 >
-                  <View style={styles.rowBody}>
-                    <Text
-                      style={[styles.rowTitle, active && styles.rowTitleActive]}
-                      numberOfLines={1}
-                    >
-                      {j.title}
-                    </Text>
-                    <Text style={styles.rowMeta} numberOfLines={1}>
-                      {jobProfessions(j).join(' · ')} · {j.city}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name={active ? 'radio-button-on' : 'radio-button-off'}
-                    size={20}
-                    color={active ? Colors.primary : Colors.textMuted}
-                  />
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
+                  {j.title}
+                </Text>
+                <Text style={styles.rowMeta} numberOfLines={1}>
+                  {jobProfessions(j).join(' · ')} · {j.city}
+                </Text>
+              </View>
+              <Ionicons
+                name={active ? 'radio-button-on' : 'radio-button-off'}
+                size={20}
+                color={active ? Colors.primary : Colors.textMuted}
+              />
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </Sheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xl,
-    maxHeight: '72%',
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.border,
-    marginBottom: Spacing.sm,
-  },
   title: {
     fontSize: FontSize.lg,
     fontWeight: '800',
@@ -112,8 +81,9 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
     marginBottom: Spacing.xs,
+    paddingHorizontal: Spacing.lg,
   },
-  list: { flexGrow: 0 },
+  list: { flexGrow: 0, paddingHorizontal: Spacing.lg },
   row: {
     flexDirection: 'row-reverse',
     alignItems: 'center',

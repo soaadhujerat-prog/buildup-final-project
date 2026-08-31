@@ -1,7 +1,5 @@
 import React from 'react';
 import {
-  View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
@@ -9,10 +7,10 @@ import {
 import {
   Colors,
   Spacing,
-  Radius,
   FontSize,
   FilterChip as FC,
 } from '../theme/colors';
+import AppText from './AppText';
 
 interface FilterChipProps {
   label: string;
@@ -22,8 +20,13 @@ interface FilterChipProps {
 }
 
 /**
- * Standardized filter chip with fixed height + padding.
- * Keeps chips visually consistent regardless of label length or count.
+ * Standardized filter chip.
+ *
+ * Sizing is `minHeight` + vertical padding rather than a hard `height`, so a
+ * longer label or an enlarged system font grows the chip instead of clipping
+ * the text (a real problem on Android, where Hebrew glyphs sit taller); the
+ * `AppText compact` label also drops Android's extra font padding so it stays
+ * vertically centred.
  */
 const FilterChip: React.FC<FilterChipProps> = ({
   label,
@@ -53,12 +56,13 @@ const FilterChip: React.FC<FilterChipProps> = ({
       ]}
       activeOpacity={0.85}
     >
-      <Text
+      <AppText
+        compact
         style={[styles.label, active && styles.labelActive]}
         numberOfLines={1}
       >
         {label}
-      </Text>
+      </AppText>
     </TouchableOpacity>
   );
 };
@@ -88,8 +92,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   chip: {
-    height: FC.height,
+    minHeight: FC.height,
     paddingHorizontal: FC.paddingHorizontal,
+    paddingVertical: FC.paddingVertical,
     borderRadius: FC.borderRadius,
     borderWidth: FC.borderWidth,
     borderColor: Colors.border,
@@ -101,7 +106,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '700',
     color: Colors.textSecondary,
-    writingDirection: 'rtl',
     textAlign: 'center',
     lineHeight: FontSize.sm + 4,
   },
