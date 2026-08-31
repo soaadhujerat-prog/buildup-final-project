@@ -45,13 +45,6 @@ const RegistrationPendingScreen: React.FC<Props> = ({
           תקבל הודעה בכתובת המייל שלך ברגע שהחשבון יאושר.
         </Text>
 
-        {!!registrationId && (
-          <View style={styles.refBox}>
-            <Text style={styles.refLabel}>מספר בקשה</Text>
-            <Text style={styles.refValue}>{registrationId}</Text>
-          </View>
-        )}
-
         {reg && (
           <View style={styles.summaryBox}>
             <View style={styles.summaryHeader}>
@@ -60,7 +53,7 @@ const RegistrationPendingScreen: React.FC<Props> = ({
 
             <Row label="סוג רישום" value={reg.role === 'worker' ? 'עובד' : 'קבלן'} />
             <Row label="שם מלא" value={reg.data.fullName} />
-            <Row label="תעודת זהות" value={reg.data.idNumber} ltr />
+            <Row label="תעודת זהות" value={reg.data.idNumber ?? '—'} ltr />
             <Row label="טלפון" value={reg.data.phone} ltr />
             <Row label="אימייל" value={reg.data.email} ltr />
             <Row label="עיר" value={reg.data.city} />
@@ -173,28 +166,6 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     lineHeight: 22,
     marginBottom: Spacing.lg,
-  },
-
-  refBox: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: Colors.primaryFaint,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    marginBottom: Spacing.lg,
-  },
-  refLabel: {
-    fontSize: FontSize.sm,
-    color: Colors.text,
-    fontWeight: '600',
-    writingDirection: 'rtl',
-  },
-  refValue: {
-    fontSize: FontSize.md,
-    color: Colors.primary,
-    fontWeight: '800',
-    fontFamily: 'monospace',
   },
 
   summaryBox: {

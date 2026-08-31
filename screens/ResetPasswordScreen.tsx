@@ -14,12 +14,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { updatePassword } from '../services/passwordResetService';
+import {
+  isPasswordValid,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_RULE_TEXT,
+} from '../utils/passwordPolicy';
+import PasswordChecklist from '../components/PasswordChecklist';
 
 interface Props {
   onBack: () => void;
 }
-
-const PASSWORD_MIN_LENGTH = 8;
 
 /** Sets a new password. In the real flow this screen is only reached from
  *  the emailed password-recovery link (a genuine Supabase recovery
@@ -40,12 +44,18 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  // Same policy as SignUpScreen (utils/passwordPolicy.ts) — no drift.
+  const pwValid = isPasswordValid(newPassword);
+  const pwMismatch =
+    confirmPassword.length > 0 && confirmPassword !== newPassword;
+  const canSubmit = !submitting && pwValid && newPassword === confirmPassword;
+
   const validate = (): string | null => {
     if (!newPassword.trim() || !confirmPassword.trim()) {
       return 'יש למלא את שני השדות';
     }
-    if (newPassword.length < PASSWORD_MIN_LENGTH) {
-      return `הסיסמה חייבת לכלול לפחות ${PASSWORD_MIN_LENGTH} תווים`;
+    if (!isPasswordValid(newPassword)) {
+      return PASSWORD_RULE_TEXT;
     }
     if (newPassword !== confirmPassword) {
       return 'הסיסמאות אינן זהות';
@@ -123,7 +133,9 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
         ) : (
           <>
             <View style={styles.subtitleRow}>
-              <Text style={styles.subtitle}>הזן סיסמה חדשה לחשבון שלך.</Text>
+              <Text style={styles.subtitle}>
+                הזן סיסמה חדשה לחשבון שלך. {PASSWORD_RULE_TEXT}.
+              </Text>
             </View>
 
             <View style={styles.form}>
@@ -151,7 +163,7 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
                       setNewPassword(v);
                       if (error) setError(null);
                     }}
-                    placeholder="לפחות 8 תווים"
+                    placeholder={`לפחות ${PASSWORD_MIN_LENGTH} תווים`}
                     placeholderTextColor={Colors.textMuted}
                     secureTextEntry={!showNewPassword}
                     autoCapitalize="none"
@@ -159,6 +171,8 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
                   />
                 </View>
               </View>
+
+              <PasswordChecklist value={newPassword} />
 
               <View style={styles.inputGroup}>
                 <View style={styles.labelRow}>
@@ -194,6 +208,10 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
                 </View>
               </View>
 
+              {pwMismatch && (
+                <Text style={styles.mismatchText}>הסיסמאות אינן זהות</Text>
+              )}
+
               {error && (
                 <View style={styles.errorBox}>
                   <Ionicons name="alert-circle" size={18} color={Colors.danger} />
@@ -202,10 +220,13 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
               )}
 
               <TouchableOpacity
-                style={[styles.submitBtn, submitting && styles.submitBtnLoading]}
+                style={[
+                  styles.submitBtn,
+                  (submitting || !canSubmit) && styles.submitBtnLoading,
+                ]}
                 onPress={handleSubmit}
                 activeOpacity={0.85}
-                disabled={submitting}
+                disabled={!canSubmit}
               >
                 <Text style={styles.submitBtnText}>
                   {submitting ? 'מעדכן...' : 'עדכן סיסמה'}
@@ -298,6 +319,13 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: FontSize.sm,
+    color: Colors.danger,
+    fontWeight: '600',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  mismatchText: {
+    fontSize: FontSize.xs,
     color: Colors.danger,
     fontWeight: '600',
     textAlign: 'right',

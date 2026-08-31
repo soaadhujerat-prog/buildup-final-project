@@ -266,7 +266,7 @@ const RegistrationRow: React.FC<{
               {new Date(record.approvedAt ?? record.processedAt ?? record.submittedAt).toLocaleDateString('he-IL')}
             </Text>
             {' · ת.ז '}
-            <Text style={{ writingDirection: 'ltr' }}>{data.idNumber}</Text>
+            <Text style={{ writingDirection: 'ltr' }}>{data.idNumber ?? '—'}</Text>
           </Text>
         ) : (
           <Text style={styles.rowMeta}>
@@ -275,7 +275,7 @@ const RegistrationRow: React.FC<{
               {new Date(record.submittedAt).toLocaleDateString('he-IL')}
             </Text>
             {' · ת.ז '}
-            <Text style={{ writingDirection: 'ltr' }}>{data.idNumber}</Text>
+            <Text style={{ writingDirection: 'ltr' }}>{data.idNumber ?? '—'}</Text>
           </Text>
         )}
       </View>

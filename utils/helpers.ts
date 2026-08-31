@@ -5,6 +5,7 @@ import type {
   Contractor,
   ContractorLicenseVerificationStatus,
   InvitationStatus,
+  RegistrationStatusEvent,
   SupportTicketStatus,
   Worker,
 } from '../types';
@@ -297,6 +298,45 @@ export const supportTicketDisplay = (
  *  "טופל" category. This is what "פניות פתוחות" counts. */
 export const isSupportTicketOpen = (status: SupportTicketStatus): boolean =>
   supportTicketDisplay(status).state !== 'done';
+
+// ---------------------------------------------------------------------------
+// Registration status-event display
+// ---------------------------------------------------------------------------
+
+export interface RegistrationEventDisplay {
+  /** User-facing Hebrew headline for the event. */
+  title: string;
+  /** Optional secondary line carrying real free-text the admin wrote (a
+   *  rejection reason / an approval note). Never a raw enum / event code. */
+  detail?: string;
+}
+
+/**
+ * The ONE place that turns a raw `registration_status_events` row into
+ * user-facing Hebrew. Backend event `reason` values are implementation codes
+ * (`submitted`, `approved`, `reverted for re-review`) EXCEPT on rejection,
+ * where `reason` is the admin's own text — so it is surfaced as `detail`, not
+ * as a code. The DB codes are never changed; this is presentation only.
+ */
+export const registrationEventDisplay = (
+  e: Pick<RegistrationStatusEvent, 'fromStatus' | 'toStatus' | 'reason' | 'message'>
+): RegistrationEventDisplay => {
+  if (e.toStatus === 'approved') {
+    return { title: 'הרישום אושר', detail: e.message?.trim() || undefined };
+  }
+  if (e.toStatus === 'rejected') {
+    // `reason` here is the admin's free-text rejection reason.
+    return { title: 'הרישום נדחה', detail: e.reason?.trim() || undefined };
+  }
+  if (e.toStatus === 'pending' && e.fromStatus === 'rejected') {
+    return { title: 'הבקשה הוחזרה לבדיקה מחודשת' };
+  }
+  if (e.toStatus === 'blocked') {
+    return { title: 'החשבון נחסם', detail: e.reason?.trim() || undefined };
+  }
+  // submitted / pending -> pending
+  return { title: 'הבקשה הוגשה' };
+};
 
 /** The one wording for "when was this support ticket received", shared by the
  *  list card and the details screen. Full "DD.MM.YYYY בשעה HH:mm" when the

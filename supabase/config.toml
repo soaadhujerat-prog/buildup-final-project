@@ -395,6 +395,37 @@ deno_version = 2
 enabled = true
 verify_jwt = false
 
+# ---------------------------------------------------------------------------
+# register: worker/contractor sign-up. Called with no session, does its own
+# validation + dedup, and stores NO raw ID / password / email in the DB.
+# Requires ID_HMAC_PEPPER.
+# ---------------------------------------------------------------------------
+[functions.register]
+enabled = true
+verify_jwt = false
+
+# ---------------------------------------------------------------------------
+# approve-registration / reject-registration: admin-only. verify_jwt=true AND
+# the caller is re-verified from live `profiles` (role=admin, status=approved)
+# before the transactional SQL function runs.
+# ---------------------------------------------------------------------------
+[functions.approve-registration]
+enabled = true
+verify_jwt = true
+
+[functions.reject-registration]
+enabled = true
+verify_jwt = true
+
+# ---------------------------------------------------------------------------
+# admin-reveal-id: decrypts ONE applicant's ID number for registration
+# verification. Admin-only (verify_jwt=true + live profiles role/status check).
+# AES key = ID_ENC_KEY, or HKDF-SHA256(ID_HMAC_PEPPER); Edge env only.
+# ---------------------------------------------------------------------------
+[functions.admin-reveal-id]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

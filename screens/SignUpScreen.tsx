@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Switch,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,6 +41,13 @@ import {
   isValidIsraeliIdFormat,
   isValidEmail,
 } from '../utils/helpers';
+import {
+  isPasswordValid,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_RULE_TEXT,
+} from '../utils/passwordPolicy';
+import PasswordChecklist from '../components/PasswordChecklist';
+import { RegistrationError } from '../services/registrationService';
 
 type Role = 'worker' | 'contractor';
 
@@ -151,7 +159,7 @@ const SignUpScreen: React.FC<Props> = ({
 
     if (!city.trim()) e.city = 'יש לבחור עיר';
 
-    if (password.length < 4) e.password = 'סיסמה חייבת לפחות 4 תווים';
+    if (!isPasswordValid(password)) e.password = PASSWORD_RULE_TEXT;
     if (!confirmPwd) e.confirmPwd = 'יש לאמת את הסיסמה';
     else if (password !== confirmPwd) e.confirmPwd = 'הסיסמאות אינן תואמות';
 
@@ -213,14 +221,19 @@ const SignUpScreen: React.FC<Props> = ({
 
   const errors: Record<string, string> = submitAttempted ? validate() : {};
 
-  const handleSubmit = () => {
+  // Live password feedback — always on, independent of submitAttempted.
+  const pwValid = isPasswordValid(password);
+  const pwMismatch = confirmPwd.length > 0 && confirmPwd !== password;
+  const canSubmit = !submitting && pwValid && password === confirmPwd;
+
+  const handleSubmit = async () => {
     setSubmitAttempted(true);
     const errs = validate();
     if (Object.keys(errs).length > 0) return;
     if (!idDocument) return; // validate() already guarantees this — narrows the type below
     setSubmitting(true);
 
-    setTimeout(() => {
+    try {
       let registrationId: string;
       if (role === 'worker') {
         const data: WorkerRegistrationData = {
@@ -248,7 +261,7 @@ const SignUpScreen: React.FC<Props> = ({
           dailyRate: Number(dailyRate),
           bio: bio.trim() || undefined,
         };
-        registrationId = submitWorkerRegistration(data).id;
+        registrationId = (await submitWorkerRegistration(data)).id;
       } else {
         const data: ContractorRegistrationData = {
           fullName: fullName.trim(),
@@ -268,11 +281,26 @@ const SignUpScreen: React.FC<Props> = ({
           password,
           bio: bio.trim() || undefined,
         };
-        registrationId = submitContractorRegistration(data).id;
+        registrationId = (await submitContractorRegistration(data)).id;
       }
-      setSubmitting(false);
       onRegistered(registrationId);
-    }, 700);
+    } catch (e) {
+      // Backend enabled and the sign-up genuinely failed — real error, no
+      // silent fallback. Errors are deliberately generic (no field-level leak).
+      const code = e instanceof RegistrationError ? e.code : 'server';
+      Alert.alert(
+        'ההרשמה נכשלה',
+        code === 'weak_password'
+          ? PASSWORD_RULE_TEXT
+          : code === 'invalid'
+          ? 'חלק מהפרטים שהוזנו אינם תקינים. בדוק/י ונסה/י שוב.'
+          : code === 'unavailable'
+          ? 'לא ניתן להשלים את ההרשמה עם הפרטים האלה. ייתכן שחלקם כבר קיימים במערכת.'
+          : 'אירעה שגיאה בשליחת ההרשמה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const isWorker = role === 'worker';
@@ -632,15 +660,16 @@ const SignUpScreen: React.FC<Props> = ({
         </Section>
 
         <Section title="סיסמה">
+          <Text style={styles.passwordRule}>{PASSWORD_RULE_TEXT}</Text>
           <Field
             label="סיסמה"
             value={password}
             onChange={setPassword}
-            placeholder="לפחות 4 תווים"
+            placeholder={`לפחות ${PASSWORD_MIN_LENGTH} תווים`}
             secure
             icon="lock-closed-outline"
-            error={errors.password}
           />
+          <PasswordChecklist value={password} />
           <Field
             label="אימות סיסמה"
             value={confirmPwd}
@@ -648,7 +677,7 @@ const SignUpScreen: React.FC<Props> = ({
             placeholder="הקלד שוב"
             secure
             icon="lock-closed-outline"
-            error={errors.confirmPwd}
+            error={pwMismatch ? 'הסיסמאות אינן תואמות' : errors.confirmPwd}
           />
         </Section>
 
@@ -664,15 +693,29 @@ const SignUpScreen: React.FC<Props> = ({
         )}
 
         <TouchableOpacity
-          style={[styles.submitBtn, submitting && styles.submitBtnLoading]}
+          style={[
+            styles.submitBtn,
+            (submitting || !canSubmit) && styles.submitBtnLoading,
+          ]}
           onPress={handleSubmit}
           activeOpacity={0.85}
-          disabled={submitting}
+          disabled={!canSubmit}
         >
           <Text style={styles.submitBtnText}>
             {submitting ? 'שולח לאישור...' : 'שלח לאישור מנהל המערכת'}
           </Text>
         </TouchableOpacity>
+        {!pwValid ? (
+          <Text style={styles.submitHint}>
+            כדי להמשיך, יש להשלים את דרישות הסיסמה שמסומנות למעלה.
+          </Text>
+        ) : password !== confirmPwd ? (
+          <Text style={styles.submitHint}>
+            {confirmPwd.length === 0
+              ? 'יש להזין שוב את הסיסמה בשדה "אימות סיסמה".'
+              : 'הסיסמאות אינן תואמות — יש לתקן את שדה אימות הסיסמה.'}
+          </Text>
+        ) : null}
 
         <View style={styles.signupRow}>
           <Text style={styles.signupText}>כבר יש לך חשבון?</Text>
@@ -801,6 +844,20 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   inputWrapperError: { borderColor: Colors.danger },
+  passwordRule: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+    textAlign: 'right',
+    marginBottom: 2,
+  },
+  submitHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
+    textAlign: 'center',
+    marginTop: Spacing.sm,
+  },
   fieldErrorText: {
     fontSize: FontSize.xs,
     color: Colors.danger,

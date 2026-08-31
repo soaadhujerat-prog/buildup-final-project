@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,11 @@ import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
 import AttachedDocument from '../components/AttachedDocument';
 import { isImageDocument, formatFileSize } from '../components/DocumentUploadField';
-import { formatDateTime, formatDateIL } from '../utils/helpers';
+import {
+  formatDateTime,
+  formatDateIL,
+  registrationEventDisplay,
+} from '../utils/helpers';
 import {
   ContractorRegistrationData,
   WorkerRegistrationData,
@@ -35,6 +39,19 @@ import {
   contractorAreas,
   normalizeCertifications,
 } from '../utils/normalize';
+import { isBackendEnabled } from '../config/env';
+import {
+  RegistrationError,
+  revealRegistrationIdNumber,
+} from '../services/registrationService';
+
+/** Generic, non-leaking message for a failed admin registration action. */
+function regActionErrMsg(e: unknown): string {
+  const code = e instanceof RegistrationError ? e.code : '';
+  if (code === 'forbidden') return 'אין לך הרשאה לבצע פעולה זו.';
+  if (code === 'reason_required') return 'יש לציין סיבת דחייה.';
+  return 'הפעולה נכשלה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.';
+}
 
 type RegStatusFilter = 'pending' | 'approved' | 'rejected';
 
@@ -71,6 +88,25 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   const [approveModalVisible, setApproveModalVisible] = useState(false);
   const [approveMessage, setApproveMessage] = useState('');
   const [idImageViewerVisible, setIdImageViewerVisible] = useState(false);
+  // Backend: the applicant's ID number is not in `reg.data` (HMAC + ciphertext
+  // only). Fetch the decrypted value via the admin-only `admin-reveal-id` path.
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+
+  const dataIdNumber = reg?.data.idNumber;
+  useEffect(() => {
+    if (!isBackendEnabled() || dataIdNumber) return;
+    let alive = true;
+    revealRegistrationIdNumber(registrationId)
+      .then((id) => {
+        if (alive) setRevealedId(id);
+      })
+      .catch(() => {
+        if (alive) setRevealedId(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [registrationId, dataIdNumber]);
 
   if (!reg) {
     return (
@@ -102,16 +138,20 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   const done = (status: RegStatusFilter) =>
     onResolved ? onResolved(status) : onBack();
 
-  const submitApprove = () => {
-    approveRegistration(
-      reg.id,
-      currentUser?.id ?? 'adm1',
-      approveMessage.trim() || undefined
-    );
-    setApproveModalVisible(false);
-    Alert.alert('הרישום אושר', `${data.fullName} אושר/ה בהצלחה.`, [
-      { text: 'אישור', onPress: () => done('approved') },
-    ]);
+  const submitApprove = async () => {
+    try {
+      await approveRegistration(
+        reg.id,
+        currentUser?.id ?? 'adm1',
+        approveMessage.trim() || undefined
+      );
+      setApproveModalVisible(false);
+      Alert.alert('הרישום אושר', `${data.fullName} אושר/ה בהצלחה.`, [
+        { text: 'אישור', onPress: () => done('approved') },
+      ]);
+    } catch (e) {
+      Alert.alert('אישור נכשל', regActionErrMsg(e));
+    }
   };
 
   const handleRevertRejection = () => {
@@ -123,13 +163,17 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         {
           text: 'החזר לבדיקה',
           style: 'default',
-          onPress: () => {
-            revertRegistrationRejection(reg.id, currentUser?.id ?? 'adm1');
-            Alert.alert(
-              'הבקשה הוחזרה',
-              'הבקשה חזרה לרשימת "ממתינות" לבדיקה מחודשת.',
-              [{ text: 'אישור', onPress: () => done('pending') }]
-            );
+          onPress: async () => {
+            try {
+              await revertRegistrationRejection(reg.id, currentUser?.id ?? 'adm1');
+              Alert.alert(
+                'הבקשה הוחזרה',
+                'הבקשה חזרה לרשימת "ממתינות" לבדיקה מחודשת.',
+                [{ text: 'אישור', onPress: () => done('pending') }]
+              );
+            } catch (e) {
+              Alert.alert('הפעולה נכשלה', regActionErrMsg(e));
+            }
           },
         },
       ]
@@ -159,16 +203,20 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         {
           text: 'דחה',
           style: 'destructive',
-          onPress: () => {
-            rejectRegistration(
-              reg.id,
-              currentUser?.id ?? 'adm1',
-              rejectReason.trim()
-            );
-            setRejectModalVisible(false);
-            Alert.alert('הרישום נדחה', `הרישום של ${data.fullName} נדחה.`, [
-              { text: 'אישור', onPress: () => done('rejected') },
-            ]);
+          onPress: async () => {
+            try {
+              await rejectRegistration(
+                reg.id,
+                currentUser?.id ?? 'adm1',
+                rejectReason.trim()
+              );
+              setRejectModalVisible(false);
+              Alert.alert('הרישום נדחה', `הרישום של ${data.fullName} נדחה.`, [
+                { text: 'אישור', onPress: () => done('rejected') },
+              ]);
+            } catch (e) {
+              Alert.alert('הדחייה נכשלה', regActionErrMsg(e));
+            }
           },
         },
       ]
@@ -257,23 +305,28 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           </Section>
         )}
 
-        {/* Full status audit trail — appended, never overwritten */}
+        {/* Full status audit trail — appended, never overwritten. Rendered via
+            registrationEventDisplay() so raw backend codes ("submitted",
+            "pending → pending", …) are never shown; a real admin
+            reason/message is surfaced separately as its own line. */}
         {reg.statusHistory && reg.statusHistory.length > 0 && (
           <Section title="היסטוריית סטטוס">
-            {reg.statusHistory.map((e) => (
-              <View key={e.id} style={styles.historyRow}>
-                <Text style={styles.historyDate}>
-                  <Text style={{ writingDirection: 'ltr' }}>
-                    {formatDateTime(e.createdAt)}
+            {reg.statusHistory.map((e) => {
+              const ev = registrationEventDisplay(e);
+              return (
+                <View key={e.id} style={styles.historyRow}>
+                  <Text style={styles.historyText}>{ev.title}</Text>
+                  {!!ev.detail && (
+                    <Text style={styles.historyDetail}>{ev.detail}</Text>
+                  )}
+                  <Text style={styles.historyDate}>
+                    <Text style={{ writingDirection: 'ltr' }}>
+                      {formatDateTime(e.createdAt)}
+                    </Text>
                   </Text>
-                </Text>
-                <Text style={styles.historyText}>
-                  {statusLabel(e.fromStatus)} ← {statusLabel(e.toStatus)}
-                  {e.reason ? ` · ${e.reason}` : ''}
-                  {e.message ? ` · ${e.message}` : ''}
-                </Text>
-              </View>
-            ))}
+                </View>
+              );
+            })}
           </Section>
         )}
 
@@ -345,7 +398,12 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
         {/* Identity */}
         <Section title="פרטים אישיים">
           <FieldRow label="שם מלא" value={data.fullName} />
-          <FieldRow label="תעודת זהות" value={data.idNumber} mono ltr />
+          <FieldRow
+            label="תעודת זהות"
+            value={data.idNumber ?? revealedId ?? '—'}
+            mono
+            ltr
+          />
           <FieldRow
             label="טלפון"
             value={data.phone}
@@ -1156,6 +1214,14 @@ const styles = StyleSheet.create({
   historyText: {
     fontSize: FontSize.sm,
     color: Colors.text,
+    fontWeight: '700',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 20,
+  },
+  historyDetail: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
     textAlign: 'right',
     writingDirection: 'rtl',
     lineHeight: 20,

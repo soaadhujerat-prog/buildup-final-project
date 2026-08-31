@@ -45,6 +45,21 @@ export class AuthInvalidCredentialsError extends Error {
   }
 }
 
+/**
+ * The ID + password matched a registration that is NOT yet approved. Carries
+ * the registration status so the caller can route to the right status screen
+ * (Phase 2 gating) instead of showing a generic credentials error. Only raised
+ * AFTER `login-by-id` has verified the password.
+ */
+export class AuthRegistrationStatusError extends Error {
+  status: 'pending' | 'rejected';
+  constructor(status: 'pending' | 'rejected') {
+    super(`registration_${status}`);
+    this.name = 'AuthRegistrationStatusError';
+    this.status = status;
+  }
+}
+
 /** Eagerly build the Supabase client so persisted-session restore + token
  *  auto-refresh start as early as possible. Safe to call more than once. */
 export const initializeAuth = (): void => {
@@ -61,7 +76,7 @@ export const getCurrentSession = async (): Promise<Session | null> => {
 
 type EdgeLoginResponse =
   | { ok: true; access_token: string; refresh_token: string }
-  | { ok: false; error?: string };
+  | { ok: false; error?: string; status?: 'pending' | 'rejected' };
 
 /**
  * Real "login by Israeli ID + password".
@@ -93,6 +108,9 @@ export const signInById = async (
   }
 
   if (!data || data.ok !== true) {
+    if (data && (data.status === 'pending' || data.status === 'rejected')) {
+      throw new AuthRegistrationStatusError(data.status);
+    }
     throw new AuthInvalidCredentialsError();
   }
 

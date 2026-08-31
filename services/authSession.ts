@@ -80,6 +80,11 @@ export async function loginById(
     await authService.signInById(idNumber, password);
   } catch (err) {
     if (err instanceof authService.AuthInvalidCredentialsError) return genericFailure();
+    if (err instanceof authService.AuthRegistrationStatusError) {
+      // ID + password matched a not-yet-approved registration — route to the
+      // pending / rejected status screen (same as the mock path). No session.
+      return { ok: false, status: err.status, reason: err.status };
+    }
     throw err; // real backend/network error — surfaced by the screen
   }
 

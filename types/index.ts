@@ -204,7 +204,11 @@ export interface Certification {
 
 export interface WorkerRegistrationData {
   fullName: string;
-  idNumber: string;
+  /** OPTIONAL (Phase 3A): the backend never stores a plaintext ID — the
+   *  `register` Edge Function turns it into an HMAC and drops the raw value, so
+   *  a registration loaded back from Supabase has no `idNumber`. The mock path
+   *  and the sign-up form still populate it. UI must tolerate `undefined`. */
+  idNumber?: string;
   idDocument?: UploadedDocument;
   phone: string;
   email: string;
@@ -227,7 +231,8 @@ export interface WorkerRegistrationData {
 export interface ContractorRegistrationData {
   fullName: string;
   companyName: string;
-  idNumber: string;
+  /** OPTIONAL (Phase 3A) — see WorkerRegistrationData.idNumber. */
+  idNumber?: string;
   idDocument?: UploadedDocument;
   contractorRegistrationNumber: string;
   phone: string;

@@ -81,6 +81,7 @@ import {
 import { isBackendEnabled } from '../config/env';
 import * as authService from '../services/authService';
 import { bootstrapSessionUser, loginById } from '../services/authSession';
+import * as registrationService from '../services/registrationService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -177,11 +178,20 @@ interface AppState {
   logout: () => void;
 
   // Registration
-  submitWorkerRegistration: (data: WorkerRegistrationData) => RegistrationRecord;
+  /** Submit a sign-up. Backend (`USE_BACKEND=true`): calls the `register` Edge
+   *  Function (creates the auth user + a `pending` registrations row; raw ID /
+   *  password / email are never stored). Mock: pushes onto the local array.
+   *  Rejects with a `RegistrationError` the screen can surface. */
+  submitWorkerRegistration: (
+    data: WorkerRegistrationData
+  ) => Promise<RegistrationRecord>;
   submitContractorRegistration: (
     data: ContractorRegistrationData
-  ) => RegistrationRecord;
+  ) => Promise<RegistrationRecord>;
   getRegistration: (id: string) => RegistrationRecord | undefined;
+  /** Re-pull the admin registrations list from the backend (no-op on mock).
+   *  Called automatically after approve / reject / revert. */
+  refreshRegistrations: () => Promise<void>;
 
   // Admin actions
   /** Approve a still-`pending` registration. `message` is an optional
@@ -192,18 +202,21 @@ interface AppState {
     registrationId: string,
     adminId: string,
     message?: string
-  ) => void;
+  ) => Promise<void>;
   rejectRegistration: (
     registrationId: string,
     adminId: string,
     reason: string
-  ) => void;
+  ) => Promise<void>;
   /** Undo a rejection — moves a `rejected` registration back to `pending` so
    *  it re-enters the pending queue for a fresh review. Never auto-approves.
    *  The rejection is NOT erased: the previous rejectionReason and every
    *  prior statusHistory entry are kept, and a new (rejected → pending)
    *  event is appended. */
-  revertRegistrationRejection: (registrationId: string, adminId: string) => void;
+  revertRegistrationRejection: (
+    registrationId: string,
+    adminId: string
+  ) => Promise<void>;
   blockUser: (userId: string, adminId: string, reason?: string) => void;
   unblockUser: (userId: string, adminId: string) => void;
 
@@ -945,7 +958,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const submitWorkerRegistration = useCallback<
     AppState['submitWorkerRegistration']
-  >((data) => {
+  >(async (data) => {
+    if (isBackendEnabled()) {
+      // Real sign-up: creates the auth user + a `pending` registrations row
+      // server-side. Raw ID / password / email are never persisted. Errors
+      // propagate to SignUpScreen (no silent fallback).
+      const rec = await registrationService.submitWorkerRegistration(data);
+      // Keep the just-submitted record in memory (own device only, password
+      // stripped) so RegistrationPendingScreen can show the clean summary —
+      // the un-authenticated signer can't read their row back from the DB.
+      setRegistrations((prev) => [rec, ...prev]);
+      return rec;
+    }
+
     const rec: RegistrationRecord = {
       id: newId('reg'),
       role: 'worker',
@@ -971,7 +996,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const submitContractorRegistration = useCallback<
     AppState['submitContractorRegistration']
-  >((data) => {
+  >(async (data) => {
+    if (isBackendEnabled()) {
+      const rec = await registrationService.submitContractorRegistration(data);
+      setRegistrations((prev) => [rec, ...prev]);
+      return rec;
+    }
+
     const rec: RegistrationRecord = {
       id: newId('reg'),
       role: 'contractor',
@@ -1002,12 +1033,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     [registrations]
   );
 
+  const refreshRegistrations = useCallback<AppState['refreshRegistrations']>(
+    async () => {
+      if (!isBackendEnabled()) return;
+      try {
+        const rows = await registrationService.listRegistrationsForAdmin();
+        setRegistrations(rows);
+      } catch {
+        // keep whatever the admin already has on screen
+      }
+    },
+    []
+  );
+
+  // Backend: load the real registrations queue once the signed-in user is a
+  // live, approved admin. Mock: this never runs; `registrations` stays
+  // MOCK_REGISTRATIONS.
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (currentUser?.role !== 'admin' || currentUser.status !== 'approved') return;
+    let alive = true;
+    registrationService
+      .listRegistrationsForAdmin()
+      .then((rows) => {
+        if (alive) setRegistrations(rows);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [currentUser?.id, currentUser?.role, currentUser?.status]);
+
   // ---------------------------------------------------------------------
   // Admin actions
   // ---------------------------------------------------------------------
 
   const approveRegistration = useCallback<AppState['approveRegistration']>(
-    (registrationId, adminId, message) => {
+    async (registrationId, adminId, message) => {
+      if (isBackendEnabled()) {
+        // Server-authoritative: the `approve-registration` Edge Function
+        // re-verifies the caller is a live admin, then materialises everything
+        // in one transaction. Then re-pull so the screen reflects reality.
+        await registrationService.approveRegistration(registrationId, message);
+        await refreshRegistrations();
+        return;
+      }
+
       const reg = registrations.find((r) => r.id === registrationId);
       if (!reg || reg.status !== 'pending') return;
 
@@ -1126,11 +1197,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
       }
     },
-    [registrations, pushNotification]
+    [registrations, pushNotification, refreshRegistrations]
   );
 
   const rejectRegistration = useCallback<AppState['rejectRegistration']>(
-    (registrationId, adminId, reason) => {
+    async (registrationId, adminId, reason) => {
+      if (isBackendEnabled()) {
+        await registrationService.rejectRegistration(registrationId, reason);
+        await refreshRegistrations();
+        return;
+      }
+
       const ts = nowIso();
       // The registration record is NEVER deleted — it stays in the pool with
       // status 'rejected', full data intact, plus an appended audit event.
@@ -1165,13 +1242,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       // statusHistory event. The applicant also sees the reason on
       // RegistrationRejectedScreen.
     },
-    []
+    [refreshRegistrations]
   );
 
   const revertRegistrationRejection = useCallback<
     AppState['revertRegistrationRejection']
   >(
-    (registrationId, adminId) => {
+    async (registrationId, adminId) => {
+      if (isBackendEnabled()) {
+        await registrationService.revertRegistrationRejection(registrationId);
+        await refreshRegistrations();
+        return;
+      }
+
       const ts = nowIso();
       setRegistrations((prev) =>
         prev.map((r) => {
@@ -1218,7 +1301,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         })
       );
     },
-    []
+    [refreshRegistrations]
   );
 
   const setCustomerStatus = useCallback(
@@ -2496,6 +2579,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       submitWorkerRegistration,
       submitContractorRegistration,
       getRegistration,
+      refreshRegistrations,
 
       approveRegistration,
       rejectRegistration,
@@ -2589,6 +2673,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       submitWorkerRegistration,
       submitContractorRegistration,
       getRegistration,
+      refreshRegistrations,
       approveRegistration,
       rejectRegistration,
       revertRegistrationRejection,
