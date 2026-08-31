@@ -12,14 +12,21 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
+import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { getOtherParticipantId } from '../services/conversationService';
+import { formatChatDateSeparator } from '../utils/helpers';
+import ChatHeader from '../components/ChatHeader';
+import MessageBubble from '../components/MessageBubble';
+import ChatDateSeparator from '../components/ChatDateSeparator';
 
 interface Props {
   conversationId: string;
   onBack: () => void;
 }
+
+const sameCalendarDay = (a: string, b: string): boolean =>
+  new Date(a).toDateString() === new Date(b).toDateString();
 
 const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
   const insets = useSafeAreaInsets();
@@ -31,13 +38,29 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
     [conversations, conversationId]
   );
 
+  // Oldest → newest, always. Sorted on a COPY so the context's message
+  // array is never reordered or mutated.
+  const orderedMessages = useMemo(
+    () =>
+      [...(conversation?.messages ?? [])].sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      ),
+    [conversation?.messages]
+  );
+
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState(false);
 
+  // Jump to the newest message on open and whenever a message is added.
   useEffect(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-  }, [conversation?.messages.length]);
+    const t = setTimeout(
+      () => scrollRef.current?.scrollToEnd({ animated: true }),
+      80
+    );
+    return () => clearTimeout(t);
+  }, [orderedMessages.length]);
 
   if (!conversation || !currentUser) {
     return (
@@ -52,7 +75,6 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
 
   const otherId = getOtherParticipantId(conversation, currentUser.id);
   const other = otherId ? getUserById(otherId) : undefined;
-  const otherIsContractor = other?.role === 'contractor';
 
   const handleSend = () => {
     const text = draft.trim();
@@ -74,35 +96,7 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={[styles.headerBar, { paddingTop: insets.top + Spacing.sm }]}>
-        <TouchableOpacity onPress={onBack} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="chevron-forward" size={26} color={Colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {other?.fullName ?? 'משתמש'}
-          </Text>
-          {other?.role === 'worker' && (
-            <Text style={styles.headerSub} numberOfLines={1}>
-              {other.profession}
-            </Text>
-          )}
-        </View>
-        <View
-          style={[
-            styles.headerAvatar,
-            otherIsContractor
-              ? { backgroundColor: '#DBEAFE' }
-              : { backgroundColor: Colors.primaryFaint },
-          ]}
-        >
-          <Ionicons
-            name={otherIsContractor ? 'business' : 'hammer'}
-            size={20}
-            color={otherIsContractor ? Colors.secondary : Colors.primary}
-          />
-        </View>
-      </View>
+      <ChatHeader otherUser={other} topInset={insets.top} onBack={onBack} />
 
       <ScrollView
         ref={scrollRef}
@@ -110,8 +104,11 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        onContentSizeChange={() =>
+          scrollRef.current?.scrollToEnd({ animated: false })
+        }
       >
-        {conversation.messages.length === 0 && (
+        {orderedMessages.length === 0 && (
           <View style={styles.emptyChat}>
             <Ionicons
               name="chatbubbles-outline"
@@ -124,56 +121,19 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
             </Text>
           </View>
         )}
-        {conversation.messages.map((m, idx) => {
-          // For demo, treat the participant as the "other" and any message
-          // sender that's not the current user as theirs.
-          const isMine = m.senderId === currentUser.id;
-          const showDate =
-            idx === 0 ||
-            new Date(conversation.messages[idx - 1].timestamp).toDateString() !==
-              new Date(m.timestamp).toDateString();
+
+        {orderedMessages.map((m, idx) => {
+          const prev = orderedMessages[idx - 1];
+          const showDate = !prev || !sameCalendarDay(prev.timestamp, m.timestamp);
           return (
             <View key={m.id}>
               {showDate && (
-                <View style={styles.dateBadge}>
-                  <Text style={styles.dateText}>
-                    {new Date(m.timestamp).toLocaleDateString('he-IL')}
-                  </Text>
-                </View>
+                <ChatDateSeparator label={formatChatDateSeparator(m.timestamp)} />
               )}
-              <View
-                style={[
-                  styles.bubbleRow,
-                  isMine ? styles.bubbleRowMine : styles.bubbleRowOther,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.bubble,
-                    isMine ? styles.bubbleMine : styles.bubbleOther,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.bubbleText,
-                      isMine && styles.bubbleTextMine,
-                    ]}
-                  >
-                    {m.content}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.bubbleTime,
-                      isMine && styles.bubbleTimeMine,
-                    ]}
-                  >
-                    {new Date(m.timestamp).toLocaleTimeString('he-IL', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </Text>
-                </View>
-              </View>
+              <MessageBubble
+                message={m}
+                isMine={m.senderId === currentUser.id}
+              />
             </View>
           );
         })}
@@ -218,42 +178,12 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
-  headerBar: {
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
-    backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    gap: Spacing.md,
-  },
-  backBtn: { padding: 4 },
-  headerCenter: { flex: 1, alignItems: 'flex-end' },
-  headerTitle: {
-    fontSize: FontSize.md,
-    fontWeight: '800',
-    color: Colors.text,
-    writingDirection: 'rtl',
-  },
-  headerSub: {
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    writingDirection: 'rtl',
-  },
-  headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
   messagesContainer: {
     padding: Spacing.lg,
-    gap: 8,
+    flexGrow: 1,
   },
   emptyChat: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 80,
@@ -283,53 +213,6 @@ const styles = StyleSheet.create({
     color: Colors.danger,
     writingDirection: 'rtl',
   },
-  dateBadge: {
-    alignSelf: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    backgroundColor: Colors.gray100,
-    borderRadius: Radius.full,
-    marginVertical: 8,
-  },
-  dateText: {
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-    fontWeight: '600',
-  },
-
-  bubbleRow: { flexDirection: 'row-reverse' },
-  bubbleRowMine: { justifyContent: 'flex-start' },
-  bubbleRowOther: { justifyContent: 'flex-end' },
-  bubble: {
-    maxWidth: '75%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    ...Shadow.small,
-  },
-  bubbleMine: {
-    backgroundColor: Colors.primary,
-    borderBottomRightRadius: 4,
-  },
-  bubbleOther: {
-    backgroundColor: Colors.white,
-    borderBottomLeftRadius: 4,
-  },
-  bubbleText: {
-    fontSize: FontSize.sm,
-    color: Colors.text,
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    lineHeight: 20,
-  },
-  bubbleTextMine: { color: Colors.white },
-  bubbleTime: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    textAlign: 'left',
-    marginTop: 2,
-  },
-  bubbleTimeMine: { color: 'rgba(255,255,255,0.85)' },
 
   inputBar: {
     flexDirection: 'row-reverse',

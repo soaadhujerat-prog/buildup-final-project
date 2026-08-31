@@ -1,120 +1,82 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../types';
-import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
+import { Colors, Spacing, FontSize } from '../theme/colors';
+import { formatMessageTime } from '../utils/helpers';
 
 interface MessageBubbleProps {
   message: Message;
+  /** True when the current user sent this message. Drives which side the
+   *  bubble sits on and its colour — never re-derives sender/receiver. */
   isMine: boolean;
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isMine }) => {
-  return (
-    <View style={[styles.wrapper, isMine ? styles.wrapperMine : styles.wrapperTheirs]}>
-      <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs]}>
-        <Text style={[styles.content, isMine ? styles.contentMine : styles.contentTheirs]}>
-          {message.content}
-        </Text>
-
-        <View style={[styles.meta, isMine ? styles.metaMine : styles.metaTheirs]}>
-          {isMine && (
-            <Ionicons
-              name={message.isRead ? 'checkmark-done' : 'checkmark'}
-              size={12}
-              color={message.isRead ? '#93C5FD' : 'rgba(255,255,255,0.7)'}
-            />
-          )}
-
-          <Text style={[styles.time, isMine ? styles.timeMine : styles.timeTheirs]}>
-            {message.timestamp}
-          </Text>
-        </View>
-      </View>
+/** One chat message, presentation only. Shared by the worker and contractor
+ *  chat screens so both sides render messages identically.
+ *
+ *  mine  → BuildUp brown background, white text, pinned to the right.
+ *  other → white card, dark text, pinned to the left.
+ *
+ *  The screen is not force-RTL (I18nManager.isRTL === false), so plain
+ *  `row` + flex-end/flex-start map directly to visual right/left. Text wraps
+ *  naturally; the bubble is capped at 78% of the row so long Hebrew messages
+ *  never run off-screen on either iOS or Android. */
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isMine }) => (
+  <View style={[styles.row, isMine ? styles.rowMine : styles.rowOther]}>
+    <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther]}>
+      <Text style={[styles.text, isMine ? styles.textMine : styles.textOther]}>
+        {message.content}
+      </Text>
+      <Text style={[styles.time, isMine ? styles.timeMine : styles.timeOther]}>
+        {formatMessageTime(message.timestamp)}
+      </Text>
     </View>
-  );
-};
+  </View>
+);
 
 const styles = StyleSheet.create({
-  wrapper: {
-    width: '100%',
-    paddingHorizontal: Spacing.lg,
-    marginVertical: 4,
+  row: {
+    flexDirection: 'row',
+    marginVertical: 3,
+    paddingHorizontal: Spacing.xs,
   },
-
-  wrapperMine: {
-    alignItems: 'flex-end',
-  },
-
-  wrapperTheirs: {
-    alignItems: 'flex-start',
-  },
+  rowMine: { justifyContent: 'flex-end' },
+  rowOther: { justifyContent: 'flex-start' },
 
   bubble: {
     maxWidth: '78%',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
   },
-
   bubbleMine: {
     backgroundColor: Colors.primary,
-    borderBottomRightRadius: 6,
+    borderBottomRightRadius: 4,
   },
-
-  bubbleTheirs: {
+  bubbleOther: {
     backgroundColor: Colors.white,
-    borderBottomLeftRadius: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 1,
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
 
-  content: {
-    fontSize: FontSize.md,
-    lineHeight: 24,
+  text: {
+    fontSize: FontSize.sm,
+    lineHeight: 20,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-
-  contentMine: {
-    color: Colors.white,
-  },
-
-  contentTheirs: {
-    color: Colors.text,
-  },
-
-  meta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 6,
-  },
-
-  metaMine: {
-    alignSelf: 'flex-end',
-    justifyContent: 'flex-end',
-  },
-
-  metaTheirs: {
-    alignSelf: 'flex-start',
-    justifyContent: 'flex-start',
-  },
+  textMine: { color: Colors.white },
+  textOther: { color: Colors.text },
 
   time: {
-    fontSize: FontSize.xs,
+    fontSize: 10,
+    marginTop: 3,
+    textAlign: 'left',
+    writingDirection: 'ltr',
   },
-
-  timeMine: {
-    color: 'rgba(255,255,255,0.78)',
-  },
-
-  timeTheirs: {
-    color: Colors.textMuted,
-  },
+  timeMine: { color: 'rgba(255,255,255,0.85)' },
+  timeOther: { color: Colors.textMuted },
 });
 
 export default MessageBubble;

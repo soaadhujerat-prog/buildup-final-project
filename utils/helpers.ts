@@ -1,9 +1,12 @@
 import type {
+  Admin,
   ApplicationStatus,
   Assignment,
+  Contractor,
   ContractorLicenseVerificationStatus,
   InvitationStatus,
   SupportTicketStatus,
+  Worker,
 } from '../types';
 import type { WorkerContractorRelationship } from '../services/assignmentService';
 
@@ -24,32 +27,94 @@ export const formatShortDate = (dateString: string): string => {
   });
 };
 
-/** For conversation-list / chat timestamps — never show a raw ISO string.
- *  Today → "HH:mm", yesterday → "אתמול", anything older → "DD/MM/YYYY". */
-export const formatConversationTime = (isoString: string): string => {
+// ---------------------------------------------------------------------------
+// Messaging / Chat — one shared set of formatters + label helpers, used
+// identically by the Worker and the Contractor side. Never format a
+// conversation time, a chat date separator, a bubble time, or the "other
+// party" name/subtitle inline in a screen — always go through these.
+// ---------------------------------------------------------------------------
+
+const CHAT_MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const HEBREW_WEEKDAYS = [
+  'יום ראשון',
+  'יום שני',
+  'יום שלישי',
+  'יום רביעי',
+  'יום חמישי',
+  'יום שישי',
+  'שבת',
+];
+
+/** Whole-calendar-days between two instants (b - a), ignoring time of day.
+ *  0 = same day, 1 = a is yesterday relative to b, etc. */
+const calendarDaysAgo = (date: Date, now: Date): number => {
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((startOfDay(now) - startOfDay(date)) / CHAT_MS_PER_DAY);
+};
+
+/** The timestamp shown on each row of the conversations inbox.
+ *  today → "HH:mm" · yesterday → "אתמול" · within the last week → the
+ *  Hebrew weekday name · older → "DD.MM.YYYY". */
+export const formatConversationTimestamp = (isoString: string): string => {
   if (!isoString) return '';
   const date = new Date(isoString);
   if (isNaN(date.getTime())) return isoString;
 
-  const now = new Date();
-  const isSameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-
-  if (isSameDay(date, now)) {
+  const daysAgo = calendarDaysAgo(date, new Date());
+  if (daysAgo <= 0) {
     return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
   }
+  if (daysAgo === 1) return 'אתמול';
+  if (daysAgo < 7) return HEBREW_WEEKDAYS[date.getDay()];
 
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (isSameDay(date, yesterday)) return 'אתמול';
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${date.getFullYear()}`;
+};
 
-  return date.toLocaleDateString('he-IL', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+/** The centre chip shown inside a chat thread when the calendar day changes.
+ *  today → "היום" · yesterday → "אתמול" · older → "DD.MM.YYYY". */
+export const formatChatDateSeparator = (isoString: string): string => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+
+  const daysAgo = calendarDaysAgo(date, new Date());
+  if (daysAgo <= 0) return 'היום';
+  if (daysAgo === 1) return 'אתמול';
+
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${date.getFullYear()}`;
+};
+
+/** The small time under a single message bubble — 24-hour "HH:mm", local. */
+export const formatMessageTime = (isoString: string): string => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+};
+
+type ChatParty = Worker | Contractor | Admin;
+
+/** Display name of the person on the other side of a conversation. */
+export const chatPartyName = (user: ChatParty | undefined): string =>
+  user?.fullName?.trim() || 'משתמש';
+
+/** The small secondary line under the other party's name, in the inbox row
+ *  and the chat header. worker → their trade · contractor → the company
+ *  name (or the plain word "קבלן" when none is stored) · admin → a fixed
+ *  label. '' when there's nothing meaningful to add. Uses only fields that
+ *  already exist on the model — nothing invented. */
+export const chatPartySubtitle = (user: ChatParty | undefined): string => {
+  if (!user) return '';
+  if (user.role === 'worker') return (user as Worker).profession?.trim() || '';
+  if (user.role === 'contractor')
+    return (user as Contractor).companyName?.trim() || 'קבלן';
+  return 'מנהל המערכת';
 };
 
 /** The one shared "date + time" formatter for every lifecycle timestamp in
