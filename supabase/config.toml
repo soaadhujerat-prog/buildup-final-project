@@ -398,9 +398,21 @@ verify_jwt = false
 # ---------------------------------------------------------------------------
 # register: worker/contractor sign-up. Called with no session, does its own
 # validation + dedup, and stores NO raw ID / password / email in the DB.
-# Requires ID_HMAC_PEPPER.
+# Phase 3B: also accepts { reservedRegistrationId, idDocumentPath } and
+# verifies the pre-uploaded ID document before persisting id_document_path.
+# Requires ID_HMAC_PEPPER (+ ID_ENC_KEY).
 # ---------------------------------------------------------------------------
 [functions.register]
+enabled = true
+verify_jwt = false
+
+# ---------------------------------------------------------------------------
+# register-upload-url (Phase 3B): reserves a registrationId + id-documents
+# path and mints a short-lived one-shot signed upload token so an
+# UNauthenticated signer can upload their ID document straight to Storage
+# without the service-role key ever reaching the client. No DB write.
+# ---------------------------------------------------------------------------
+[functions.register-upload-url]
 enabled = true
 verify_jwt = false
 
@@ -423,6 +435,26 @@ verify_jwt = true
 # AES key = ID_ENC_KEY, or HKDF-SHA256(ID_HMAC_PEPPER); Edge env only.
 # ---------------------------------------------------------------------------
 [functions.admin-reveal-id]
+enabled = true
+verify_jwt = true
+
+# ---------------------------------------------------------------------------
+# admin-user-action (Phase 3B): one focused entry point for block / unblock /
+# set contractor registration number / grant-revoke admin permission.
+# verify_jwt=true + live `profiles` role/status re-check; the writes run in
+# SECURITY DEFINER admin_* SQL functions (service_role EXECUTE only).
+# ---------------------------------------------------------------------------
+[functions.admin-user-action]
+enabled = true
+verify_jwt = true
+
+# ---------------------------------------------------------------------------
+# review-license-update (Phase 3B): admin contractor-licence review / verify /
+# request-renewal. verify_jwt=true + live-admin re-check; SECURITY DEFINER
+# SQL functions (service_role EXECUTE only) do the transactional write +
+# contractor notification.
+# ---------------------------------------------------------------------------
+[functions.review-license-update]
 enabled = true
 verify_jwt = true
 

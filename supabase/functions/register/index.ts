@@ -1,11 +1,19 @@
 // =============================================================================
-// BuildUp – Edge Function: register  (Phase 3A)
+// BuildUp – Edge Function: register  (Phase 3A + 3B)
 // =============================================================================
 // Real worker/contractor sign-up. Called with NO session (verify_jwt = false).
 // Raw ID / password / email are never stored in `registrations`. In addition
 // to the HMAC (login/dedup) it also stores an AES-256-GCM ciphertext of the
 // normalized ID (admin verification only) via public.create_registration().
 // Password policy is enforced here (backstop) — mirror of utils/passwordPolicy.ts.
+//
+// Phase 3B: the ID document is uploaded BEFORE this call via the
+// `register-upload-url` function + a one-shot signed upload token. The client
+// then passes { reservedRegistrationId, idDocumentPath } here; we VERIFY the
+// object actually exists in id-documents/{reservedRegistrationId}/ and only
+// then persist registrations.id_document_path with the SAME row id (so the
+// id-documents RLS read policy, which keys on the first path segment, works).
+// A failed registration removes both the auth user and the uploaded object.
 // =============================================================================
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -126,10 +134,29 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const password = typeof raw.password === 'string' ? raw.password : '';
   const normId = normalizeId(raw.idNumber);
 
+  // Phase 3B: ID document already uploaded via `register-upload-url`.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const reservedRegistrationId =
+    typeof body?.reservedRegistrationId === 'string' ? body.reservedRegistrationId.trim() : '';
+  const idDocumentPath =
+    typeof body?.idDocumentPath === 'string' ? body.idDocumentPath.trim() : '';
+
   if (role !== 'worker' && role !== 'contractor') return json({ ok: false, error: 'invalid' });
   if (!EMAIL_RE.test(email)) return json({ ok: false, error: 'invalid' });
   if (!isPasswordValid(password)) return json({ ok: false, error: 'weak_password' });
   if (normId.length !== 9) return json({ ok: false, error: 'invalid' });
+
+  // Both ID-doc fields travel together or not at all; the path must live
+  // inside the reserved registration's folder.
+  if ((reservedRegistrationId === '') !== (idDocumentPath === '')) {
+    return json({ ok: false, error: 'invalid' });
+  }
+  if (reservedRegistrationId) {
+    if (!UUID_RE.test(reservedRegistrationId)) return json({ ok: false, error: 'invalid' });
+    if (!idDocumentPath.startsWith(`${reservedRegistrationId}/`)) {
+      return json({ ok: false, error: 'invalid' });
+    }
+  }
 
   const data = role === 'worker' ? sanitiseWorker(raw) : sanitiseContractor(raw);
   if (!data.fullName || !data.phone || !data.city) return json({ ok: false, error: 'invalid' });
@@ -167,19 +194,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (regNoHit.data) return json({ ok: false, error: 'unavailable' });
   }
 
+  // Confirm the pre-uploaded ID document really exists before we let a
+  // registration claim it. A missing object => the client's upload step
+  // failed; never persist a dangling id_document_path.
+  if (reservedRegistrationId) {
+    const listed = await admin.storage
+      .from('id-documents')
+      .list(reservedRegistrationId, { limit: 100 });
+    if (listed.error) return json({ ok: false, error: 'server' }, 500);
+    const found = (listed.data ?? []).some(
+      (o) => `${reservedRegistrationId}/${o.name}` === idDocumentPath
+    );
+    if (!found) return json({ ok: false, error: 'id_document_missing' }, 400);
+  }
+
   const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
   if (created.error || !created.data?.user) return json({ ok: false, error: 'unavailable' });
   const uid = created.data.user.id;
 
   const rpc = await admin.rpc('create_registration', {
+    p_registration_id: reservedRegistrationId || null,
     p_auth_user_id: uid,
     p_role: role,
     p_id_hash: hash,
     p_id_enc: enc,
+    p_id_document_path: idDocumentPath || null,
     p_data: data,
   });
   if (rpc.error || !rpc.data) {
     await admin.auth.admin.deleteUser(uid).catch(() => {});
+    if (idDocumentPath) {
+      await admin.storage.from('id-documents').remove([idDocumentPath]).catch(() => {});
+    }
     return json({ ok: false, error: 'server' }, 500);
   }
 

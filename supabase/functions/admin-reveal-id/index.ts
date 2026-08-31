@@ -1,12 +1,13 @@
 // =============================================================================
-// BuildUp – Edge Function: admin-reveal-id  (Phase 3A polish)
+// BuildUp – Edge Function: admin-reveal-id  (Phase 3A polish + 3B)
 // =============================================================================
-// The ONE narrowly-scoped path that decrypts an applicant's ID number for
-// registration verification. verify_jwt = true, and on top of that the caller
-// is re-verified from LIVE `profiles` as role='admin' AND status='approved'
+// The ONE narrowly-scoped path that decrypts an ID number for admin
+// verification. verify_jwt = true, and on top of that the caller is
+// re-verified from LIVE `profiles` as role='admin' AND status='approved'
 // (never a JWT claim).
 //
-// body: { registrationId: string }
+// body: { registrationId: string }   -> reads registrations.id_number_enc
+//   OR: { userId: string }           -> reads user_identity.id_number_enc  (3B)
 // ok:   { ok: true, idNumber: "123456789" }
 //
 // Security:
@@ -92,8 +93,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch {
     return json({ ok: false, error: 'invalid' }, 400);
   }
-  const registrationId = typeof body?.registrationId === 'string' ? body.registrationId : '';
-  if (!registrationId) return json({ ok: false, error: 'invalid' }, 400);
+  const registrationId = typeof body?.registrationId === 'string' ? body.registrationId.trim() : '';
+  const userId = typeof body?.userId === 'string' ? body.userId.trim() : '';
+  if ((registrationId === '') === (userId === '')) {
+    // exactly one of the two is required
+    return json({ ok: false, error: 'invalid' }, 400);
+  }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -115,16 +120,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // ---- fetch + decrypt the ONE requested ID ----
-  const { data: reg, error: regErr } = await admin
-    .from('registrations')
-    .select('id_number_enc')
-    .eq('id', registrationId)
-    .maybeSingle();
-  if (regErr) return json({ ok: false, error: 'server' }, 500);
-  if (!reg || !reg.id_number_enc) return json({ ok: false, error: 'unavailable' }, 404);
+  let enc: string | null = null;
+  if (registrationId) {
+    const { data, error } = await admin
+      .from('registrations')
+      .select('id_number_enc')
+      .eq('id', registrationId)
+      .maybeSingle();
+    if (error) return json({ ok: false, error: 'server' }, 500);
+    enc = (data?.id_number_enc as string | null) ?? null;
+  } else {
+    const { data, error } = await admin
+      .from('user_identity')
+      .select('id_number_enc')
+      .eq('profile_id', userId)
+      .maybeSingle();
+    if (error) return json({ ok: false, error: 'server' }, 500);
+    enc = (data?.id_number_enc as string | null) ?? null;
+  }
+  if (!enc) return json({ ok: false, error: 'unavailable' }, 404);
 
   try {
-    const idNumber = await decryptId(reg.id_number_enc as string);
+    const idNumber = await decryptId(enc);
     return json({ ok: true, idNumber });
   } catch {
     return json({ ok: false, error: 'decrypt_failed' }, 500);
