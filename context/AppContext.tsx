@@ -82,6 +82,14 @@ import { isBackendEnabled } from '../config/env';
 import * as authService from '../services/authService';
 import { bootstrapSessionUser, loginById } from '../services/authSession';
 import * as registrationService from '../services/registrationService';
+import {
+  updateWorkerProfileBackend,
+  updateContractorProfileBackend,
+  setWorkerAvailabilityBackend,
+} from '../services/profileService';
+import * as notificationService from '../services/notificationService';
+import * as adminUserService from '../services/adminUserService';
+import * as licenseService from '../services/licenseService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -217,8 +225,14 @@ interface AppState {
     registrationId: string,
     adminId: string
   ) => Promise<void>;
-  blockUser: (userId: string, adminId: string, reason?: string) => void;
-  unblockUser: (userId: string, adminId: string) => void;
+  blockUser: (userId: string, adminId: string, reason?: string) => Promise<void>;
+  unblockUser: (userId: string, adminId: string) => Promise<void>;
+  /** Backend only: true when this user has an encrypted ID on file (drives the
+   *  admin "reveal ID" affordance). Always false on the mock path. */
+  userHasIdOnFile: (userId: string) => boolean;
+  /** Backend only: decrypt one approved user's ID number for admin
+   *  verification — re-gated to a live approved admin server-side. */
+  revealUserIdNumber: (userId: string) => Promise<string>;
 
   // Jobs
   postJob: (
@@ -328,12 +342,16 @@ interface AppState {
   getFavoriteContractorIds: (workerId: string) => string[];
 
   // Worker profile edits
-  setWorkerAvailability: (workerId: string, isAvailable: boolean) => void;
-  updateWorkerProfile: (workerId: string, patch: Partial<Worker>) => void;
+  setWorkerAvailability: (
+    workerId: string,
+    isAvailable: boolean,
+    availableFrom?: string
+  ) => Promise<void>;
+  updateWorkerProfile: (workerId: string, patch: Partial<Worker>) => Promise<void>;
   updateContractorProfile: (
     contractorId: string,
     patch: Partial<Contractor>
-  ) => void;
+  ) => Promise<void>;
   /** Admin edits the contractor's registration number from the user card.
    *  Persists it on the same Contractor object and notifies the contractor —
    *  but ONLY when the value really changes (identical value, empty value, or
@@ -345,7 +363,7 @@ interface AppState {
     contractorId: string,
     registrationNumber: string,
     adminId: string
-  ) => void;
+  ) => Promise<void>;
 
   // Messaging — one conversation per pair of users, WhatsApp-style (no job
   // scoping: the same two people always share a single thread).
@@ -408,7 +426,7 @@ interface AppState {
       proposedValidFrom?: string;
       proposedValidUntil?: string;
     }
-  ) => ContractorLicenseUpdateRequest | null;
+  ) => Promise<ContractorLicenseUpdateRequest | null>;
   /** Admin approves / rejects a pending licence-update request. Approve →
    *  the proposed values become the contractor's current verified licence
    *  (re-stamps verifiedAt / nextReviewAt); reject → the request is marked
@@ -420,11 +438,11 @@ interface AppState {
     adminId: string,
     approve: boolean,
     reason?: string
-  ) => void;
+  ) => Promise<void>;
   /** Admin verifies the contractor's CURRENT licence (initial or periodic
    *  review) without any pending replacement — sets status 'verified' and
    *  moves the review clock forward. */
-  verifyContractorLicense: (contractorId: string, adminId: string) => void;
+  verifyContractorLicense: (contractorId: string, adminId: string) => Promise<void>;
   getPendingLicenseRequestForContractor: (
     contractorId: string
   ) => ContractorLicenseUpdateRequest | undefined;
@@ -437,7 +455,7 @@ interface AppState {
   requestContractorLicenseRenewal: (
     contractorId: string,
     adminId: string
-  ) => void;
+  ) => Promise<void>;
   /** True once a renewal request has been sent to this contractor for the
    *  given licenseValidUntil (used to swap the admin CTA for an info line). */
   hasRenewalRequestBeenSent: (
@@ -1064,6 +1082,72 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [currentUser?.id, currentUser?.role, currentUser?.status]);
 
+  // Backend: which profile ids have a decryptable ID on file (drives the
+  // admin "reveal ID" affordance). Populated alongside the user directory.
+  const [idOnFile, setIdOnFile] = useState<Set<string>>(new Set());
+
+  // Backend: replace the MOCK_* worker/contractor pools with the live directory
+  // for an approved admin, so every admin screen shows real backend users.
+  const refreshUserDirectory = useCallback(async () => {
+    if (!isBackendEnabled()) return;
+    try {
+      const dir = await adminUserService.loadUserDirectory();
+      setWorkers(dir.workers);
+      setContractors(dir.contractors);
+      setIdOnFile(dir.idOnFile);
+    } catch {
+      // keep whatever the admin already has on screen
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (currentUser?.role !== 'admin' || currentUser.status !== 'approved') return;
+    void refreshUserDirectory();
+  }, [currentUser?.id, currentUser?.role, currentUser?.status, refreshUserDirectory]);
+
+  // Backend: the signed-in user's real notifications (minimal Phase 3B read
+  // path — no realtime). Reloaded whenever the user identity changes.
+  const refreshNotifications = useCallback(async () => {
+    if (!isBackendEnabled()) return;
+    try {
+      setNotifications(await notificationService.listNotifications());
+    } catch {
+      /* keep current */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setNotifications([]);
+      return;
+    }
+    void refreshNotifications();
+  }, [currentUser?.id, refreshNotifications]);
+
+  // Backend: contractor licence-update requests (RLS returns own for a
+  // contractor, all for an admin). Frontend-only in the mock path.
+  const refreshLicenseRequests = useCallback(async () => {
+    if (!isBackendEnabled()) return;
+    try {
+      setContractorLicenseRequests(await licenseService.listLicenseRequests());
+    } catch {
+      /* keep current */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (
+      currentUser?.role !== 'contractor' &&
+      !(currentUser?.role === 'admin' && currentUser.status === 'approved')
+    ) {
+      return;
+    }
+    void refreshLicenseRequests();
+  }, [currentUser?.id, currentUser?.role, currentUser?.status, refreshLicenseRequests]);
+
   // ---------------------------------------------------------------------
   // Admin actions
   // ---------------------------------------------------------------------
@@ -1317,7 +1401,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const blockUser = useCallback<AppState['blockUser']>(
-    (userId, _adminId, reason) => {
+    async (userId, _adminId, reason) => {
+      if (isBackendEnabled()) {
+        // admin-user-action -> admin_block_user (server re-checks live-admin +
+        // the 'block_users' permission, flips profiles.status and writes the
+        // account_blocked notification in one transaction).
+        await adminUserService.blockUser(userId, reason);
+        await refreshUserDirectory();
+        setCurrentUser((cu) =>
+          cu && cu.role !== 'admin' && cu.id === userId
+            ? { ...cu, status: 'blocked', blockedReason: reason, blockedAt: nowIso() }
+            : cu
+        );
+        return;
+      }
       const blockedAt = nowIso();
       setWorkers((prev) =>
         prev.map((w) =>
@@ -1348,11 +1445,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         relatedId: userId,
       });
     },
-    [pushNotification]
+    [pushNotification, refreshUserDirectory]
   );
 
   const unblockUser = useCallback<AppState['unblockUser']>(
-    (userId, _adminId) => {
+    async (userId, _adminId) => {
+      if (isBackendEnabled()) {
+        await adminUserService.unblockUser(userId);
+        await refreshUserDirectory();
+        setCurrentUser((cu) =>
+          cu && cu.role !== 'admin' && cu.id === userId
+            ? { ...cu, status: 'approved', blockedReason: undefined, blockedAt: undefined }
+            : cu
+        );
+        return;
+      }
       setWorkers((prev) =>
         prev.map((w) =>
           w.id === userId
@@ -1395,7 +1502,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         relatedId: userId,
       });
     },
-    [pushNotification]
+    [pushNotification, refreshUserDirectory]
   );
 
   // ---------------------------------------------------------------------
@@ -1906,7 +2013,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const setWorkerAvailability = useCallback<
     AppState['setWorkerAvailability']
-  >((workerId, isAvailable) => {
+  >(async (workerId, isAvailable, availableFrom) => {
+    if (isBackendEnabled()) {
+      // Server-authoritative: set_own_worker_availability RPC (self-pinned to
+      // auth.uid()). Re-hydrate currentUser from the DB. Errors propagate.
+      const fresh = await setWorkerAvailabilityBackend(isAvailable, availableFrom);
+      if (fresh) setCurrentUser(fresh);
+      return;
+    }
     setWorkers((prev) =>
       prev.map((w) =>
         w.id === workerId ? { ...w, isAvailable } : w
@@ -1920,7 +2034,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, []);
 
   const updateWorkerProfile = useCallback<AppState['updateWorkerProfile']>(
-    (workerId, patch) => {
+    async (workerId, patch) => {
+      if (isBackendEnabled()) {
+        // update_own_worker_profile RPC + avatar / certificate uploads, then
+        // rebuild currentUser from the authoritative post-write state.
+        const fresh = await updateWorkerProfileBackend(patch);
+        if (fresh) setCurrentUser(fresh);
+        return;
+      }
       setWorkers((prev) =>
         prev.map((w) => (w.id === workerId ? { ...w, ...patch } : w))
       );
@@ -1935,7 +2056,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const updateContractorProfile = useCallback<
     AppState['updateContractorProfile']
-  >((contractorId, patch) => {
+  >(async (contractorId, patch) => {
+    if (isBackendEnabled()) {
+      const fresh = await updateContractorProfileBackend(patch);
+      if (fresh) setCurrentUser(fresh);
+      return;
+    }
     setContractors((prev) =>
       prev.map((c) => (c.id === contractorId ? { ...c, ...patch } : c))
     );
@@ -1949,7 +2075,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const updateContractorRegistrationNumber = useCallback<
     AppState['updateContractorRegistrationNumber']
   >(
-    (contractorId, registrationNumber, _adminId) => {
+    async (contractorId, registrationNumber, _adminId) => {
       const next = registrationNumber.trim();
       const existing = contractors.find((c) => c.id === contractorId);
       // No real change (or nothing to change) -> persist nothing and,
@@ -1959,6 +2085,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         !next ||
         next === existing.contractorRegistrationNumber
       ) {
+        return;
+      }
+
+      if (isBackendEnabled()) {
+        // admin-user-action Edge Function -> admin_set_contractor_registration_number
+        // (server re-checks live-admin, writes the guarded column, notifies the
+        // contractor in one transaction; a duplicate number throws).
+        await adminUserService.setContractorRegistrationNumber(contractorId, next);
+        await refreshUserDirectory();
         return;
       }
 
@@ -1986,7 +2121,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         relatedId: contractorId,
       });
     },
-    [contractors, pushNotification]
+    [contractors, pushNotification, refreshUserDirectory]
   );
 
   // ---------------------------------------------------------------------
@@ -2239,7 +2374,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const submitContractorLicenseUpdate = useCallback<
     AppState['submitContractorLicenseUpdate']
   >(
-    (contractorId, patch) => {
+    async (contractorId, patch) => {
       const hasChange =
         !!patch.newLicenseDocument ||
         !!patch.newLicenseDetails?.trim() ||
@@ -2254,6 +2389,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ) {
         return null;
       }
+
+      if (isBackendEnabled()) {
+        // Client INSERT into contractor_license_update_requests (RLS: own row +
+        // is_active_user) + upload to contractor-licenses/{uid}/. Admin
+        // notifications come from the DB trigger (020). The one-pending partial
+        // unique surfaces as null (already open).
+        try {
+          const created = await licenseService.submitLicenseUpdate(patch);
+          setContractorLicenseRequests((prev) => [created, ...prev]);
+          return created;
+        } catch (err) {
+          if (err instanceof Error && err.message.includes('already pending')) {
+            return null;
+          }
+          throw err;
+        }
+      }
+
       const req: ContractorLicenseUpdateRequest = {
         id: newId('lreq'),
         contractorId,
@@ -2287,11 +2440,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const reviewContractorLicenseUpdate = useCallback<
     AppState['reviewContractorLicenseUpdate']
   >(
-    (requestId, adminId, approve, reason) => {
+    async (requestId, adminId, approve, reason) => {
       const req = contractorLicenseRequests.find((r) => r.id === requestId);
       if (!req || req.status !== 'pending') return;
       // A rejection must always carry a reason (the UI enforces this too).
       if (!approve && !reason?.trim()) return;
+
+      if (isBackendEnabled()) {
+        // review-license-update Edge Function -> review_contractor_license_update
+        // (server re-checks live-admin, writes the guarded contractor_profiles
+        // licence columns + the contractor notification in one transaction).
+        await licenseService.reviewLicenseUpdate(requestId, approve, reason);
+        await Promise.all([refreshLicenseRequests(), refreshUserDirectory()]);
+        return;
+      }
+
       const ts = nowIso();
 
       setContractorLicenseRequests((prev) =>
@@ -2356,13 +2519,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         relatedId: req.contractorId,
       });
     },
-    [contractorLicenseRequests, pushNotification]
+    [contractorLicenseRequests, pushNotification, refreshLicenseRequests, refreshUserDirectory]
   );
 
   const verifyContractorLicense = useCallback<
     AppState['verifyContractorLicense']
   >(
-    (contractorId, _adminId) => {
+    async (contractorId, _adminId) => {
+      if (isBackendEnabled()) {
+        await licenseService.verifyContractorLicense(contractorId);
+        await refreshUserDirectory();
+        return;
+      }
       const ts = nowIso();
       // The periodic annual review — a pure admin-side audit stamp. It moves
       // ONLY the review clock forward. licenseValidUntil, the document, the
@@ -2381,7 +2549,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         )
       );
     },
-    []
+    [refreshUserDirectory]
   );
 
   const renewalRequestKey = (contractorId: string, validUntil?: string) =>
@@ -2400,12 +2568,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const requestContractorLicenseRenewal = useCallback<
     AppState['requestContractorLicenseRenewal']
   >(
-    (contractorId, _adminId) => {
+    async (contractorId, _adminId) => {
       const c = contractors.find((x) => x.id === contractorId);
       if (!c) return;
       const st = getContractorLicenseStatus(c);
       // Only meaningful for a validity problem — never for a periodic review.
       if (st.state !== 'expiring_soon' && st.state !== 'expired') return;
+
+      if (isBackendEnabled()) {
+        // review-license-update -> request_contractor_license_renewal
+        // (notification only; deduped server-side per contractor+validUntil).
+        await licenseService.requestLicenseRenewal(contractorId);
+        return;
+      }
 
       const when = c.licenseValidUntil ? formatDateIL(c.licenseValidUntil) : '';
       // Sends the contractor a notification and NOTHING else. dedupeKey keeps
@@ -2438,9 +2613,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const markNotificationRead = useCallback<AppState['markNotificationRead']>(
     (id) => {
+      // Optimistic; then persist is_read (RLS allows only that column).
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
       );
+      if (isBackendEnabled()) {
+        void notificationService.markNotificationRead(id).catch(() => {});
+      }
     },
     []
   );
@@ -2451,7 +2630,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setNotifications((prev) =>
       prev.map((n) => (n.userId === userId ? { ...n, isRead: true } : n))
     );
+    if (isBackendEnabled()) {
+      void notificationService.markAllNotificationsRead().catch(() => {});
+    }
   }, []);
+
+  const userHasIdOnFile = useCallback<AppState['userHasIdOnFile']>(
+    (userId) => idOnFile.has(userId),
+    [idOnFile]
+  );
+
+  const revealUserIdNumber = useCallback<AppState['revealUserIdNumber']>(
+    (userId) => adminUserService.revealUserIdNumber(userId),
+    []
+  );
 
   // ---------------------------------------------------------------------
   // Selectors
@@ -2586,6 +2778,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       revertRegistrationRejection,
       blockUser,
       unblockUser,
+      userHasIdOnFile,
+      revealUserIdNumber,
 
       postJob,
       updateJob,
@@ -2679,6 +2873,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       revertRegistrationRejection,
       blockUser,
       unblockUser,
+      userHasIdOnFile,
+      revealUserIdNumber,
       postJob,
       updateJob,
       deleteJob,

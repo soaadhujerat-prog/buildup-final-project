@@ -58,7 +58,7 @@ const AvailabilityManagementScreen: React.FC<Props> = ({ onBack }) => {
 
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (submitting) return;
     if (preferredAreas.length === 0) {
       Alert.alert('שגיאה', 'יש לבחור לפחות אזור עבודה אחד');
@@ -72,15 +72,23 @@ const AvailabilityManagementScreen: React.FC<Props> = ({ onBack }) => {
       return;
     }
     setSubmitting(true);
-    setWorkerAvailability(me.id, isAvailable);
-    updateWorkerProfile(me.id, {
-      availableFrom: availableFrom.trim() || undefined,
-      preferredAreas,
-    });
-    setSubmitting(false);
-    Alert.alert('נשמר', 'ההגדרות עודכנו בהצלחה.', [
-      { text: 'אישור', onPress: onBack },
-    ]);
+    try {
+      // Availability + its "from" date in one call (avoids an ordering race
+      // between the two mutators on the backend path); areas separately.
+      await setWorkerAvailability(
+        me.id,
+        isAvailable,
+        availableFrom.trim() || undefined
+      );
+      await updateWorkerProfile(me.id, { preferredAreas });
+      Alert.alert('נשמר', 'ההגדרות עודכנו בהצלחה.', [
+        { text: 'אישור', onPress: onBack },
+      ]);
+    } catch {
+      Alert.alert('שגיאה', 'שמירת ההגדרות נכשלה. בדוק את החיבור ונסה שוב.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

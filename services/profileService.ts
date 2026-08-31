@@ -17,16 +17,26 @@
 import type {
   Admin,
   AdminPermission,
+  Certification,
   Contractor,
   ContractorLicenseVerificationStatus,
   CustomerStatus,
   ProfessionCategory,
+  UploadedDocument,
   UserRole,
   Worker,
 } from '../types';
 import type { SessionUser } from '../types/auth';
 
+import { dmyToIso } from '../utils/helpers';
+
 import { getSupabase } from './supabaseClient';
+import {
+  getSignedUrl,
+  removeOwn,
+  SIGNED_URL_TTL,
+  uploadToOwnFolder,
+} from './storageService';
 
 // ---------------------------------------------------------------------------
 // Row shapes we actually read (a subset of the generated DB types — kept local
@@ -136,17 +146,28 @@ export async function fetchSessionUser(): Promise<SessionUser> {
 
   const profile = profileRaw as ProfileRow;
 
+  // avatar_path -> a short-lived signed URL (avatars bucket is private, 010).
+  const avatarUrl =
+    (await getSignedUrl('avatars', profile.avatar_path, SIGNED_URL_TTL.avatar)) ??
+    undefined;
+
   if (profile.role === 'admin') {
-    return mapAdmin(profile, await loadAdminPermissions(uid));
+    return { ...mapAdmin(profile, await loadAdminPermissions(uid)), avatarUrl };
   }
 
   const tax = await loadTaxonomy();
 
   if (profile.role === 'worker') {
-    return mapWorker(profile, await loadWorkerChildren(uid), tax);
+    return {
+      ...mapWorker(profile, await loadWorkerChildren(uid), tax),
+      avatarUrl,
+    };
   }
   if (profile.role === 'contractor') {
-    return mapContractor(profile, await loadContractorChildren(uid), tax);
+    return {
+      ...mapContractor(profile, await loadContractorChildren(uid), tax),
+      avatarUrl,
+    };
   }
 
   return null;
@@ -165,11 +186,17 @@ async function loadAdminPermissions(uid: string): Promise<AdminPermission[]> {
   return ((data ?? []) as Array<{ permission: AdminPermission }>).map((r) => r.permission);
 }
 
+interface WorkerCertRow {
+  id: string;
+  name: string;
+  document_path: string | null;
+}
+
 interface WorkerChildren {
   wp: WorkerProfileRow | null;
   professions: Array<{ profession_slug: string; is_primary: boolean }>;
   skills: string[];
-  certifications: Array<{ id: string; name: string }>;
+  certifications: Array<{ id: string; name: string; documentUrl?: string; documentPath?: string }>;
   areas: string[];
 }
 
@@ -185,19 +212,30 @@ async function loadWorkerChildren(uid: string): Promise<WorkerChildren> {
       .maybeSingle(),
     sb.from('worker_professions').select('profession_slug, is_primary').eq('worker_id', uid),
     sb.from('worker_skills').select('skill').eq('worker_id', uid),
-    sb.from('worker_certifications').select('id, name').eq('worker_id', uid),
+    sb.from('worker_certifications').select('id, name, document_path').eq('worker_id', uid),
     sb.from('worker_preferred_areas').select('area_slug').eq('worker_id', uid),
   ]);
   for (const res of [wp, profs, skills, certs, areas]) {
     if (res.error) throw res.error;
   }
+  const certRows = (certs.data as WorkerCertRow[] | null) ?? [];
+  const certifications = await Promise.all(
+    certRows.map(async (r) => ({
+      id: r.id,
+      name: r.name,
+      documentPath: r.document_path ?? undefined,
+      documentUrl: r.document_path
+        ? (await getSignedUrl('worker-certificates', r.document_path, SIGNED_URL_TTL.avatar)) ??
+          undefined
+        : undefined,
+    }))
+  );
   return {
     wp: (wp.data as WorkerProfileRow | null) ?? null,
     professions:
       (profs.data as Array<{ profession_slug: string; is_primary: boolean }> | null) ?? [],
     skills: ((skills.data as Array<{ skill: string }> | null) ?? []).map((r) => r.skill),
-    certifications:
-      (certs.data as Array<{ id: string; name: string }> | null) ?? [],
+    certifications,
     areas: ((areas.data as Array<{ area_slug: string }> | null) ?? []).map((r) => r.area_slug),
   };
 }
@@ -278,7 +316,18 @@ function mapWorker(p: ProfileRow, c: WorkerChildren, tax: TaxonomyMaps): Worker 
       c.wp?.profession_category_slug ??
       '') as ProfessionCategory,
     skills: c.skills,
-    certifications: c.certifications.map((r) => ({ id: r.id, name: r.name })),
+    certifications: c.certifications.map((r) => ({
+      id: r.id,
+      name: r.name,
+      document: r.documentUrl
+        ? ({
+            uri: r.documentUrl,
+            fileName: r.name,
+            type: 'certification',
+            storagePath: r.documentPath,
+          } as UploadedDocument)
+        : undefined,
+    })),
     experienceYears: c.wp?.experience_years ?? 0,
     preferredAreas: c.areas.map((slug) => tax.area.get(slug) ?? slug),
     isAvailable: c.wp?.is_available ?? false,
@@ -319,4 +368,179 @@ function mapContractor(
     licenseLastVerifiedAt: c.cp?.license_last_verified_at ?? undefined,
     licenseNextReviewAt: c.cp?.license_next_review_at ?? undefined,
   };
+}
+
+// ===========================================================================
+// Writes (Phase 3B) — self-service profile edits
+// ===========================================================================
+// Each returns a fresh SessionUser (re-read from the DB) so AppContext can
+// swap `currentUser` for the authoritative post-write state. The patch objects
+// are the SAME `Partial<Worker>` / `Partial<Contractor>` shapes the edit
+// screens already build (Hebrew display values); the SECURITY DEFINER RPCs
+// (018) resolve names -> taxonomy slugs and only ever touch non-privileged
+// columns of the caller's OWN rows.
+
+const isLocalFileUri = (v: string): boolean => /^(file|content):/i.test(v);
+
+/** Normalise a date the UI may give as DD/MM/YYYY (DatePickerField) or already
+ *  ISO into 'YYYY-MM-DD' for the RPC; '' / undefined -> '' (clears). */
+const normalizeDateForRpc = (v?: string): string => {
+  const s = (v ?? '').trim();
+  if (!s) return '';
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+    const iso = dmyToIso(s);
+    return iso ? iso.slice(0, 10) : '';
+  }
+  return s.slice(0, 10);
+};
+
+async function sessionUid(): Promise<string> {
+  const { data } = await getSupabase().auth.getSession();
+  const uid = data.session?.user?.id;
+  if (!uid) throw new Error('no active session');
+  return uid;
+}
+
+/** Read the current avatar_path so a replaced avatar can be cleaned up. */
+async function currentAvatarPath(uid: string): Promise<string | null> {
+  const { data } = await getSupabase()
+    .from('profiles')
+    .select('avatar_path')
+    .eq('id', uid)
+    .maybeSingle();
+  return (data as { avatar_path: string | null } | null)?.avatar_path ?? null;
+}
+
+interface AvatarResolution {
+  /** present in the RPC payload only when it should change */
+  avatarPath?: string | null;
+  /** a freshly uploaded object path, so a failed RPC can roll it back */
+  uploaded?: string;
+}
+
+async function resolveAvatar(
+  uid: string,
+  patch: { avatarUrl?: string | null }
+): Promise<AvatarResolution> {
+  if (!('avatarUrl' in patch)) return {};
+  const v = patch.avatarUrl;
+  if (v == null || v === '') return { avatarPath: null };
+  if (isLocalFileUri(v)) {
+    const path = await uploadToOwnFolder('avatars', uid, v, { kind: 'avatar' });
+    return { avatarPath: path, uploaded: path };
+  }
+  // an https signed URL we handed the screen earlier — unchanged
+  return {};
+}
+
+/** Upload any freshly-picked certificate documents; keep existing ones by
+ *  their storagePath. Returns the payload array `[{ name, documentPath }]`. */
+async function resolveCertifications(
+  uid: string,
+  certs: Certification[] | undefined
+): Promise<Array<{ name: string; documentPath: string | null }> | undefined> {
+  if (!certs) return undefined;
+  const out: Array<{ name: string; documentPath: string | null }> = [];
+  for (const c of certs) {
+    const name = (c.name ?? '').trim();
+    if (!name) continue;
+    let documentPath: string | null = null;
+    const doc = c.document;
+    if (doc?.storagePath) {
+      documentPath = doc.storagePath;
+    } else if (doc?.uri && isLocalFileUri(doc.uri)) {
+      documentPath = await uploadToOwnFolder('worker-certificates', uid, doc.uri, {
+        kind: 'certificate',
+        mimeType: doc.mimeType,
+      });
+    }
+    out.push({ name, documentPath });
+  }
+  return out;
+}
+
+export async function updateWorkerProfileBackend(
+  patch: Partial<Worker>
+): Promise<SessionUser> {
+  const sb = getSupabase();
+  const uid = await sessionUid();
+  const prevAvatar = await currentAvatarPath(uid);
+  const avatar = await resolveAvatar(uid, patch);
+
+  const payload: Record<string, unknown> = {};
+  const put = (k: string, v: unknown) => {
+    if (v !== undefined) payload[k] = v;
+  };
+  put('fullName', patch.fullName);
+  put('phone', patch.phone);
+  put('bio', patch.bio);
+  put('city', patch.city);
+  put('professionCategory', patch.professionCategory);
+  put('professions', patch.professions);
+  put('skills', patch.skills);
+  put('preferredAreas', patch.preferredAreas);
+  put('experienceYears', patch.experienceYears);
+  put('hourlyRate', patch.hourlyRate);
+  put('dailyRate', patch.dailyRate);
+  if ('availableFrom' in patch) {
+    payload.availableFrom = normalizeDateForRpc(patch.availableFrom ?? undefined);
+  }
+  if ('avatarPath' in avatar) payload.avatarPath = avatar.avatarPath;
+  const certPayload = await resolveCertifications(uid, patch.certifications);
+  if (certPayload !== undefined) payload.certifications = certPayload;
+
+  const { error } = await sb.rpc('update_own_worker_profile', { p_data: payload });
+  if (error) {
+    if (avatar.uploaded) await removeOwn('avatars', avatar.uploaded);
+    throw error;
+  }
+  if (avatar.uploaded && prevAvatar && prevAvatar !== avatar.uploaded) {
+    await removeOwn('avatars', prevAvatar);
+  }
+  return fetchSessionUser();
+}
+
+export async function updateContractorProfileBackend(
+  patch: Partial<Contractor>
+): Promise<SessionUser> {
+  const sb = getSupabase();
+  const uid = await sessionUid();
+  const prevAvatar = await currentAvatarPath(uid);
+  const avatar = await resolveAvatar(uid, patch);
+
+  const payload: Record<string, unknown> = {};
+  const put = (k: string, v: unknown) => {
+    if (v !== undefined) payload[k] = v;
+  };
+  put('fullName', patch.fullName);
+  put('phone', patch.phone);
+  put('bio', patch.bio);
+  put('city', patch.city);
+  put('companyName', patch.companyName);
+  put('areasOfOperation', patch.areasOfOperation);
+  put('projectTypes', patch.projectTypes);
+  if ('avatarPath' in avatar) payload.avatarPath = avatar.avatarPath;
+
+  const { error } = await sb.rpc('update_own_contractor_profile', { p_data: payload });
+  if (error) {
+    if (avatar.uploaded) await removeOwn('avatars', avatar.uploaded);
+    throw error;
+  }
+  if (avatar.uploaded && prevAvatar && prevAvatar !== avatar.uploaded) {
+    await removeOwn('avatars', prevAvatar);
+  }
+  return fetchSessionUser();
+}
+
+export async function setWorkerAvailabilityBackend(
+  isAvailable: boolean,
+  availableFrom?: string
+): Promise<SessionUser> {
+  const norm = normalizeDateForRpc(availableFrom);
+  const { error } = await getSupabase().rpc('set_own_worker_availability', {
+    p_is_available: isAvailable,
+    p_available_from: norm || null,
+  });
+  if (error) throw error;
+  return fetchSessionUser();
 }

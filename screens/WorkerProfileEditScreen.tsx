@@ -172,7 +172,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     setAvatarSheetOpen(false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (submitting) return;
     if (!phone.trim()) return Alert.alert('שגיאה', 'טלפון חובה');
     if (!isValidIsraeliPhone(phone))
@@ -194,29 +194,33 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
       return Alert.alert('שגיאה', 'יש לבחור לפחות אזור עבודה אחד');
 
     setSubmitting(true);
-    updateWorkerProfile(me.id, {
-      avatarUrl: avatarUri,
-      phone: normalizePhone(phone),
-      email: email.trim(),
-      city,
-      professionCategory: profCategory,
-      profession: professions[0],
-      professions,
-      experienceYears: exp,
-      skills,
-      certifications: certifications
-        .map((c) => ({ ...c, name: c.name.trim() }))
-        .filter((c) => c.name.length > 0),
-      hourlyRate: hr,
-      dailyRate: dr,
-      bio: bio.trim(),
-      preferredAreas,
-    });
-
-    Alert.alert('נשמר', 'הפרופיל שלך עודכן בהצלחה.', [
-      { text: 'אישור', onPress: onBack },
-    ]);
-    setSubmitting(false);
+    try {
+      await updateWorkerProfile(me.id, {
+        avatarUrl: avatarUri,
+        phone: normalizePhone(phone),
+        email: email.trim(),
+        city,
+        professionCategory: profCategory,
+        profession: professions[0],
+        professions,
+        experienceYears: exp,
+        skills,
+        certifications: certifications
+          .map((c) => ({ ...c, name: c.name.trim() }))
+          .filter((c) => c.name.length > 0),
+        hourlyRate: hr,
+        dailyRate: dr,
+        bio: bio.trim(),
+        preferredAreas,
+      });
+      Alert.alert('נשמר', 'הפרופיל שלך עודכן בהצלחה.', [
+        { text: 'אישור', onPress: onBack },
+      ]);
+    } catch {
+      Alert.alert('שגיאה', 'שמירת הפרופיל נכשלה. בדוק את החיבור ונסה שוב.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

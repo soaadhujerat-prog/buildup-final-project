@@ -185,6 +185,11 @@ export interface UploadedDocument {
   mimeType?: string;
   size?: number;
   type: 'id_card' | 'certification' | 'contractor_license';
+  /** Phase 3B: when this document already lives in Supabase Storage, the
+   *  object path inside its (private) bucket. `uri` then holds a short-lived
+   *  signed URL for display/opening; `storagePath` is the stable reference
+   *  that survives a re-save. Absent for a freshly-picked local file. */
+  storagePath?: string;
 }
 
 /** A named professional certificate the worker holds, with an optional

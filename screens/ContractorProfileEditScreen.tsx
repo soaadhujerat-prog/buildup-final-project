@@ -217,7 +217,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     }
   };
 
-  const submitLicenseRequest = () => {
+  const submitLicenseRequest = async () => {
     if (!me || licenseReqSubmitting) return;
     const proposedIso = dmyToIso(licenseValidUntilReq);
     if (!licenseDocReq || !proposedIso) {
@@ -229,7 +229,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     }
     setLicenseReqSubmitting(true);
     try {
-      const req = submitContractorLicenseUpdate(me.id, {
+      const req = await submitContractorLicenseUpdate(me.id, {
         newLicenseDocument: licenseDocReq,
         proposedValidUntil: proposedIso,
         newLicenseDetails: licenseDetailsReq.trim() || undefined,
@@ -265,7 +265,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     );
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (submitting) return;
     if (!fullName.trim()) return Alert.alert('שגיאה', 'שם מלא חובה');
     if (!companyName.trim()) return Alert.alert('שגיאה', 'שם החברה חובה');
@@ -284,7 +284,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
 
     setSubmitting(true);
     try {
-      updateContractorProfile(me.id, {
+      await updateContractorProfile(me.id, {
         fullName: fullName.trim(),
         companyName: companyName.trim(),
         phone: normalizePhone(phone),
