@@ -39,11 +39,20 @@ const SplashScreen: React.FC<Props> = ({ onFinish }) => {
   const finishedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // The hold timer is armed once (mount-only effect) but `onFinish` can change
+  // on a later re-render (e.g. the navigator swapping the auth-bootstrap splash
+  // for the real one). Keep a ref to the latest so `finish` never fires a
+  // stale callback.
+  const onFinishRef = useRef(onFinish);
+  useEffect(() => {
+    onFinishRef.current = onFinish;
+  }, [onFinish]);
+
   const finish = () => {
     if (finishedRef.current) return;
     finishedRef.current = true;
     if (timerRef.current) clearTimeout(timerRef.current);
-    onFinish();
+    onFinishRef.current();
   };
 
   useEffect(() => {

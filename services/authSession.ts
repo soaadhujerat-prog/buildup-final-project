@@ -31,8 +31,16 @@ const genericFailure = (): LoginResult => ({ ok: false, reason: 'wrong_password'
  * app never sits in a half-authenticated state. A profile is never created here.
  */
 export async function bootstrapSessionUser(): Promise<SessionUser> {
+  // eslint-disable-next-line no-console
+  if (__DEV__) console.log('[AUTH_BOOT] getSession');
   const session = await authService.getCurrentSession();
-  if (!session) return null;
+  if (!session) {
+    // eslint-disable-next-line no-console
+    if (__DEV__) console.log('[AUTH_BOOT] no session');
+    return null;
+  }
+  // eslint-disable-next-line no-console
+  if (__DEV__) console.log('[AUTH_BOOT] session found');
 
   try {
     const user = await fetchSessionUser();
@@ -40,6 +48,8 @@ export async function bootstrapSessionUser(): Promise<SessionUser> {
       await authService.signOut().catch(() => {});
       return null;
     }
+    // eslint-disable-next-line no-console
+    if (__DEV__) console.log('[AUTH_BOOT] profile loaded');
     return user;
   } catch (err) {
     // Transient DB/network error on boot: don't strand the user in a broken

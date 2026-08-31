@@ -517,6 +517,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => {
     if (!isBackendEnabled()) return;
     let alive = true;
+    // eslint-disable-next-line no-console
+    if (__DEV__) console.log('[AUTH_BOOT] start');
+
+    // The initial bootstrap MUST settle on its own — it never waits on an
+    // onAuthStateChange event. `endBootstrap` is the single place sessionLoading
+    // is cleared; every path below routes through it exactly once.
+    let settled = false;
+    const endBootstrap = (user: SessionUser) => {
+      if (!alive || settled) return;
+      settled = true;
+      clearTimeout(safetyNet);
+      // eslint-disable-next-line no-console
+      if (__DEV__) console.log('[AUTH_BOOT] finish');
+      setCurrentUser(user);
+      setSessionLoading(false);
+    };
+
+    // Secondary safety net ONLY. The real guarantee that sessionLoading ends is
+    // the finally() below; this is defence-in-depth so a future hang inside the
+    // Supabase auth client can never strand the app on the splash screen.
+    const safetyNet = setTimeout(() => {
+      if (!alive || settled) return;
+      // eslint-disable-next-line no-console
+      console.warn('[AUTH_BOOT] bootstrap did not settle in 15s — forcing logged-out');
+      endBootstrap(null);
+    }, 15000);
 
     // Building the client throws if the public Supabase config is missing —
     // don't let that crash the provider; just fall through to logged-out.
@@ -528,25 +554,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (event === 'SIGNED_OUT') setCurrentUser(null);
         else if (event === 'PASSWORD_RECOVERY') setPasswordRecoveryActive(true);
       });
-    } catch {
-      setSessionLoading(false);
-      return;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[AUTH_BOOT] client init failed — logged-out', err);
+      endBootstrap(null);
+      return () => {
+        alive = false;
+      };
     }
 
     bootstrapSessionUser()
-      .then((user) => {
-        if (alive) setCurrentUser(user);
-      })
-      .catch(() => {
+      .then((user) => endBootstrap(user))
+      .catch((err) => {
         // No silent mock fallback — just land logged-out; the user can retry.
-        if (alive) setCurrentUser(null);
-      })
-      .finally(() => {
-        if (alive) setSessionLoading(false);
+        // eslint-disable-next-line no-console
+        console.warn('[AUTH_BOOT] bootstrap error — logged-out', err);
+        endBootstrap(null);
       });
 
     return () => {
       alive = false;
+      clearTimeout(safetyNet);
       unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

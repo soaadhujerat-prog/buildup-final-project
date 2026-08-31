@@ -578,8 +578,15 @@ const AppNavigator: React.FC = () => {
   // splash so we never flash Login or a dashboard before we know who, if
   // anyone, is signed in. `onFinish` is a no-op: AppContext flips
   // `sessionLoading` off when the restore settles.
+  //
+  // The explicit `key` is load-bearing: this element and the `route === 'Splash'`
+  // one below are both <SplashScreen>, so without distinct keys React reuses the
+  // SAME instance when `sessionLoading` flips false. SplashScreen captures
+  // `onFinish` in a mount-only effect + a `finishedRef` latch, so the reused
+  // instance keeps firing THIS no-op forever and never navigates to Welcome.
+  // Distinct keys force a fresh mount of the real splash with the real onFinish.
   if (sessionLoading) {
-    return <SplashScreen onFinish={() => {}} />;
+    return <SplashScreen key="auth-bootstrap-splash" onFinish={() => {}} />;
   }
 
   // A Supabase PASSWORD_RECOVERY session is active (app opened from the emailed
@@ -596,7 +603,12 @@ const AppNavigator: React.FC = () => {
   }
 
   if (route?.name === 'Splash') {
-    return <SplashScreen onFinish={() => resetTo({ name: 'Welcome' })} />;
+    return (
+      <SplashScreen
+        key="app-splash"
+        onFinish={() => resetTo({ name: 'Welcome' })}
+      />
+    );
   }
   if (route?.name === 'Welcome') {
     return (
