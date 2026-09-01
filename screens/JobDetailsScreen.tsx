@@ -905,7 +905,7 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
           />
           <FieldRow label="תחום" value={job.professionCategory} />
           <FieldRow label="כתובת" value={job.address} />
-          <FieldRow label="תאריך התחלה" value={job.startDate} ltr />
+          <FieldRow label="תאריך התחלה" value={formatDateHe(job.startDate)} ltr />
           <FieldRow label="משך" value={job.duration} />
           {!!job.hourlyRate && (
             <FieldRow label="תעריף לשעה" value={`${job.hourlyRate} ₪`} ltr />

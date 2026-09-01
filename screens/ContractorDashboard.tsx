@@ -59,6 +59,7 @@ const ContractorDashboard: React.FC<Props> = ({
     currentUser,
     jobs,
     jobsLoading,
+    jobsError,
     applications,
     invitations,
     assignments,
@@ -327,6 +328,8 @@ const ContractorDashboard: React.FC<Props> = ({
             text={
               jobsLoading && jobs.length === 0
                 ? 'טוען משרות…'
+                : jobsError && jobs.length === 0
+                ? 'לא הצלחנו לטעון משרות — בדוק/י את החיבור'
                 : 'עדיין לא פרסמת משרות'
             }
           />

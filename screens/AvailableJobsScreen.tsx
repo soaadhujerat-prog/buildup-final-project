@@ -44,6 +44,8 @@ const AvailableJobsScreen: React.FC<Props> = ({
     currentUser,
     jobs,
     jobsLoading,
+    jobsError,
+    refreshJobs,
     getUserById,
     getFavoriteContractorIds,
     jobSearchState,
@@ -306,6 +308,19 @@ const AvailableJobsScreen: React.FC<Props> = ({
         <View style={styles.emptyWrap}>
           <ActivityIndicator size="large" color={Colors.primary} />
           <Text style={styles.emptySub}>טוען משרות…</Text>
+        </View>
+      ) : jobsError && jobs.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <Ionicons name="cloud-offline-outline" size={56} color={Colors.textMuted} />
+          <Text style={styles.emptyTitle}>לא הצלחנו לטעון משרות</Text>
+          <Text style={styles.emptySub}>בדוק/י את חיבור האינטרנט ונסה/י שוב.</Text>
+          <TouchableOpacity
+            onPress={() => refreshJobs()}
+            style={styles.emptyCta}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.emptyCtaText}>נסה שוב</Text>
+          </TouchableOpacity>
         </View>
       ) : results.length === 0 ? (
         <View style={styles.emptyWrap}>

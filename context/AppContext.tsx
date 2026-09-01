@@ -173,6 +173,11 @@ interface AppState {
    *  a loading state instead of their "no jobs" empty state during the initial
    *  load. Always `false` on the mock path. */
   jobsLoading: boolean;
+  /** Phase 4D: true when the LAST backend job fetch threw and left no jobs to
+   *  show. Lets screens tell a real load FAILURE apart from a genuinely empty
+   *  result (never a silent fall-back to mock data). Cleared the moment the
+   *  next fetch starts. Always `false` on the mock path. */
+  jobsError: boolean;
   /** Phase 4A: re-pull `jobs` from Supabase for the current user (worker →
    *  open pool, contractor → own, admin → all). No-op on the mock path. 4B/4C
    *  call this after a job mutation; in 4A it runs from the load effect. */
@@ -651,6 +656,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // state instead of their "no jobs" empty state during the initial load.
   // Always false on the mock path.
   const [jobsLoading, setJobsLoading] = useState<boolean>(isBackendEnabled());
+  // True when the last backend job fetch failed and left nothing to show, so a
+  // load failure reads as a failure and not as an empty result. Never a mock
+  // fall-back. Always false on the mock path.
+  const [jobsError, setJobsError] = useState<boolean>(false);
   const [applications, setApplications] = useState<Application[]>(MOCK_APPLICATIONS);
   const [invitations, setInvitations] = useState<Invitation[]>(MOCK_INVITATIONS);
 
@@ -1200,6 +1209,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const refreshJobs = useCallback(async () => {
     if (!isBackendEnabled() || !currentUser) return;
     setJobsLoading(true);
+    setJobsError(false);
     try {
       const list =
         currentUser.role === 'worker'
@@ -1209,8 +1219,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           : await jobsService.listContractorJobs();
       setJobs(list);
     } catch {
-      // No silent mock fallback — keep whatever is on screen; screens show a
-      // real empty/error state.
+      // No silent mock fallback. Flag the failure so screens can say "load
+      // failed" instead of "no results"; keep whatever is already on screen.
+      setJobsError(true);
     } finally {
       setJobsLoading(false);
     }
@@ -2898,6 +2909,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       jobSearchState,
       updateJobSearchState,
       jobsLoading,
+      jobsError,
       refreshJobs,
       admins,
       workers,
@@ -2998,6 +3010,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       jobSearchState,
       updateJobSearchState,
       jobsLoading,
+      jobsError,
       refreshJobs,
       admins,
       workers,
