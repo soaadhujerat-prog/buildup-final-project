@@ -23,6 +23,7 @@ import {
   assignmentCancelLine,
 } from '../utils/helpers';
 import { getEffectiveJobAssignments } from '../services/assignmentService';
+import { assignmentErrorText } from '../services/assignmentsService';
 import { Worker, Assignment } from '../types';
 
 interface Props {
@@ -108,12 +109,20 @@ const JobStaffingScreen: React.FC<Props> = ({
   );
 
   const [cancelTarget, setCancelTarget] = useState<WorkerRow | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
-  const submitCancel = (message: string) => {
-    if (!cancelTarget) return;
+  const submitCancel = async (message: string) => {
+    if (!cancelTarget || actionBusy) return;
     const id = cancelTarget.assignment.id;
     setCancelTarget(null);
-    cancelAssignment(id, 'contractor', message || undefined);
+    setActionBusy(true);
+    try {
+      await cancelAssignment(id, 'contractor', message || undefined);
+    } catch (e) {
+      Alert.alert('ביטול השיבוץ נכשל', assignmentErrorText(e));
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const confirmComplete = (row: WorkerRow) => {
@@ -124,7 +133,17 @@ const JobStaffingScreen: React.FC<Props> = ({
         { text: 'ביטול', style: 'cancel' },
         {
           text: 'סיום עבודה',
-          onPress: () => completeAssignment(row.assignment.id),
+          onPress: async () => {
+            if (actionBusy) return;
+            setActionBusy(true);
+            try {
+              await completeAssignment(row.assignment.id);
+            } catch (e) {
+              Alert.alert('סיום העבודה נכשל', assignmentErrorText(e));
+            } finally {
+              setActionBusy(false);
+            }
+          },
         },
       ]
     );
@@ -232,8 +251,8 @@ const JobStaffingScreen: React.FC<Props> = ({
                   onPressProfile={() => onOpenWorkerProfile(row.worker.id)}
                   onPressMessage={() => onOpenChat(row.worker.id)}
                   onPressCall={() => callPhone(row.worker.phone)}
-                  onComplete={() => confirmComplete(row)}
-                  onCancel={() => setCancelTarget(row)}
+                  onComplete={() => !actionBusy && confirmComplete(row)}
+                  onCancel={() => !actionBusy && setCancelTarget(row)}
                 />
               ))
             )}

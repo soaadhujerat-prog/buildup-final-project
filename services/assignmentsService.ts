@@ -1,10 +1,13 @@
 // =============================================================================
-// BuildUp – Assignments service (Phase 5B · real staffing READ layer)
+// BuildUp – Assignments service (Phase 5B READ layer + Phase 5C-2 lifecycle)
 // =============================================================================
-// Reads `assignments` from Supabase when USE_BACKEND=true. NO writes here —
-// assignments are created ONLY by the SECURITY DEFINER RPC respond_to_application
-// (029); the table has just a SELECT RLS policy, so a direct client
-// insert/update/delete is impossible.
+// Reads `assignments` from Supabase when USE_BACKEND=true. The table has only a
+// SELECT RLS policy (008) and INSERT/UPDATE/DELETE are revoked from
+// `authenticated`, so a direct client mutation is impossible. Every write goes
+// through a SECURITY DEFINER RPC:
+//   • create   — respond_to_application (029) / respond_to_invitation (030)
+//   • cancel   — cancel_assignment (031)   active -> cancelled  (frees the slot)
+//   • complete — complete_assignment (031) active -> completed  (KEEPS the slot)
 //
 // RLS `assignments_select` scopes rows to:
 //   worker_id = auth.uid()  OR  contractor_id = auth.uid()  OR  is_admin()
@@ -63,4 +66,92 @@ export async function listVisibleAssignments(): Promise<Assignment[]> {
     .select(ASSIGNMENT_SELECT);
   if (error) throw error;
   return ((data as unknown as AssignmentRow[] | null) ?? []).map(mapAssignmentRow);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5C-2 — lifecycle mutations (SECURITY DEFINER RPCs, migration 031)
+// ---------------------------------------------------------------------------
+
+/** Typed failure so the UI can show a clean Hebrew line per case instead of a
+ *  raw Postgres/RLS error. */
+export type AssignmentErrorCode =
+  | 'not_active' // the assignment is already completed / cancelled
+  | 'unauthorized' // not signed in / not the assigned worker / not the owning contractor
+  | 'gone'; // assignment (or its job) no longer exists
+
+export class AssignmentError extends Error {
+  code: AssignmentErrorCode;
+  constructor(code: AssignmentErrorCode) {
+    super(code);
+    this.name = 'AssignmentError';
+    this.code = code;
+  }
+}
+
+function unwrap(data: unknown): AssignmentRow {
+  return (Array.isArray(data) ? data[0] : data) as AssignmentRow;
+}
+
+/** Clean Hebrew message for a cancel / complete failure (backend path). */
+export function assignmentErrorText(e: unknown): string {
+  if (e instanceof AssignmentError) {
+    switch (e.code) {
+      case 'not_active':
+        return 'לא ניתן לעדכן שיבוץ שכבר הסתיים או בוטל.';
+      case 'unauthorized':
+        return 'אין לך הרשאה לבצע פעולה זו על השיבוץ.';
+      case 'gone':
+        return 'השיבוץ כבר לא קיים.';
+    }
+  }
+  return 'הפעולה נכשלה. בדוק/י את החיבור ונסה/י שוב.';
+}
+
+/**
+ * Cancel an `active` assignment (cancel_assignment RPC — 031). Caller must be
+ * the assigned worker OR the owning approved contractor; the RPC derives
+ * `cancelled_by`, stamps `cancelled_at`, stores the trimmed message, and locks
+ * the job row so a cancel racing an accept can't corrupt capacity. Freeing the
+ * slot lets `job_registration_state` reopen the job automatically (unless it is
+ * status<>'open' or `closed_manually`). Returns the updated row.
+ *   P0001 -> 'not_active'   · P0002 -> 'gone'   · 42501 -> 'unauthorized'
+ */
+export async function cancelAssignmentBackend(
+  assignmentId: string,
+  message?: string
+): Promise<Assignment> {
+  const trimmed = (message ?? '').trim();
+  const { data, error } = await getSupabase().rpc('cancel_assignment', {
+    p_assignment_id: assignmentId,
+    p_message: trimmed ? trimmed : null,
+  });
+  if (error) {
+    if (error.code === 'P0001') throw new AssignmentError('not_active');
+    if (error.code === 'P0002') throw new AssignmentError('gone');
+    if (error.code === '42501') throw new AssignmentError('unauthorized');
+    throw error;
+  }
+  return mapAssignmentRow(unwrap(data));
+}
+
+/**
+ * Mark an `active` assignment as `completed` (complete_assignment RPC — 031).
+ * Owning approved contractor only. The slot STAYS occupied
+ * (occupied_slot_count counts active + completed) — no capacity change, no
+ * reopen. Only `status` + `completed_at` are written. Returns the updated row.
+ *   P0001 -> 'not_active'   · P0002 -> 'gone'   · 42501 -> 'unauthorized'
+ */
+export async function completeAssignmentBackend(
+  assignmentId: string
+): Promise<Assignment> {
+  const { data, error } = await getSupabase().rpc('complete_assignment', {
+    p_assignment_id: assignmentId,
+  });
+  if (error) {
+    if (error.code === 'P0001') throw new AssignmentError('not_active');
+    if (error.code === 'P0002') throw new AssignmentError('gone');
+    if (error.code === '42501') throw new AssignmentError('unauthorized');
+    throw error;
+  }
+  return mapAssignmentRow(unwrap(data));
 }

@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   FlatList,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +30,7 @@ import {
   ASSIGNMENT_STATUS_LABEL,
   ASSIGNMENT_STATUS_TONE,
 } from '../utils/helpers';
+import { assignmentErrorText } from '../services/assignmentsService';
 import { Assignment, Contractor, JobPost, Worker } from '../types';
 import { jobProfessions } from '../utils/normalize';
 
@@ -83,6 +85,7 @@ const MyAssignmentsScreen: React.FC<Props> = ({
 
   const [filter, setFilter] = useState<AssignmentFilter>('all');
   const [cancelTarget, setCancelTarget] = useState<AssignmentRow | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   // The filter row is laid out RTL (row-reverse), so "הכל" is the right-most
   // chip. A horizontal ScrollView still opens anchored at its left edge, which
@@ -91,11 +94,18 @@ const MyAssignmentsScreen: React.FC<Props> = ({
   const chipScrollRef = useRef<ScrollView>(null);
   const chipAnchored = useRef(false);
 
-  const submitCancel = (message: string) => {
-    if (!cancelTarget) return;
+  const submitCancel = async (message: string) => {
+    if (!cancelTarget || cancelling) return;
     const id = cancelTarget.assignment.id;
     setCancelTarget(null);
-    cancelAssignment(id, 'worker', message || undefined);
+    setCancelling(true);
+    try {
+      await cancelAssignment(id, 'worker', message || undefined);
+    } catch (e) {
+      Alert.alert('ביטול השיבוץ נכשל', assignmentErrorText(e));
+    } finally {
+      setCancelling(false);
+    }
   };
 
   // Real staffing data only — never re-derive from application/invitation
@@ -335,7 +345,8 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                 {item.assignment.status === 'active' && (
                   <TouchableOpacity
                     style={styles.giveUpBtn}
-                    onPress={() => setCancelTarget(item)}
+                    onPress={() => !cancelling && setCancelTarget(item)}
+                    disabled={cancelling}
                     activeOpacity={0.85}
                     accessibilityLabel="ויתור על השיבוץ"
                   >

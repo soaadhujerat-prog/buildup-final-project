@@ -383,22 +383,28 @@ interface AppState {
   /** Cancel an ACTIVE assignment — a staffed worker leaving the job, from
    *  either side. Flips the Assignment (not the Application/Invitation that
    *  produced it) to 'cancelled', stamps cancelledAt / cancelledBy /
-   *  cancellationMessage, notifies the other party, and lets the capacity
-   *  reconciler reopen registration if it had auto-closed. No-op on a
-   *  completed or already-cancelled assignment. */
+   *  cancellationMessage, and lets the capacity reconciler reopen registration
+   *  if it had auto-closed. Backend path (Phase 5C-2): the `cancel_assignment`
+   *  RPC (assigned worker OR owning approved contractor; `cancelled_by` derived
+   *  server-side; job-row lock) followed by `refreshAssignments()` +
+   *  `refreshJobs()`. Rejects with an `assignmentsService.AssignmentError`
+   *  ('not_active' | 'unauthorized' | 'gone') on the backend path. Mock path
+   *  unchanged (no-op on a completed / already-cancelled assignment). */
   cancelAssignment: (
     assignmentId: string,
     cancelledBy: 'worker' | 'contractor',
     message?: string
-  ) => void;
+  ) => Promise<void>;
   /** Mark an ACTIVE assignment as the worker having FINISHED their part
-   *  normally. Flips the Assignment to 'completed', stamps completedAt /
-   *  updatedAt, and notifies the worker. This is NOT a cancellation: the slot
-   *  stays occupied (no capacity change, no reopening of registration), and
-   *  nothing on the job itself changes — job.status, acceptingApplications,
-   *  workersNeeded and the job lifecycle are all untouched. No-op on a
-   *  completed or already-cancelled assignment. */
-  completeAssignment: (assignmentId: string) => void;
+   *  normally. Flips the Assignment to 'completed', stamps completedAt. NOT a
+   *  cancellation: the slot stays occupied (occupied_slot_count counts active +
+   *  completed), so capacity / open state do not change and nothing on the job
+   *  itself is touched. Backend path (Phase 5C-2): the `complete_assignment`
+   *  RPC (owning approved contractor only; job-row lock) followed by
+   *  `refreshAssignments()` + `refreshJobs()`. Rejects with an
+   *  `assignmentsService.AssignmentError` on the backend path. Mock path
+   *  unchanged (no-op on a completed / already-cancelled assignment). */
+  completeAssignment: (assignmentId: string) => Promise<void>;
 
   // Favorite workers — personal to each contractor, never a global Worker
   // property. See ContractorFavoriteWorker in types/index.ts.
@@ -2288,7 +2294,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // ---------------------------------------------------------------------
 
   const cancelAssignment = useCallback<AppState['cancelAssignment']>(
-    (assignmentId, cancelledBy, message) => {
+    async (assignmentId, cancelledBy, message) => {
+      if (isBackendEnabled()) {
+        // Phase 5C-2: cancel_assignment RPC (worker OR owning approved
+        // contractor; active -> cancelled; cancelled_by derived server-side;
+        // job-row lock serializes against accept paths). Freeing the slot lets
+        // job_registration_state reopen the job — so re-pull assignments + jobs.
+        // No client capacity math, no source-row rewrite. Throws
+        // AssignmentError; the screen maps it to a Hebrew alert.
+        await assignmentsService.cancelAssignmentBackend(assignmentId, message);
+        await Promise.all([refreshAssignments(), refreshJobs()]);
+        return;
+      }
+
       const existing = assignments.find((a) => a.id === assignmentId);
       if (!existing || existing.status !== 'active') return;
 
@@ -2339,7 +2357,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
       }
     },
-    [assignments, jobs, workers, pushNotification]
+    [assignments, jobs, workers, pushNotification, refreshAssignments, refreshJobs]
   );
 
   // ---------------------------------------------------------------------
@@ -2352,7 +2370,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // deliberately not touched here — one worker finishing is not the whole job
   // finishing.
   const completeAssignment = useCallback<AppState['completeAssignment']>(
-    (assignmentId) => {
+    async (assignmentId) => {
+      if (isBackendEnabled()) {
+        // Phase 5C-2: complete_assignment RPC (owning approved contractor only;
+        // active -> completed; job-row lock). The slot stays occupied
+        // (occupied_slot_count counts active + completed) so capacity / open
+        // state are unchanged — but re-pull both to reflect the persisted row.
+        // Throws AssignmentError; the screen maps it to a Hebrew alert.
+        await assignmentsService.completeAssignmentBackend(assignmentId);
+        await Promise.all([refreshAssignments(), refreshJobs()]);
+        return;
+      }
+
       const existing = assignments.find((a) => a.id === assignmentId);
       if (!existing || existing.status !== 'active') return;
 
@@ -2376,7 +2405,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         relatedId: existing.jobId,
       });
     },
-    [assignments, jobs, pushNotification]
+    [assignments, jobs, pushNotification, refreshAssignments, refreshJobs]
   );
 
   // ---------------------------------------------------------------------
