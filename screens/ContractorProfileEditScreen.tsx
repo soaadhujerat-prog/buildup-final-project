@@ -177,7 +177,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     setRegChangeOpen(true);
   };
 
-  const submitRegChange = () => {
+  const submitRegChange = async () => {
     if (!me || regChangeSubmitting) return;
     const requested = regChangeNewNumber.trim();
     if (!requested || !/^\d+$/.test(requested)) {
@@ -198,7 +198,7 @@ const ContractorProfileEditScreen: React.FC<Props> = ({ onBack }) => {
         (reason ? `הסבר: ${reason}\n` : '') +
         `הבקשה ממתינה לאימות חיצוני על ידי מנהל המערכת. ` +
         `המספר הנוכחי נשאר ללא שינוי עד לאישור.`;
-      openSupportTicket(
+      await openSupportTicket(
         me.id,
         'contractor',
         'question',

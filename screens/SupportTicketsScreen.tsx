@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,7 +36,8 @@ const SupportTicketsScreen: React.FC<Props> = ({
   onOpenNewTicket,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, supportTickets, getUserById } = useApp();
+  const { currentUser, supportTickets, supportTicketsLoading, getUserById } =
+    useApp();
 
   const isAdmin = currentUser?.role === 'admin';
   const [filter, setFilter] = useState<StatusFilter>('all');
@@ -109,7 +111,12 @@ const SupportTicketsScreen: React.FC<Props> = ({
         ))}
       </ScrollView>
 
-      {filtered.length === 0 ? (
+      {supportTicketsLoading && supportTickets.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.emptySub}>טוען פניות…</Text>
+        </View>
+      ) : filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Ionicons
             name={isAdmin ? 'mail-open-outline' : 'help-buoy-outline'}

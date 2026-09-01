@@ -60,6 +60,9 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
 
   const scrollRef = useRef<ScrollView>(null);
   const [reply, setReply] = useState('');
+  // True while a reply / close / reopen request is in flight — guards the
+  // action buttons against a double-tap creating a duplicate message.
+  const [sending, setSending] = useState(false);
   // Admin picks a status here; it is applied ONLY together with the reply,
   // via the combined "send + update status" action. Never a silent change.
   const [pendingStatus, setPendingStatus] = useState<SupportTicketStatus | null>(
@@ -163,9 +166,16 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
         {
           text: 'סגור פנייה',
           style: 'destructive',
-          onPress: () => {
-            if (!currentUser) return;
-            closeSupportTicket(ticket.id, currentUser.id);
+          onPress: async () => {
+            if (!currentUser || sending) return;
+            setSending(true);
+            try {
+              await closeSupportTicket(ticket.id, currentUser.id);
+            } catch {
+              Alert.alert('שגיאה', 'סגירת הפנייה נכשלה. נסה שוב.');
+            } finally {
+              setSending(false);
+            }
           },
         },
       ]
@@ -180,17 +190,24 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
         { text: 'ביטול', style: 'cancel' },
         {
           text: 'פתח מחדש',
-          onPress: () => {
-            if (!currentUser) return;
-            reopenSupportTicket(ticket.id, currentUser.id);
+          onPress: async () => {
+            if (!currentUser || sending) return;
+            setSending(true);
+            try {
+              await reopenSupportTicket(ticket.id, currentUser.id);
+            } catch {
+              Alert.alert('שגיאה', 'פתיחת הפנייה מחדש נכשלה. נסה שוב.');
+            } finally {
+              setSending(false);
+            }
           },
         },
       ]
     );
   };
 
-  const handleSend = () => {
-    if (!currentUser) return;
+  const handleSend = async () => {
+    if (!currentUser || sending) return;
     // Belt-and-braces: the compose box is not rendered on a closed ticket,
     // and replyToTicket refuses one too — but never send from here either.
     if (isClosed) return;
@@ -204,19 +221,26 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
       );
       return;
     }
-    replyToTicket(
-      ticket.id,
-      currentUser.id,
-      currentUser.role as 'admin' | 'worker' | 'contractor',
-      text,
-      wantsStatusChange ? pendingStatus! : undefined
-    );
-    setReply('');
-    setPendingStatus(null);
-    Keyboard.dismiss();
-    requestAnimationFrame(() =>
-      scrollRef.current?.scrollToEnd({ animated: true })
-    );
+    setSending(true);
+    try {
+      await replyToTicket(
+        ticket.id,
+        currentUser.id,
+        currentUser.role as 'admin' | 'worker' | 'contractor',
+        text,
+        wantsStatusChange ? pendingStatus! : undefined
+      );
+      setReply('');
+      setPendingStatus(null);
+      Keyboard.dismiss();
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollToEnd({ animated: true })
+      );
+    } catch {
+      Alert.alert('שגיאה', 'שליחת התגובה נכשלה. נסה שוב.');
+    } finally {
+      setSending(false);
+    }
   };
 
   const togglePendingStatus = (raw: SupportTicketStatus) => {
@@ -318,17 +342,11 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
                   <Text style={styles.fLabel}>חברה</Text>
                 </View>
               )}
-              <View style={styles.fRow}>
-                <Text
-                  style={[
-                    styles.fValue,
-                    { fontFamily: 'monospace', writingDirection: 'ltr' },
-                  ]}
-                >
-                  {filer.idNumber}
-                </Text>
-                <Text style={styles.fLabel}>ת.ז</Text>
-              </View>
+              {/* National ID is deliberately NOT shown here. It is not
+                  directory data — it lives behind the secure self-reveal /
+                  admin-reveal-id flow and never enters Support state. Admins
+                  who need it use "צפה בפרטי המשתמש" → Admin User Details, where
+                  the existing secure reveal action stays unchanged. */}
               <View style={styles.fRow}>
                 <Text style={[styles.fValue, { writingDirection: 'ltr' }]}>
                   {filer.phone}
@@ -563,13 +581,18 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
               }}
             />
             <TouchableOpacity
-              style={styles.submitBtn}
+              style={[styles.submitBtn, sending && { opacity: 0.6 }]}
               onPress={handleSend}
+              disabled={sending}
               activeOpacity={0.85}
             >
               <Ionicons name="send" size={18} color={Colors.white} />
               <Text style={styles.submitText}>
-                {wantsStatusChange ? 'שלח תגובה ועדכן סטטוס' : 'שלח תגובה'}
+                {sending
+                  ? 'שולח...'
+                  : wantsStatusChange
+                  ? 'שלח תגובה ועדכן סטטוס'
+                  : 'שלח תגובה'}
               </Text>
             </TouchableOpacity>
           </View>

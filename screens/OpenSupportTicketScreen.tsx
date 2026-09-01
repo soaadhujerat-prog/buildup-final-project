@@ -65,7 +65,8 @@ const OpenSupportTicketScreen: React.FC<Props> = ({
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (submitting) return; // guard against a double-tap while the request is in flight
     if (!subject.trim()) {
       Alert.alert('שגיאה', 'נושא הפנייה חובה');
       return;
@@ -82,17 +83,19 @@ const OpenSupportTicketScreen: React.FC<Props> = ({
       return;
     }
     setSubmitting(true);
-    setTimeout(() => {
-      const ticket = openSupportTicket(
+    try {
+      const ticket = await openSupportTicket(
         currentUser.id,
         currentUser.role,
         type,
         subject.trim(),
         description.trim()
       );
-      setSubmitting(false);
       onSubmitted(ticket.id);
-    }, 600);
+    } catch {
+      Alert.alert('שגיאה', 'שליחת הפנייה נכשלה. נסה שוב.');
+      setSubmitting(false);
+    }
   };
 
   return (

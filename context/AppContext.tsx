@@ -101,6 +101,7 @@ import * as invitationsService from '../services/invitationsService';
 import * as participantsService from '../services/participantsService';
 import * as favoritesService from '../services/favoritesService';
 import * as chatService from '../services/chatService';
+import * as supportService from '../services/supportService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -187,6 +188,12 @@ interface AppState {
   conversations: Conversation[];
   notifications: AppNotification[];
   supportTickets: SupportTicket[];
+  /** Backend only: true while the first support-ticket load for the current
+   *  user is in flight. Always false on the mock path. */
+  supportTicketsLoading: boolean;
+  /** Backend only: re-read the signed-in user's support tickets from Supabase.
+   *  No-op on the mock path. */
+  refreshSupportTickets: () => Promise<void>;
   contractorLicenseRequests: ContractorLicenseUpdateRequest[];
 
   // Worker job-search state — persists across navigation (see JobSearchState).
@@ -485,13 +492,18 @@ interface AppState {
   markChatNotificationsRead: (conversationId: string) => Promise<void>;
 
   // Support
+  /** Open a new support ticket for `userId` (a worker or contractor). Resolves
+   *  with the created ticket. Backend (`USE_BACKEND=true`): calls the
+   *  `create_support_ticket` RPC — `user_id`/`user_role`/`status`/timestamps are
+   *  server-authoritative, admins are notified server-side — then re-reads.
+   *  Mock path: unchanged local behaviour, wrapped in a resolved promise. */
   openSupportTicket: (
     userId: string,
     userRole: 'worker' | 'contractor',
     type: SupportTicketType,
     subject: string,
     description: string
-  ) => SupportTicket;
+  ) => Promise<SupportTicket>;
   /** Append one reply to a ticket's conversation — from the admin OR from
    *  the requester. Never overwrites an earlier reply; the previous messages
    *  stay in `messages`. Bumps `updatedAt` and mirrors the latest admin reply
@@ -509,18 +521,18 @@ interface AppState {
     senderRole: SupportMessageSenderRole,
     message: string,
     statusChange?: SupportTicketStatus
-  ) => void;
+  ) => Promise<void>;
   /** Close a ticket's conversation. Independent of `status` (a "טופל" ticket
    *  stays "טופל"): it only sets `isClosed`/`closedAt`/`closedBy`, bumps
    *  `updatedAt`, and notifies the requester. No message is ever removed or
    *  edited. A no-op if the ticket is missing or already closed. Admin-only
    *  by convention — enforced at the call site. */
-  closeSupportTicket: (ticketId: string, adminId: string) => void;
+  closeSupportTicket: (ticketId: string, adminId: string) => Promise<void>;
   /** Reopen a closed ticket so the conversation can continue. Clears
    *  `isClosed`/`closedAt`/`closedBy`, bumps `updatedAt`, notifies the
    *  requester. `status` is left exactly as it was. A no-op if the ticket is
    *  missing or not currently closed. */
-  reopenSupportTicket: (ticketId: string, adminId: string) => void;
+  reopenSupportTicket: (ticketId: string, adminId: string) => Promise<void>;
 
   // Contractor licence verification
   /** Contractor asks to change a verified licence detail (document and/or
@@ -867,8 +879,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
   const [notifications, setNotifications] =
     useState<AppNotification[]>(MOCK_NOTIFICATIONS);
+  // Backend path starts empty and hydrates from Supabase (refreshSupportTickets
+  // below, RLS-scoped); the mock path keeps the seeded local tickets.
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() =>
-    MOCK_SUPPORT_TICKETS.map(normalizeSupportTicket)
+    isBackendEnabled() ? [] : MOCK_SUPPORT_TICKETS.map(normalizeSupportTicket)
+  );
+  const [supportTicketsLoading, setSupportTicketsLoading] = useState<boolean>(
+    isBackendEnabled()
   );
 
   // Contractor licence-update requests — frontend-only, no mock seed. Shaped
@@ -1297,6 +1314,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     void refreshNotifications();
   }, [currentUser?.id, refreshNotifications]);
 
+  // Backend: the signed-in user's real support tickets + threads. RLS scopes
+  // the rows (worker / contractor -> own; admin -> all), so one call covers
+  // every role. Reads only — writes go through the support RPCs
+  // (openSupportTicket / replyToTicket / close / reopen) which re-read after.
+  // No realtime: a support notification arriving also triggers a re-read (see
+  // the notifications INSERT handler). No-op / seeded mock on the mock path.
+  const refreshSupportTickets = useCallback(async () => {
+    if (!isBackendEnabled()) return;
+    try {
+      setSupportTickets(await supportService.listMyTickets());
+    } catch {
+      /* keep whatever is loaded — screens show their existing empty state */
+    } finally {
+      setSupportTicketsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setSupportTickets([]);
+      setSupportTicketsLoading(false);
+      return;
+    }
+    setSupportTicketsLoading(true);
+    void refreshSupportTickets();
+  }, [currentUser?.id, currentUser?.role, refreshSupportTickets]);
+
   // ---------------------------------------------------------------------
   // Chat — real backend read layer (7A persistence) + realtime/unread (7B)
   // ---------------------------------------------------------------------
@@ -1567,8 +1612,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         // persist read (server bulk update, scoped by related_id)
         void markChatNotificationsRead(n.relatedId);
       }
+
+      // Support is not a realtime feature, but a support notification (admin
+      // replied / status changed / closed / reopened, or — for an admin — a
+      // new ticket / user reply) means the ticket list is now stale. Re-read so
+      // tapping the notification lands on an up-to-date SupportTicketDetails.
+      if (n.type === 'support_response' || n.type === 'new_support_ticket') {
+        void refreshSupportTickets();
+      }
     },
-    [currentUser?.id, markChatNotificationsRead]
+    [currentUser?.id, markChatNotificationsRead, refreshSupportTickets]
   );
 
   useEffect(() => {
@@ -1592,6 +1645,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (state !== 'active' || !currentUser) return;
       void refreshConversations();
       void refreshNotifications();
+      void refreshSupportTickets();
       const active = activeConversationIdRef.current;
       if (active) {
         void hydrateConversationMessages(active);
@@ -1603,6 +1657,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     currentUser?.id,
     refreshConversations,
     refreshNotifications,
+    refreshSupportTickets,
     hydrateConversationMessages,
     markChatNotificationsRead,
   ]);
@@ -3403,14 +3458,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // ---------------------------------------------------------------------
 
   const openSupportTicket = useCallback<AppState['openSupportTicket']>(
-    (userId, userRole, type, subject, description) => {
+    async (userId, userRole, type, subject, description) => {
+      const subj = subject.trim();
+      const desc = description.trim();
+
+      if (isBackendEnabled()) {
+        // create_support_ticket derives user_id/user_role/status server-side and
+        // notifies every admin in the same transaction. Re-read so the new
+        // ticket (with its id) is in `supportTickets` before we return it.
+        const id = await supportService.createTicket(type, subj, desc);
+        const fresh = await supportService.listMyTickets();
+        setSupportTickets(fresh);
+        setSupportTicketsLoading(false);
+        return (
+          fresh.find((t) => t.id === id) ?? {
+            id,
+            userId,
+            userRole,
+            type,
+            subject: subj,
+            description: desc,
+            status: 'open' as const,
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+            messages: [],
+          }
+        );
+      }
+
+      // Mock path (USE_BACKEND=false) — unchanged local behaviour.
       const t: SupportTicket = {
         id: newId('tkt'),
         userId,
         userRole,
         type,
-        subject,
-        description,
+        subject: subj,
+        description: desc,
         status: 'open',
         createdAt: nowIso(),
         updatedAt: nowIso(),
@@ -3422,7 +3505,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           userId: a.id,
           type: 'new_support_ticket',
           title: 'פנייה חדשה לתמיכה',
-          body: `${subject} — ${userRole === 'worker' ? 'עובד' : 'קבלן'}`,
+          body: `${subj} — ${userRole === 'worker' ? 'עובד' : 'קבלן'}`,
           relatedId: t.id,
         })
       );
@@ -3432,11 +3515,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const replyToTicket = useCallback<AppState['replyToTicket']>(
-    (ticketId, senderId, senderRole, message, statusChange) => {
+    async (ticketId, senderId, senderRole, message, statusChange) => {
       const text = message.trim();
       if (!text) return;
       const isAdmin = senderRole === 'admin';
       const ts = nowIso();
+
+      if (isBackendEnabled()) {
+        // reply_to_support_ticket forces sender_role from the caller's real
+        // identity, applies `statusChange` for an admin only, guards the closed
+        // state, and raises the notification(s) server-side. Re-read after.
+        await supportService.replyToTicket(
+          ticketId,
+          text,
+          isAdmin ? statusChange : undefined
+        );
+        await refreshSupportTickets();
+        return;
+      }
 
       const existing = supportTickets.find((t) => t.id === ticketId);
       if (!existing) return;
@@ -3521,11 +3617,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         );
       }
     },
-    [supportTickets, admins, pushNotification]
+    [supportTickets, admins, pushNotification, refreshSupportTickets]
   );
 
   const closeSupportTicket = useCallback<AppState['closeSupportTicket']>(
-    (ticketId, adminId) => {
+    async (ticketId, adminId) => {
+      if (isBackendEnabled()) {
+        await supportService.setTicketClosed(ticketId, true);
+        await refreshSupportTickets();
+        return;
+      }
       const ts = nowIso();
       let target: SupportTicket | undefined;
       setSupportTickets((prev) =>
@@ -3550,11 +3651,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         relatedId: ticketId,
       });
     },
-    [pushNotification]
+    [pushNotification, refreshSupportTickets]
   );
 
   const reopenSupportTicket = useCallback<AppState['reopenSupportTicket']>(
-    (ticketId, _adminId) => {
+    async (ticketId, _adminId) => {
+      if (isBackendEnabled()) {
+        await supportService.setTicketClosed(ticketId, false);
+        await refreshSupportTickets();
+        return;
+      }
       const ts = nowIso();
       let target: SupportTicket | undefined;
       setSupportTickets((prev) =>
@@ -3579,7 +3685,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         relatedId: ticketId,
       });
     },
-    [pushNotification]
+    [pushNotification, refreshSupportTickets]
   );
 
   // -------------------------------------------------------------------
@@ -3999,6 +4105,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       conversations,
       notifications,
       supportTickets,
+      supportTicketsLoading,
+      refreshSupportTickets,
       contractorLicenseRequests,
 
       loginAsCustomer,
@@ -4109,6 +4217,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       conversations,
       notifications,
       supportTickets,
+      supportTicketsLoading,
+      refreshSupportTickets,
       contractorLicenseRequests,
       loginAsCustomer,
       loginAsAdmin,
