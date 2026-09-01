@@ -1,8 +1,8 @@
 // =============================================================================
 // BuildUp – Jobs service (Phase 4A · real job READ layer)
 // =============================================================================
-// Reads jobs from the live Supabase schema through RLS. NO writes here — job
-// create / edit / close / reopen / delete stay on the mock path until 4B/4C.
+// Reads jobs from the live Supabase schema through RLS. Writes (create / edit —
+// 4B; close / reopen / delete — 4C) go through SECURITY DEFINER RPCs below.
 //
 // SOURCE-OF-TRUTH RULE
 //   `public.job_registration_state` (a SECURITY-INVOKER view) is the ONLY
@@ -20,6 +20,7 @@ import type { JobPost, JobStatus, ProfessionCategory } from '../types';
 
 import { dmyToIso } from '../utils/helpers';
 import { getSupabase } from './supabaseClient';
+import { FunctionError, invokeFn } from './functionsClient';
 import {
   getSignedUrl,
   removeObject,
@@ -481,5 +482,87 @@ export async function updateJobBackend(
   const kept = new Set(finalPaths);
   for (const p of currentPaths) {
     if (!kept.has(p)) await removeObject('worksite-images', p);
+  }
+}
+
+// ===========================================================================
+// Writes (Phase 4C) — close / reopen / delete
+// ===========================================================================
+// job_registration_state stays the ONLY source of truth for the open/closed
+// state. The contractor toggle writes exactly ONE column (jobs.closed_manually)
+// through set_job_closed_manually; callers MUST re-read the job afterwards and
+// take open_for_applications / closure_reason from the view, never assume them.
+// Delete is delegated to the `delete-job` Edge Function (authoritative DB
+// delete first, then server-side Storage cleanup) — see deleteJobBackend.
+
+/**
+ * Contractor manual close / reopen. `closed = true` closes registration
+ * (job_registration_state.closure_reason becomes 'manual'); `closed = false`
+ * only clears the manual flag — the view decides whether the job actually
+ * reopens (a job at capacity stays closed with closure_reason 'capacity').
+ * Owner (still approved) or live admin only — enforced in the RPC.
+ */
+export async function setJobClosedManually(
+  jobId: string,
+  closed: boolean
+): Promise<void> {
+  const { error } = await getSupabase().rpc('set_job_closed_manually', {
+    p_job_id: jobId,
+    p_closed: closed,
+  });
+  if (error) throw error;
+}
+
+/**
+ * True when the job currently has zero applications / invitations / assignments
+ * and the caller (owner / live admin) may hard-delete it. Drives the JobDetails
+ * menu choice between "מחק משרה" and "סגור משרה להרשמה" on the backend path,
+ * where the synchronous mock staffing arrays are not valid. The DB delete
+ * trigger stays authoritative even if this value is momentarily stale.
+ */
+export async function jobIsDeletable(jobId: string): Promise<boolean> {
+  const { data, error } = await getSupabase().rpc('job_is_deletable', {
+    p_job_id: jobId,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+/** Thrown by `deleteJobBackend` when the job cannot be hard-deleted because it
+ *  has activity — the caller shows the "close registration instead" message. */
+export class JobHasActivityError extends Error {
+  constructor() {
+    super('job has activity and cannot be deleted');
+    this.name = 'JobHasActivityError';
+  }
+}
+
+/**
+ * Hard-delete a clean job. Delegated to the `delete-job` Edge Function so the
+ * DB delete is authoritative and happens BEFORE any destructive Storage
+ * cleanup:
+ *   • the function re-checks the caller (approved owner / live admin), runs the
+ *     authoritative delete through SECURITY DEFINER admin_delete_job (the
+ *     jobs_block_delete_with_activity trigger is the final guard), and ONLY
+ *     then removes that job's worksite-image objects with server-side Storage
+ *     authority.
+ *   • a blocked delete (job has activity) → FunctionError 'has_activity' (409)
+ *     → JobHasActivityError, and no image is ever touched.
+ *   • Storage cleanup failing AFTER a successful delete does NOT fail the call
+ *     (the function logs it and returns ok) — the job stays deleted.
+ * The client never names a bucket or path; nothing here can delete arbitrary
+ * Storage objects.
+ */
+export async function deleteJobBackend(jobId: string): Promise<void> {
+  try {
+    await invokeFn<{ ok: true }>('delete-job', { jobId });
+  } catch (e) {
+    if (
+      e instanceof FunctionError &&
+      (e.code === 'has_activity' || e.status === 409)
+    ) {
+      throw new JobHasActivityError();
+    }
+    throw e;
   }
 }

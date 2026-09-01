@@ -458,6 +458,18 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+# ---------------------------------------------------------------------------
+# delete-job (Phase 4C follow-up): hard-delete one clean job, THEN clean its
+# private worksite-image Storage objects. verify_jwt=true + live-profile
+# re-check (approved owner or live admin); the authoritative DB delete runs in
+# SECURITY DEFINER public.admin_delete_job (service_role EXECUTE only) with the
+# jobs_block_delete_with_activity trigger as the final guard. Storage cleanup
+# happens only after a successful DB delete and is best-effort.
+# ---------------------------------------------------------------------------
+[functions.delete-job]
+enabled = true
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

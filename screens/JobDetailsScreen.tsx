@@ -105,6 +105,12 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     { mode: 'accept' | 'reject'; app: Application } | null
   >(null);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  // One in-flight guard for the contractor job actions (close / reopen /
+  // delete) so a double-tap can't fire two backend mutations.
+  const [actionBusy, setActionBusy] = useState(false);
+  // Backend hard-delete eligibility (null = not yet known / not applicable).
+  // Mock path keeps using the synchronous canDeleteJob selector.
+  const [backendDeletable, setBackendDeletable] = useState<boolean | null>(null);
 
   const contractor = getUserById(job.contractorId) as Contractor | undefined;
   const candidates = getApplicationsForJob(jobId);
@@ -164,7 +170,33 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
   // Hard delete is allowed only for a job that never generated any activity.
   // Anything else (applications / invitations / assignments) → the job is part
   // of someone's history and can only be CLOSED to registration.
-  const canHardDelete = isContractorOwner && canDeleteJob(job.id);
+  //   mock path    → the synchronous canDeleteJob selector.
+  //   backend path → job_is_deletable RPC (the mock staffing arrays are empty),
+  //                  resolved by the effect below. The DB delete trigger stays
+  //                  authoritative if this value is momentarily stale.
+  useEffect(() => {
+    if (!isBackendEnabled() || !isContractorOwner) {
+      setBackendDeletable(null);
+      return;
+    }
+    let alive = true;
+    setBackendDeletable(null);
+    jobsService
+      .jobIsDeletable(job.id)
+      .then((ok) => {
+        if (alive) setBackendDeletable(ok);
+      })
+      .catch(() => {
+        if (alive) setBackendDeletable(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [job.id, isContractorOwner]);
+
+  const canHardDelete =
+    isContractorOwner &&
+    (isBackendEnabled() ? backendDeletable === true : canDeleteJob(job.id));
 
   // Worker viewing this contractor — professional-history relationship,
   // derived only from real Assignments (same badge the contractor sees on the
@@ -466,6 +498,22 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     );
   };
 
+  // Run one contractor job mutation with a single in-flight guard and a clean
+  // Hebrew failure alert. The AppContext method re-reads the real job state
+  // (job_registration_state) after a successful backend write, so the screen
+  // never forces an optimistic open/closed state of its own.
+  const runJobAction = async (fn: () => Promise<void>, failTitle: string) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      await fn();
+    } catch {
+      Alert.alert(failTitle, 'אירעה שגיאה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const handleToggleApplications = () => {
     const opening = !job.acceptingApplications;
     Alert.alert(
@@ -477,7 +525,11 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
         { text: 'ביטול', style: 'cancel' },
         {
           text: opening ? 'פתח' : 'סגור',
-          onPress: () => setJobAcceptingApplications(job.id, opening),
+          onPress: () =>
+            runJobAction(
+              () => setJobAcceptingApplications(job.id, opening),
+              opening ? 'פתיחת המשרה נכשלה' : 'סגירת המשרה נכשלה'
+            ),
         },
       ]
     );
@@ -496,9 +548,27 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
         {
           text: 'מחק משרה',
           style: 'destructive',
-          onPress: () => {
-            deleteJob(job.id);
-            onBack();
+          onPress: async () => {
+            if (actionBusy) return;
+            setActionBusy(true);
+            try {
+              await deleteJob(job.id);
+              onBack();
+            } catch (e) {
+              if (e instanceof jobsService.JobHasActivityError) {
+                Alert.alert(
+                  'לא ניתן למחוק משרה זו',
+                  'המשרה כבר כוללת פעילות (מועמדויות, הזמנות או שיבוצים) ולכן לא ניתן למחוק אותה. ניתן לסגור אותה להרשמה במקום זאת.'
+                );
+              } else {
+                Alert.alert(
+                  'מחיקת המשרה נכשלה',
+                  'אירעה שגיאה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.'
+                );
+              }
+            } finally {
+              setActionBusy(false);
+            }
           },
         },
       ]
@@ -515,7 +585,11 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
         { text: 'ביטול', style: 'cancel' },
         {
           text: 'סגור משרה להרשמה',
-          onPress: () => setJobAcceptingApplications(job.id, false),
+          onPress: () =>
+            runJobAction(
+              () => setJobAcceptingApplications(job.id, false),
+              'סגירת המשרה נכשלה'
+            ),
         },
       ]
     );
@@ -533,7 +607,11 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
             { text: 'סגור', style: 'cancel' },
             {
               text: 'סגור משרה להרשמה',
-              onPress: () => setJobAcceptingApplications(job.id, false),
+              onPress: () =>
+                runJobAction(
+                  () => setJobAcceptingApplications(job.id, false),
+                  'סגירת המשרה נכשלה'
+                ),
             },
           ]
         : [{ text: 'הבנתי', style: 'cancel' }]
@@ -1220,8 +1298,10 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
                     job.acceptingApplications
                       ? styles.toggleApplicationsBtnClose
                       : styles.toggleApplicationsBtnOpen,
+                    actionBusy && { opacity: 0.6 },
                   ]}
                   onPress={handleToggleApplications}
+                  disabled={actionBusy}
                   activeOpacity={0.85}
                 >
                   <Ionicons

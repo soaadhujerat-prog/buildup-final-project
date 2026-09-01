@@ -250,7 +250,12 @@ interface AppState {
       acceptingApplications?: boolean;
     }
   ) => Promise<JobPost>;
-  setJobAcceptingApplications: (jobId: string, accepting: boolean) => void;
+  /** Contractor manual close / reopen of registration. Backend path (Phase 4C):
+   *  writes ONLY jobs.closed_manually via the set_job_closed_manually RPC, then
+   *  re-reads the job — job_registration_state alone decides the resulting
+   *  open state (reopening a full job leaves it closed, reason 'capacity').
+   *  Never sets acceptingApplications directly. Mock path unchanged. */
+  setJobAcceptingApplications: (jobId: string, accepting: boolean) => Promise<void>;
   /** Edits an existing job in place — same id, same contractorId, same
    *  postedAt (none of those three are patchable, by type). A plain merge —
    *  does NOT stamp updatedAt itself; pass it explicitly in `patch` when
@@ -268,10 +273,13 @@ interface AppState {
    *  for a job that has any activity is a silent no-op — the UI must offer
    *  "close registration" instead. Never touches applications / invitations /
    *  assignments (a clean job has none by definition). */
-  deleteJob: (jobId: string) => void;
+  deleteJob: (jobId: string) => Promise<void>;
   /** True when `deleteJob` would actually delete this job (i.e. it has zero
-   *  applications / invitations / assignments). The UI uses this to decide
-   *  between "מחק משרה" and "סגור משרה להרשמה". */
+   *  applications / invitations / assignments). MOCK PATH ONLY — the UI uses
+   *  this to decide between "מחק משרה" and "סגור משרה להרשמה". On the backend
+   *  path the screen asks the DB via jobsService.jobIsDeletable (the mock
+   *  staffing arrays aren't populated). `deleteJob` on the backend path
+   *  rejects with jobsService.JobHasActivityError when deletion is blocked. */
   canDeleteJob: (jobId: string) => boolean;
 
   // Applications (worker -> job)
@@ -1187,8 +1195,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   //   admin      -> jobsService.listContractorJobs()    (every job, via RLS)
   // job_registration_state is the sole source of truth for acceptingApplications
   // (see jobsService). No-op on the mock path — `jobs` stays MOCK_JOBS. Writes
-  // (postJob / updateJob / deleteJob / setJobAcceptingApplications) are NOT
-  // routed to the backend yet — that is Phase 4B/4C.
+  // (postJob / updateJob — 4B; setJobAcceptingApplications / deleteJob — 4C) are
+  // routed through jobsService RPCs and always re-read via refreshJobs after.
   const refreshJobs = useCallback(async () => {
     if (!isBackendEnabled() || !currentUser) return;
     setJobsLoading(true);
@@ -1665,11 +1673,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const deleteJob = useCallback<AppState['deleteJob']>(
-    (jobId) => {
+    async (jobId) => {
+      if (isBackendEnabled()) {
+        // Phase 4C: hard delete via the `delete-job` Edge Function — it runs
+        // the authoritative DB delete FIRST (jobs_block_delete_with_activity is
+        // the final guard; child rows cascade) and only then cleans the private
+        // worksite-image Storage objects server-side. A blocked delete throws
+        // JobHasActivityError and never touches an image.
+        await jobsService.deleteJobBackend(jobId);
+        setJobs((prev) => prev.filter((j) => j.id !== jobId));
+        await refreshJobs();
+        return;
+      }
       if (!canDeleteJob(jobId)) return; // has activity — keep it
       setJobs((prev) => prev.filter((j) => j.id !== jobId));
     },
-    [canDeleteJob]
+    [canDeleteJob, refreshJobs]
   );
 
   // The contractor's manual open/close switch. Closing stamps
@@ -1680,7 +1699,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const setJobAcceptingApplications = useCallback<
     AppState['setJobAcceptingApplications']
   >(
-    (jobId, accepting) => {
+    async (jobId, accepting) => {
+      if (isBackendEnabled()) {
+        // Phase 4C: write ONLY jobs.closed_manually, then re-read. We do NOT
+        // set acceptingApplications here — job_registration_state re-derives
+        // it (reopening a full job leaves it closed with reason 'capacity').
+        await jobsService.setJobClosedManually(jobId, !accepting);
+        await refreshJobs();
+        return;
+      }
       setJobs((prev) =>
         prev.map((j) => {
           if (j.id !== jobId) return j;
@@ -1702,7 +1729,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         })
       );
     },
-    [assignments]
+    [assignments, refreshJobs]
   );
 
   // ---------------------------------------------------------------------
