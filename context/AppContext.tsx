@@ -92,6 +92,7 @@ import * as adminUserService from '../services/adminUserService';
 import * as licenseService from '../services/licenseService';
 import * as jobsService from '../services/jobsService';
 import * as applicationsService from '../services/applicationsService';
+import * as assignmentsService from '../services/assignmentsService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -124,11 +125,10 @@ export type { SessionUser, LoginResult };
  *  surface "כל המקומות במשרה כבר אוישו." */
 export interface StaffingActionResult {
   ok: boolean;
-  /** 'full' — job already at capacity. 'unsupported' — the action is not wired
-   *  to the backend yet (contractor accept/reject arrives in Phase 5B); the
-   *  screen shows a "coming soon" note instead of mutating mock state over a
-   *  real job. */
-  reason?: 'full' | 'unsupported';
+  /** 'full' — job already at capacity (accept refused). 'error' — the backend
+   *  call failed for another reason (stale application, auth, network); the
+   *  screen shows a generic Hebrew failure. */
+  reason?: 'full' | 'error';
 }
 
 /** The worker job-search screen's search/filter/sort — lifted up here
@@ -307,15 +307,17 @@ interface AppState {
   /** True while the initial backend applications fetch is in flight. Always
    *  false on the mock path. */
   applicationsLoading: boolean;
-  /** Accept / reject a pending application. Accepting is refused (returns
-   *  `{ ok: false, reason: 'full' }`, no state change) when the job's active
-   *  assignments already equal workersNeeded — this is the one guard against
-   *  overbooking, so no screen re-implements it. Rejecting always succeeds. */
+  /** Accept / reject a pending application. Backend path (Phase 5B): the atomic
+   *  `respond_to_application` RPC — accept also creates ONE real assignment
+   *  under a job-row lock (no overbooking), then applications + assignments +
+   *  jobs are re-pulled. Returns `{ ok:false, reason:'full' }` when the job
+   *  filled first, `{ ok:false, reason:'error' }` on any other failure. Mock
+   *  path unchanged. */
   respondToApplication: (
     applicationId: string,
     accepted: boolean,
     response?: string
-  ) => StaffingActionResult;
+  ) => Promise<StaffingActionResult>;
   /** Worker pulls back their own still-`pending` application. Never deletes
    *  the record — flips status to 'withdrawn' and stamps `withdrawnAt`, so
    *  the history stays intact and a fresh application can be filed later if
@@ -1301,6 +1303,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser?.id, currentUser?.role, refreshApplications]);
 
   // ---------------------------------------------------------------------
+  // Assignments — real backend READ layer (Phase 5B)
+  // ---------------------------------------------------------------------
+  // Created only by respond_to_application (029). Kept in the SAME `assignments`
+  // array the client-side staffing helpers (getStaffingProgress /
+  // isJobFullyStaffed) and every screen already read, so real capacity /
+  // "X מתוך Y שובצו" light up automatically. RLS scopes rows to the caller.
+  const refreshAssignments = useCallback(async () => {
+    if (!isBackendEnabled() || !currentUser) return;
+    try {
+      setAssignments(await assignmentsService.listVisibleAssignments());
+    } catch {
+      // No silent mock fallback — keep whatever is loaded.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setAssignments([]);
+      return;
+    }
+    void refreshAssignments();
+  }, [currentUser?.id, currentUser?.role, refreshAssignments]);
+
+  // ---------------------------------------------------------------------
   // Admin actions
   // ---------------------------------------------------------------------
 
@@ -1899,13 +1927,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const respondToApplication = useCallback<AppState['respondToApplication']>(
-    (applicationId, accepted, response) => {
+    async (applicationId, accepted, response) => {
       if (isBackendEnabled()) {
-        // Phase 5A is READ-only for the contractor. Accepting / rejecting an
-        // applicant (and the assignment it creates) is Phase 5B — do NOT mutate
-        // mock state over a real application. The screen shows a "coming soon"
-        // note on this result.
-        return { ok: false, reason: 'unsupported' };
+        // Phase 5B: one atomic RPC. Accept also creates a real assignment under
+        // a job-row lock (no overbooking); we then re-pull applications +
+        // assignments + jobs, because job_registration_state (full / closed for
+        // capacity) may have changed. No client-side capacity math, no manual
+        // job close.
+        try {
+          const updated =
+            await applicationsService.respondToApplicationBackend(
+              applicationId,
+              accepted,
+              response
+            );
+          setApplications((prev) =>
+            prev.map((a) => (a.id === updated.id ? updated : a))
+          );
+          await Promise.all([refreshAssignments(), refreshJobs()]);
+          return { ok: true };
+        } catch (e) {
+          if (
+            e instanceof applicationsService.ApplicationError &&
+            e.code === 'full'
+          ) {
+            return { ok: false, reason: 'full' };
+          }
+          return { ok: false, reason: 'error' };
+        }
       }
       const existing = applications.find((a) => a.id === applicationId);
       if (!existing) return { ok: false };
@@ -1959,7 +2008,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       return { ok: true };
     },
-    [applications, jobs, assignments, pushNotification]
+    [applications, jobs, assignments, pushNotification, refreshAssignments, refreshJobs]
   );
 
   // ---------------------------------------------------------------------

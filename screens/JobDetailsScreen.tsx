@@ -123,6 +123,9 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     { mode: 'accept' | 'reject'; app: Application } | null
   >(null);
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  // In-flight guard for a contractor accept/reject so a double-tap can't fire
+  // two backend responses on the same applicant.
+  const [responding, setResponding] = useState(false);
   // One in-flight guard for the contractor job actions (close / reopen /
   // delete) so a double-tap can't fire two backend mutations.
   const [actionBusy, setActionBusy] = useState(false);
@@ -281,6 +284,7 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
   };
 
   const handleAccept = (app: Application) => {
+    if (responding) return;
     if (fullyStaffed) {
       Alert.alert('כל המקומות במשרה כבר אוישו.');
       return;
@@ -289,22 +293,31 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
   };
 
   const handleReject = (app: Application) => {
+    if (responding) return;
     setCandidateDialog({ mode: 'reject', app });
   };
 
-  const submitCandidateDialog = (message: string) => {
-    if (!candidateDialog) return;
+  const submitCandidateDialog = async (message: string) => {
+    if (!candidateDialog || responding) return;
     const { mode, app } = candidateDialog;
     setCandidateDialog(null);
-    const res = respondToApplication(
-      app.id,
-      mode === 'accept',
-      message || undefined
-    );
-    if (!res.ok && res.reason === 'unsupported') {
-      Alert.alert('בקרוב', 'אישור ודחייה של מועמדים ייכללו בשלב הבא של המערכת.');
-    } else if (mode === 'accept' && !res.ok && res.reason === 'full') {
-      Alert.alert('כל המקומות במשרה כבר אוישו.');
+    setResponding(true);
+    try {
+      const res = await respondToApplication(
+        app.id,
+        mode === 'accept',
+        message || undefined
+      );
+      if (!res.ok && res.reason === 'full') {
+        Alert.alert('כל המקומות במשרה כבר אוישו.');
+      } else if (!res.ok) {
+        Alert.alert(
+          mode === 'accept' ? 'אישור המועמד נכשל' : 'דחיית המועמד נכשלה',
+          'אירעה שגיאה. ייתכן שהבקשה כבר טופלה. נסה/י שוב.'
+        );
+      }
+    } finally {
+      setResponding(false);
     }
   };
 

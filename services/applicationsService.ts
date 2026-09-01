@@ -60,8 +60,9 @@ export function mapApplicationRow(r: ApplicationRow): Application {
 export type ApplicationErrorCode =
   | 'duplicate' // already applied in the current recruitment cycle
   | 'ineligible' // job closed / full / not an active worker (RLS refused)
-  | 'unauthorized' // not signed in / not the owning worker
-  | 'not_pending'; // withdraw attempted on a non-pending application
+  | 'unauthorized' // not signed in / not the owning worker / not the job owner
+  | 'not_pending' // acted on an application that is no longer pending
+  | 'full'; // contractor accept refused — job already at capacity
 
 export class ApplicationError extends Error {
   code: ApplicationErrorCode;
@@ -157,6 +158,40 @@ export async function reapplyToJobBackend(
     if (['P0001', 'P0002', '42501'].includes(error.code ?? '')) {
       throw new ApplicationError('ineligible');
     }
+    throw error;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return mapApplicationRow(row as unknown as ApplicationRow);
+}
+
+/**
+ * Contractor accept / reject a pending application on their own job (029 RPC —
+ * one atomic transaction). On accept the RPC also creates exactly one 'active'
+ * assignment under a job-row lock, so concurrent accepts on a 1-slot job can't
+ * overbook. Returns the updated application row.
+ *   P0001 -> 'not_pending' (already accepted/rejected/withdrawn, or past cycle)
+ *   check_violation -> 'full' (job filled first)
+ *   42501 -> 'unauthorized' (not the owning approved contractor)
+ */
+export async function respondToApplicationBackend(
+  applicationId: string,
+  accept: boolean,
+  response?: string
+): Promise<Application> {
+  const trimmed = (response ?? '').trim();
+  const { data, error } = await getSupabase().rpc('respond_to_application', {
+    p_application_id: applicationId,
+    p_accept: accept,
+    p_response: trimmed ? trimmed : null,
+  });
+  if (error) {
+    // 23514 = check_violation raised by respond_to_application / the
+    // assignments_capacity_guard trigger when the job filled first.
+    if (error.code === '23514' || /fully staffed/i.test(error.message ?? '')) {
+      throw new ApplicationError('full');
+    }
+    if (error.code === 'P0001') throw new ApplicationError('not_pending');
+    if (error.code === '42501') throw new ApplicationError('unauthorized');
     throw error;
   }
   const row = Array.isArray(data) ? data[0] : data;

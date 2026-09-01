@@ -73,6 +73,8 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
   const [dialog, setDialog] = useState<
     { mode: 'accept' | 'reject'; app: Application } | null
   >(null);
+  // In-flight guard so a double-tap can't fire two backend responses.
+  const [responding, setResponding] = useState(false);
 
   // SOURCE: applications joined to my jobs
   const myJobIds = useMemo(
@@ -105,6 +107,7 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
   };
 
   const handleAccept = (app: Application) => {
+    if (responding) return;
     if (isJobFullyStaffed(app.jobId)) {
       capacityAlert();
       return;
@@ -112,22 +115,31 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
     setDialog({ mode: 'accept', app });
   };
   const handleReject = (app: Application) => {
+    if (responding) return;
     setDialog({ mode: 'reject', app });
   };
 
-  const submitDialog = (message: string) => {
-    if (!dialog) return;
+  const submitDialog = async (message: string) => {
+    if (!dialog || responding) return;
     const { mode, app } = dialog;
     setDialog(null);
-    const res = respondToApplication(
-      app.id,
-      mode === 'accept',
-      message || undefined
-    );
-    if (!res.ok && res.reason === 'unsupported') {
-      Alert.alert('בקרוב', 'אישור ודחייה של מועמדים ייכללו בשלב הבא של המערכת.');
-    } else if (mode === 'accept' && !res.ok && res.reason === 'full') {
-      capacityAlert();
+    setResponding(true);
+    try {
+      const res = await respondToApplication(
+        app.id,
+        mode === 'accept',
+        message || undefined
+      );
+      if (mode === 'accept' && !res.ok && res.reason === 'full') {
+        capacityAlert();
+      } else if (!res.ok) {
+        Alert.alert(
+          mode === 'accept' ? 'אישור המועמד נכשל' : 'דחיית המועמד נכשלה',
+          'אירעה שגיאה. ייתכן שהבקשה כבר טופלה. נסה/י שוב.'
+        );
+      }
+    } finally {
+      setResponding(false);
     }
   };
 
