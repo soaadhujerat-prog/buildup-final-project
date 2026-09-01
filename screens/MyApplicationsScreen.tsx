@@ -49,6 +49,7 @@ const MyApplicationsScreen: React.FC<Props> = ({
   const {
     currentUser,
     applications,
+    applicationsLoading,
     jobs,
     assignments,
     getUserById,
@@ -70,7 +71,16 @@ const MyApplicationsScreen: React.FC<Props> = ({
         {
           text: 'ביטול הבקשה',
           style: 'destructive',
-          onPress: () => withdrawApplication(app.id),
+          onPress: async () => {
+            try {
+              await withdrawApplication(app.id);
+            } catch {
+              Alert.alert(
+                'ביטול הבקשה נכשל',
+                'אירעה שגיאה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.'
+              );
+            }
+          },
         },
       ]
     );
@@ -158,12 +168,16 @@ const MyApplicationsScreen: React.FC<Props> = ({
             color={Colors.textMuted}
           />
           <Text style={styles.emptyTitle}>
-            {counts.all === 0
+            {applicationsLoading && counts.all === 0
+              ? 'טוען מועמדויות…'
+              : counts.all === 0
               ? 'עדיין לא הגשת מועמדות'
               : 'אין בקשות בסינון זה'}
           </Text>
           <Text style={styles.emptySub}>
-            {counts.all === 0
+            {applicationsLoading && counts.all === 0
+              ? ''
+              : counts.all === 0
               ? 'גלה משרות מתאימות במסך חיפוש העבודות.'
               : 'נסה סינון אחר'}
           </Text>

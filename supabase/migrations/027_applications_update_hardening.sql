@@ -1,0 +1,36 @@
+-- =============================================================================
+-- 027 · remove the direct-UPDATE surface on applications (Phase 5A hardening)
+-- =============================================================================
+-- CONFIRMED HOLE (migration 026): an RLS row policy gates the *final row*
+-- (status / worker_id), never *which columns changed*. Under 026 a worker's raw
+-- PostgREST UPDATE that moved pending -> withdrawn ALSO successfully wrote
+-- contractor_response, responded_at, recruitment_cycle, message and applied_at
+-- on their own row. Verified live before this migration.
+--
+-- Phase 5A has exactly one sanctioned application mutation for a normal user:
+--   public.withdraw_application(p_application_id)  -- 025, SECURITY DEFINER
+--     (owns the row · status is 'pending' · sets ONLY status='withdrawn' +
+--      server-generated withdrawn_at). It runs as the function owner and
+--      `applications` is NOT force-RLS, so it bypasses RLS and does NOT need an
+--      UPDATE policy.
+--
+-- Contractor accept/reject is Phase 5B and will ship its own narrowly-scoped
+-- SECURITY DEFINER RPC(s) (status + contractor_response + responded_at +
+-- assignment). No current admin feature updates applications directly (audited:
+-- no client code, no Edge Function, no admin_* RPC touches applications.UPDATE).
+--
+-- Therefore: drop `applications_update` outright. With RLS enabled and no
+-- UPDATE policy, every direct client UPDATE (worker / contractor / admin acting
+-- as `authenticated`) is denied. INSERT and SELECT policies are unchanged.
+--
+-- This is a TIGHTENING (removes attack surface), not a weakening. Forward-only:
+-- migrations 025 and 026 are left intact.
+-- Untouched: applications INSERT/SELECT RLS, applications_set_cycle,
+-- applications_set_updated_at, can_worker_apply, the UNIQUE constraint,
+-- job_registration_state, jobs/invitations/assignments.
+-- =============================================================================
+
+drop policy if exists applications_update on public.applications;
+
+-- (intentionally no replacement policy — application mutation goes through
+--  SECURITY DEFINER RPCs only: withdraw_application now, accept/reject in 5B.)

@@ -17,6 +17,7 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { isBackendEnabled } from '../config/env';
 import { useApp } from '../context/AppContext';
 import * as jobsService from '../services/jobsService';
+import { ApplicationError } from '../services/applicationsService';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
@@ -60,6 +61,23 @@ const formatDateHe = (dateLike: string): string => {
   const d = new Date(dateLike);
   if (isNaN(d.getTime())) return dateLike;
   return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+};
+
+/** Clean Hebrew message for an apply / withdraw failure (backend path). */
+const applicationErrorText = (e: unknown): string => {
+  if (e instanceof ApplicationError) {
+    switch (e.code) {
+      case 'duplicate':
+        return 'כבר הגשת מועמדות למשרה זו.';
+      case 'ineligible':
+        return 'לא ניתן להגיש מועמדות למשרה זו כרגע — ייתכן שההרשמה נסגרה או שהמשרה אוישה.';
+      case 'not_pending':
+        return 'לא ניתן לבטל בקשה שכבר טופלה.';
+      case 'unauthorized':
+        return 'צריך להתחבר מחדש כדי לבצע את הפעולה.';
+    }
+  }
+  return 'אירעה שגיאה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.';
 };
 
 // The full detail view. Receives an already-resolved `job` so every hook below
@@ -240,18 +258,26 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     [invitations, job.id]
   );
 
-  const submitApplication = (message: string) => {
-    if (!isWorker || !currentUser) return;
+  const submitApplication = async (message: string) => {
+    if (!isWorker || !currentUser || applying) return;
     setApplyDialogOpen(false);
     setApplying(true);
-    setTimeout(() => {
-      applyToJob(job.id, currentUser.id, message || undefined);
-      setApplying(false);
+    try {
+      // Mock path keeps its original ~0.5s "שולח…" beat; the backend path is
+      // genuinely async (real INSERT, server-checked eligibility).
+      if (!isBackendEnabled()) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      await applyToJob(job.id, currentUser.id, message || undefined);
       Alert.alert(
         'הבקשה נשלחה',
         'בקשתך נשלחה לקבלן. תקבל התראה כשתהיה החלטה.'
       );
-    }, 500);
+    } catch (e) {
+      Alert.alert('שליחת הבקשה נכשלה', applicationErrorText(e));
+    } finally {
+      setApplying(false);
+    }
   };
 
   const handleAccept = (app: Application) => {
@@ -275,7 +301,9 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
       mode === 'accept',
       message || undefined
     );
-    if (mode === 'accept' && !res.ok && res.reason === 'full') {
+    if (!res.ok && res.reason === 'unsupported') {
+      Alert.alert('בקרוב', 'אישור ודחייה של מועמדים ייכללו בשלב הבא של המערכת.');
+    } else if (mode === 'accept' && !res.ok && res.reason === 'full') {
       Alert.alert('כל המקומות במשרה כבר אוישו.');
     }
   };
@@ -289,7 +317,13 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
         {
           text: 'ביטול הבקשה',
           style: 'destructive',
-          onPress: () => withdrawApplication(app.id),
+          onPress: async () => {
+            try {
+              await withdrawApplication(app.id);
+            } catch (e) {
+              Alert.alert('ביטול הבקשה נכשל', applicationErrorText(e));
+            }
+          },
         },
       ]
     );

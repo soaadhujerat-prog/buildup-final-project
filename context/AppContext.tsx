@@ -91,6 +91,7 @@ import * as notificationService from '../services/notificationService';
 import * as adminUserService from '../services/adminUserService';
 import * as licenseService from '../services/licenseService';
 import * as jobsService from '../services/jobsService';
+import * as applicationsService from '../services/applicationsService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -123,7 +124,11 @@ export type { SessionUser, LoginResult };
  *  surface "כל המקומות במשרה כבר אוישו." */
 export interface StaffingActionResult {
   ok: boolean;
-  reason?: 'full';
+  /** 'full' — job already at capacity. 'unsupported' — the action is not wired
+   *  to the backend yet (contractor accept/reject arrives in Phase 5B); the
+   *  screen shows a "coming soon" note instead of mutating mock state over a
+   *  real job. */
+  reason?: 'full' | 'unsupported';
 }
 
 /** The worker job-search screen's search/filter/sort — lifted up here
@@ -288,7 +293,20 @@ interface AppState {
   canDeleteJob: (jobId: string) => boolean;
 
   // Applications (worker -> job)
-  applyToJob: (jobId: string, workerId: string, message?: string) => Application;
+  /** Submit an application. Backend path (Phase 5A): a real Supabase INSERT
+   *  (RLS + trigger enforce worker_id / eligibility / recruitment_cycle) whose
+   *  persisted row is merged into `applications`; rejects with an
+   *  `applicationsService.ApplicationError` ('duplicate' | 'ineligible' |
+   *  'unauthorized') the caller maps to a Hebrew message. `workerId` is ignored
+   *  on the backend path (auth.uid() is authoritative). Mock path unchanged. */
+  applyToJob: (
+    jobId: string,
+    workerId: string,
+    message?: string
+  ) => Promise<Application>;
+  /** True while the initial backend applications fetch is in flight. Always
+   *  false on the mock path. */
+  applicationsLoading: boolean;
   /** Accept / reject a pending application. Accepting is refused (returns
    *  `{ ok: false, reason: 'full' }`, no state change) when the job's active
    *  assignments already equal workersNeeded — this is the one guard against
@@ -302,7 +320,7 @@ interface AppState {
    *  the record — flips status to 'withdrawn' and stamps `withdrawnAt`, so
    *  the history stays intact and a fresh application can be filed later if
    *  the job is still open. A no-op on any non-pending application. */
-  withdrawApplication: (applicationId: string) => void;
+  withdrawApplication: (applicationId: string) => Promise<void>;
 
   // Invitations (contractor -> worker)
   /** Send an invitation. Returns `null` (nothing created) when the job is
@@ -660,14 +678,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // load failure reads as a failure and not as an empty result. Never a mock
   // fall-back. Always false on the mock path.
   const [jobsError, setJobsError] = useState<boolean>(false);
-  const [applications, setApplications] = useState<Application[]>(MOCK_APPLICATIONS);
-  const [invitations, setInvitations] = useState<Invitation[]>(MOCK_INVITATIONS);
+
+  // Phase 5A: on the real backend path APPLICATIONS load from Supabase (see
+  // refreshApplications below), so they start empty; the mock path keeps
+  // MOCK_APPLICATIONS. Invitations & assignments are NOT migrated yet (Phase
+  // 5B/5C) — but on the backend path they must start empty too so no mock
+  // staffing row can ever attach itself to a real job UUID (fake applicant
+  // counts / fake capacity / fake notifications).
+  const [applications, setApplications] = useState<Application[]>(
+    isBackendEnabled() ? [] : MOCK_APPLICATIONS
+  );
+  const [applicationsLoading, setApplicationsLoading] = useState<boolean>(
+    isBackendEnabled()
+  );
+  const [invitations, setInvitations] = useState<Invitation[]>(
+    isBackendEnabled() ? [] : MOCK_INVITATIONS
+  );
 
   // Seed assignments once from whatever applications/invitations already came
   // in as 'accepted' in the mock data, so staffing counts are consistent with
   // the rest of the prototype from first render — never a separate hardcoded
-  // number.
+  // number. Empty on the backend path (see note above).
   const [assignments, setAssignments] = useState<Assignment[]>(() => {
+    if (isBackendEnabled()) return [];
     const seeded: Assignment[] = [];
     MOCK_APPLICATIONS.filter((a) => a.status === 'accepted').forEach((a) => {
       const job = MOCK_JOBS.find((j) => j.id === a.jobId);
@@ -1239,6 +1272,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser?.id, currentUser?.role, refreshJobs]);
 
   // ---------------------------------------------------------------------
+  // Applications — real backend READ layer (Phase 5A)
+  // ---------------------------------------------------------------------
+  // One flat list, RLS-scoped by the DB (worker → own; contractor → own jobs'
+  // applications; admin → all), kept in the SAME `applications` array every
+  // screen/selector already reads. No-op on the mock path (MOCK_APPLICATIONS).
+  const refreshApplications = useCallback(async () => {
+    if (!isBackendEnabled() || !currentUser) return;
+    setApplicationsLoading(true);
+    try {
+      setApplications(await applicationsService.listVisibleApplications());
+    } catch {
+      // No silent mock fallback — leave whatever is loaded; screens show empty.
+    } finally {
+      setApplicationsLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setApplications([]);
+      setApplicationsLoading(false);
+      return;
+    }
+    void refreshApplications();
+  }, [currentUser?.id, currentUser?.role, refreshApplications]);
+
+  // ---------------------------------------------------------------------
   // Admin actions
   // ---------------------------------------------------------------------
 
@@ -1748,7 +1810,34 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // ---------------------------------------------------------------------
 
   const applyToJob = useCallback<AppState['applyToJob']>(
-    (jobId, workerId, message) => {
+    async (jobId, workerId, message) => {
+      if (isBackendEnabled()) {
+        // Phase 5A. worker_id / eligibility / recruitment_cycle are all
+        // enforced server-side; no mock notification for a real job.
+        //   • a current-cycle WITHDRAWN row exists  -> reactivate it in place
+        //     (reapply_to_job RPC — no second row, same id, fresh applied_at).
+        //   • otherwise -> a real INSERT.
+        // pending / accepted / rejected rows never reach here — the JobDetails
+        // action bar shows no apply button for them.
+        const uid = currentUser?.id;
+        const withdrawnRow = uid
+          ? applications.find(
+              (a) =>
+                a.jobId === jobId &&
+                a.workerId === uid &&
+                a.status === 'withdrawn'
+            )
+          : undefined;
+        const created = withdrawnRow
+          ? await applicationsService.reapplyToJobBackend(jobId, message)
+          : await applicationsService.applyToJobBackend(jobId, message);
+        setApplications((prev) => [
+          created,
+          ...prev.filter((a) => a.id !== created.id),
+        ]);
+        return created;
+      }
+
       // Duplicate prevention looks only at applications that still "count":
       // a pending one, or an accepted one whose Assignment is still active.
       // An accepted application whose assignment was later cancelled is
@@ -1786,11 +1875,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       return app;
     },
-    [applications, assignments, jobs, workers, pushNotification]
+    [applications, assignments, jobs, workers, pushNotification, currentUser?.id]
   );
 
   const withdrawApplication = useCallback<AppState['withdrawApplication']>(
-    (applicationId) => {
+    async (applicationId) => {
+      if (isBackendEnabled()) {
+        // Phase 5A: withdraw_application RPC (own pending row only, pending ->
+        // withdrawn, history preserved). Re-pull so the row reflects the DB.
+        await applicationsService.withdrawApplicationBackend(applicationId);
+        await refreshApplications();
+        return;
+      }
       setApplications((prev) =>
         prev.map((a) =>
           a.id === applicationId && a.status === 'pending'
@@ -1799,11 +1895,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         )
       );
     },
-    []
+    [refreshApplications]
   );
 
   const respondToApplication = useCallback<AppState['respondToApplication']>(
     (applicationId, accepted, response) => {
+      if (isBackendEnabled()) {
+        // Phase 5A is READ-only for the contractor. Accepting / rejecting an
+        // applicant (and the assignment it creates) is Phase 5B — do NOT mutate
+        // mock state over a real application. The screen shows a "coming soon"
+        // note on this result.
+        return { ok: false, reason: 'unsupported' };
+      }
       const existing = applications.find((a) => a.id === applicationId);
       if (!existing) return { ok: false };
       const job = jobs.find((j) => j.id === existing.jobId);
@@ -2910,6 +3013,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updateJobSearchState,
       jobsLoading,
       jobsError,
+      applicationsLoading,
       refreshJobs,
       admins,
       workers,
@@ -3011,6 +3115,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updateJobSearchState,
       jobsLoading,
       jobsError,
+      applicationsLoading,
       refreshJobs,
       admins,
       workers,

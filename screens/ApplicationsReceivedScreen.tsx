@@ -52,6 +52,7 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
   const {
     currentUser,
     applications,
+    applicationsLoading,
     jobs,
     assignments,
     getUserById,
@@ -123,7 +124,11 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
       mode === 'accept',
       message || undefined
     );
-    if (mode === 'accept' && !res.ok && res.reason === 'full') capacityAlert();
+    if (!res.ok && res.reason === 'unsupported') {
+      Alert.alert('בקרוב', 'אישור ודחייה של מועמדים ייכללו בשלב הבא של המערכת.');
+    } else if (mode === 'accept' && !res.ok && res.reason === 'full') {
+      capacityAlert();
+    }
   };
 
   return (
@@ -174,12 +179,16 @@ const ApplicationsReceivedScreen: React.FC<Props> = ({
             color={Colors.textMuted}
           />
           <Text style={styles.emptyTitle}>
-            {counts.all === 0
+            {applicationsLoading && counts.all === 0
+              ? 'טוען בקשות…'
+              : counts.all === 0
               ? 'עדיין אין בקשות'
               : 'אין בקשות בסינון זה'}
           </Text>
           <Text style={styles.emptySub}>
-            {counts.all === 0
+            {applicationsLoading && counts.all === 0
+              ? ''
+              : counts.all === 0
               ? 'כשתפרסם משרות, מועמדויות יופיעו כאן.'
               : 'נסה סינון אחר'}
           </Text>
