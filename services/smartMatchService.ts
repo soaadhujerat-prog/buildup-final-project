@@ -38,6 +38,8 @@ import {
   getWorkerContractorRelationship,
   hasActiveAssignment,
 } from './assignmentService';
+import { isBackendEnabled } from '../config/env';
+import { getSupabase } from './supabaseClient';
 
 // ---------------------------------------------------------------------------
 // Weights — the future 100-point model. Kept here so the local matcher and a
@@ -465,6 +467,23 @@ const compareResults = (a: SmartMatchResult, b: SmartMatchResult): number => {
 export async function getSmartMatches(
   query: SmartMatchQuery
 ): Promise<SmartMatchResult[]> {
+  // ---- Backend path (Phase 9A): real server-side + AI-assisted matching ----
+  // The `smart-match` Edge Function authenticates the caller, re-checks
+  // contractor ownership + job eligibility, pre-filters candidates
+  // deterministically, then runs the hybrid (deterministic + bounded AI) model.
+  // The local pools on `query` are ignored — the function reads the live DB.
+  // Any failure throws; SmartMatchScreen already renders its Hebrew error
+  // state. There is NO silent fallback to the local matcher.
+  if (isBackendEnabled()) {
+    const { data, error } = await getSupabase().functions.invoke('smart-match', {
+      body: { jobId: query.jobId },
+    });
+    if (error) throw error;
+    const results = (data as { results?: SmartMatchResult[] } | null)?.results;
+    return Array.isArray(results) ? results : [];
+  }
+
+  // ---- Mock path (EXPO_PUBLIC_USE_BACKEND=false): unchanged local matcher ----
   const job = query.jobs.find((j) => j.id === query.jobId);
   if (!job) return [];
 
