@@ -12,6 +12,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   ReactNode,
   useCallback,
@@ -94,6 +95,7 @@ import * as jobsService from '../services/jobsService';
 import * as applicationsService from '../services/applicationsService';
 import * as assignmentsService from '../services/assignmentsService';
 import * as invitationsService from '../services/invitationsService';
+import * as participantsService from '../services/participantsService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -694,8 +696,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const [admins] = useState<Admin[]>(MOCK_ADMINS);
-  const [workers, setWorkers] = useState<Worker[]>(MOCK_WORKERS);
-  const [contractors, setContractors] = useState<Contractor[]>(MOCK_CONTRACTORS);
+  // Backend: the worker/contractor pools start EMPTY and are filled with real
+  // Supabase profiles — the admin directory (refreshUserDirectory) for an
+  // admin, or the referenced-participant resolver (refreshParticipants) for a
+  // worker/contractor. Mock path keeps MOCK_* unchanged.
+  const [workers, setWorkers] = useState<Worker[]>(
+    isBackendEnabled() ? [] : MOCK_WORKERS
+  );
+  const [contractors, setContractors] = useState<Contractor[]>(
+    isBackendEnabled() ? [] : MOCK_CONTRACTORS
+  );
   const [registrations, setRegistrations] = useState<RegistrationRecord[]>(
     MOCK_REGISTRATIONS
   );
@@ -1388,6 +1398,151 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
     void refreshInvitations();
   }, [currentUser?.id, currentUser?.role, refreshInvitations]);
+
+  // ---------------------------------------------------------------------
+  // Participants — real profile resolution for a worker / contractor (backend)
+  // ---------------------------------------------------------------------
+  // An admin gets the full directory (refreshUserDirectory). A worker /
+  // contractor instead needs the REAL profiles of the people referenced by
+  // their jobs / applications / invitations / assignments, so getUserById()
+  // (and SearchWorkers / SmartMatch, which read `workers`) resolve to real
+  // backend users instead of showing "עובד לא ידוע" / a mock name. All reads
+  // are RLS-scoped direct SELECTs (participantsService) — no RPC, no RLS
+  // change. Resolved rows are merged into the SAME `workers` / `contractors`
+  // arrays every selector already reads. Each id (and the one-time
+  // available-workers bulk load) is attempted once per session.
+  const participantAttemptsRef = useRef<{
+    uid: string | null;
+    ids: Set<string>;
+    availableLoaded: boolean;
+  }>({ uid: null, ids: new Set(), availableLoaded: false });
+
+  const resolveParticipants = useCallback(async () => {
+    if (!isBackendEnabled() || !currentUser) return;
+    if (currentUser.role === 'admin') return; // admin uses refreshUserDirectory
+
+    const st = participantAttemptsRef.current;
+    if (st.uid !== currentUser.id) {
+      // identity changed without a logout in between — drop the previous
+      // user's resolved pools so nothing stale leaks across sessions.
+      participantAttemptsRef.current = {
+        uid: currentUser.id,
+        ids: new Set(),
+        availableLoaded: false,
+      };
+      if (st.uid !== null) {
+        setWorkers([]);
+        setContractors([]);
+      }
+    }
+    const attempts = participantAttemptsRef.current;
+
+    const mergeWorkers = (list: Worker[]) => {
+      list.forEach((w) => attempts.ids.add(w.id));
+      if (!list.length) return;
+      setWorkers((prev) => {
+        const byId = new Map(prev.map((w) => [w.id, w]));
+        list.forEach((w) => byId.set(w.id, w));
+        return Array.from(byId.values());
+      });
+    };
+    const mergeContractors = (list: Contractor[]) => {
+      list.forEach((c) => attempts.ids.add(c.id));
+      if (!list.length) return;
+      setContractors((prev) => {
+        const byId = new Map(prev.map((c) => [c.id, c]));
+        list.forEach((c) => byId.set(c.id, c));
+        return Array.from(byId.values());
+      });
+    };
+
+    const wantContractors = new Set<string>();
+    jobs.forEach((j) => j.contractorId && wantContractors.add(j.contractorId));
+    invitations.forEach(
+      (i) => i.contractorId && wantContractors.add(i.contractorId)
+    );
+    assignments.forEach(
+      (a) => a.contractorId && wantContractors.add(a.contractorId)
+    );
+
+    try {
+      if (currentUser.role === 'contractor') {
+        wantContractors.add(currentUser.id); // own job "פורסם על ידי"
+
+        const wantWorkers = new Set<string>();
+        applications.forEach((a) => a.workerId && wantWorkers.add(a.workerId));
+        invitations.forEach((i) => i.workerId && wantWorkers.add(i.workerId));
+        assignments.forEach((a) => a.workerId && wantWorkers.add(a.workerId));
+
+        const missingW = [...wantWorkers].filter((id) => !attempts.ids.has(id));
+        const missingC = [...wantContractors].filter(
+          (id) => !attempts.ids.has(id)
+        );
+
+        const tasks: Promise<void>[] = [];
+        if (!attempts.availableLoaded) {
+          attempts.availableLoaded = true;
+          tasks.push(
+            participantsService
+              .loadAvailableWorkerSummaries()
+              .then(mergeWorkers)
+          );
+        }
+        if (missingW.length) {
+          missingW.forEach((id) => attempts.ids.add(id));
+          tasks.push(
+            participantsService.loadWorkerSummaries(missingW).then(mergeWorkers)
+          );
+        }
+        if (missingC.length) {
+          missingC.forEach((id) => attempts.ids.add(id));
+          tasks.push(
+            participantsService
+              .loadContractorSummaries(missingC)
+              .then(mergeContractors)
+          );
+        }
+        await Promise.all(tasks);
+      } else {
+        // worker: resolve the contractors behind their jobs / invitations /
+        // assignments (workerId always resolves to `currentUser`).
+        const missingC = [...wantContractors].filter(
+          (id) => !attempts.ids.has(id)
+        );
+        if (missingC.length) {
+          missingC.forEach((id) => attempts.ids.add(id));
+          mergeContractors(
+            await participantsService.loadContractorSummaries(missingC)
+          );
+        }
+      }
+    } catch {
+      // keep whatever resolved; unresolved ids show a neutral fallback and are
+      // retried on the next identity change (not in a loop this session).
+    }
+  }, [
+    currentUser?.id,
+    currentUser?.role,
+    applications,
+    invitations,
+    assignments,
+    jobs,
+  ]);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setWorkers([]);
+      setContractors([]);
+      participantAttemptsRef.current = {
+        uid: null,
+        ids: new Set(),
+        availableLoaded: false,
+      };
+      return;
+    }
+    void resolveParticipants();
+  }, [currentUser?.id, resolveParticipants]);
 
   // ---------------------------------------------------------------------
   // Admin actions
