@@ -97,6 +97,7 @@ import * as applicationsService from '../services/applicationsService';
 import * as assignmentsService from '../services/assignmentsService';
 import * as invitationsService from '../services/invitationsService';
 import * as participantsService from '../services/participantsService';
+import * as favoritesService from '../services/favoritesService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -1414,6 +1415,61 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser?.id, currentUser?.role, refreshInvitations]);
 
   // ---------------------------------------------------------------------
+  // Favorites — real backend READ layer (viewer-specific bookmark lists)
+  // ---------------------------------------------------------------------
+  // Two independent relationships, hydrated into the SAME arrays the selectors
+  // (isFavoriteWorker / getFavoriteWorkerIds / …) already read:
+  //   contractor session -> contractor_favorite_workers  -> favoriteWorkers
+  //   worker session     -> worker_favorite_contractors  -> favoriteContractors
+  // RLS scopes every row to auth.uid(), so a fresh login only ever sees its own
+  // list and a logout (currentUser -> null) clears both. No silent mock
+  // fallback on failure — the list just stays empty. Writes go through the
+  // backend-aware toggles below. No-op on the mock path (MOCK is empty anyway).
+  const refreshFavorites = useCallback(async () => {
+    if (!isBackendEnabled() || !currentUser) return;
+    try {
+      if (currentUser.role === 'contractor') {
+        const ids = await favoritesService.listFavoriteWorkerIds();
+        setFavoriteWorkers(
+          ids.map((workerId) => ({
+            id: `${currentUser.id}:${workerId}`,
+            contractorId: currentUser.id,
+            workerId,
+            createdAt: '',
+          }))
+        );
+      } else if (currentUser.role === 'worker') {
+        const ids = await favoritesService.listFavoriteContractorIds();
+        setFavoriteContractors(
+          ids.map((contractorId) => ({
+            id: `${currentUser.id}:${contractorId}`,
+            workerId: currentUser.id,
+            contractorId,
+            createdAt: '',
+          }))
+        );
+      }
+    } catch {
+      // No silent mock fallback — keep whatever is loaded (empty on first load).
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setFavoriteWorkers([]);
+      setFavoriteContractors([]);
+      return;
+    }
+    void refreshFavorites();
+  }, [currentUser?.id, currentUser?.role, refreshFavorites]);
+
+  // Guards a favorite key while its insert/delete is in flight, so a rapid
+  // double-tap can't fire a second racing request (backend path only).
+  const favInFlightRef = useRef<Set<string>>(new Set());
+
+  // ---------------------------------------------------------------------
   // Participants — real profile resolution for a worker / contractor (backend)
   // ---------------------------------------------------------------------
   // An admin gets the full directory (refreshUserDirectory). A worker /
@@ -2615,6 +2671,61 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const toggleFavoriteWorker = useCallback<AppState['toggleFavoriteWorker']>(
     (contractorId, workerId) => {
+      const addRow = (): ContractorFavoriteWorker => ({
+        id: isBackendEnabled()
+          ? `${contractorId}:${workerId}`
+          : newId('fav'),
+        contractorId,
+        workerId,
+        createdAt: nowIso(),
+      });
+
+      if (isBackendEnabled()) {
+        const key = `${contractorId}:${workerId}`;
+        if (favInFlightRef.current.has(key)) return; // double-tap guard
+        const exists = favoriteWorkers.some(
+          (f) => f.contractorId === contractorId && f.workerId === workerId
+        );
+        // Optimistic: flip the heart now, reconcile with the server below.
+        setFavoriteWorkers((prev) =>
+          exists
+            ? prev.filter(
+                (f) =>
+                  !(f.contractorId === contractorId && f.workerId === workerId)
+              )
+            : [...prev, addRow()]
+        );
+        favInFlightRef.current.add(key);
+        void (async () => {
+          try {
+            if (exists) {
+              await favoritesService.removeFavoriteWorker(contractorId, workerId);
+            } else {
+              await favoritesService.addFavoriteWorker(contractorId, workerId);
+            }
+          } catch {
+            // Roll the optimistic change back to its pre-tap state.
+            setFavoriteWorkers((prev) => {
+              const there = prev.some(
+                (f) => f.contractorId === contractorId && f.workerId === workerId
+              );
+              if (exists && !there) return [...prev, addRow()];
+              if (!exists && there) {
+                return prev.filter(
+                  (f) =>
+                    !(f.contractorId === contractorId && f.workerId === workerId)
+                );
+              }
+              return prev;
+            });
+          } finally {
+            favInFlightRef.current.delete(key);
+          }
+        })();
+        return;
+      }
+
+      // Mock path — unchanged local-only toggle.
       setFavoriteWorkers((prev) => {
         const exists = prev.some(
           (f) => f.contractorId === contractorId && f.workerId === workerId
@@ -2630,7 +2741,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         ];
       });
     },
-    []
+    [favoriteWorkers]
   );
 
   // ---------------------------------------------------------------------
@@ -2657,22 +2768,81 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const toggleFavoriteContractor = useCallback<
     AppState['toggleFavoriteContractor']
-  >((workerId, contractorId) => {
-    setFavoriteContractors((prev) => {
-      const exists = prev.some(
-        (f) => f.workerId === workerId && f.contractorId === contractorId
-      );
-      if (exists) {
-        return prev.filter(
-          (f) => !(f.workerId === workerId && f.contractorId === contractorId)
+  >(
+    (workerId, contractorId) => {
+      const addRow = (): WorkerFavoriteContractor => ({
+        id: isBackendEnabled()
+          ? `${workerId}:${contractorId}`
+          : newId('favc'),
+        workerId,
+        contractorId,
+        createdAt: nowIso(),
+      });
+
+      if (isBackendEnabled()) {
+        const key = `${workerId}:${contractorId}`;
+        if (favInFlightRef.current.has(key)) return; // double-tap guard
+        const exists = favoriteContractors.some(
+          (f) => f.workerId === workerId && f.contractorId === contractorId
         );
+        setFavoriteContractors((prev) =>
+          exists
+            ? prev.filter(
+                (f) =>
+                  !(f.workerId === workerId && f.contractorId === contractorId)
+              )
+            : [...prev, addRow()]
+        );
+        favInFlightRef.current.add(key);
+        void (async () => {
+          try {
+            if (exists) {
+              await favoritesService.removeFavoriteContractor(
+                workerId,
+                contractorId
+              );
+            } else {
+              await favoritesService.addFavoriteContractor(workerId, contractorId);
+            }
+          } catch {
+            setFavoriteContractors((prev) => {
+              const there = prev.some(
+                (f) => f.workerId === workerId && f.contractorId === contractorId
+              );
+              if (exists && !there) return [...prev, addRow()];
+              if (!exists && there) {
+                return prev.filter(
+                  (f) =>
+                    !(f.workerId === workerId && f.contractorId === contractorId)
+                );
+              }
+              return prev;
+            });
+          } finally {
+            favInFlightRef.current.delete(key);
+          }
+        })();
+        return;
       }
-      return [
-        ...prev,
-        { id: newId('favc'), workerId, contractorId, createdAt: nowIso() },
-      ];
-    });
-  }, []);
+
+      // Mock path — unchanged local-only toggle.
+      setFavoriteContractors((prev) => {
+        const exists = prev.some(
+          (f) => f.workerId === workerId && f.contractorId === contractorId
+        );
+        if (exists) {
+          return prev.filter(
+            (f) => !(f.workerId === workerId && f.contractorId === contractorId)
+          );
+        }
+        return [
+          ...prev,
+          { id: newId('favc'), workerId, contractorId, createdAt: nowIso() },
+        ];
+      });
+    },
+    [favoriteContractors]
+  );
 
   // ---------------------------------------------------------------------
   // Worker / Contractor profile mutations
