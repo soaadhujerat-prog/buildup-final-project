@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { useSelfIdNumber } from '../hooks/useSelfIdNumber';
 import ContractorAvatar from '../components/ContractorAvatar';
 import StatusBadge from '../components/StatusBadge';
 import AttachedDocument from '../components/AttachedDocument';
@@ -43,6 +44,9 @@ const ContractorProfileScreen: React.FC<Props> = ({
   const pendingLicenseReq = me
     ? getPendingLicenseRequestForContractor(me.id)
     : undefined;
+  // Own national ID — read-only, decrypted on demand via `reveal-my-id`
+  // (auth.uid() only). Never editable, never persisted.
+  const selfId = useSelfIdNumber();
 
   if (!me || me.role !== 'contractor') {
     return (
@@ -110,7 +114,12 @@ const ContractorProfileScreen: React.FC<Props> = ({
 
         {/* Contact */}
         <Section title="פרטי קשר">
-          <FieldRow label="תעודת זהות" value={me.idNumber ?? ''} mono ltr />
+          <FieldRow
+            label="תעודת זהות"
+            value={selfId.text}
+            mono={selfId.isNumber}
+            ltr={selfId.isNumber}
+          />
           <FieldRow label="טלפון" value={me.phone} ltr />
           <FieldRow label="אימייל" value={me.email} ltr />
         </Section>

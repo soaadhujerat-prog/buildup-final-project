@@ -37,7 +37,12 @@ const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 export interface UserDirectory {
   workers: Worker[];
   contractors: Contractor[];
-  /** profile ids that have a decryptable ID on file (show the reveal action) */
+  /** profile ids that have a `user_identity` row at all — i.e. there is an ID
+   *  on file worth trying to reveal. Whether that row's ciphertext is present
+   *  yet is only knowable server-side (client roles cannot read
+   *  `id_number_enc` — migration 037); a legacy row with no ciphertext returns
+   *  "unavailable" from `admin-reveal-id` and the UI then shows a truthful
+   *  "heals on next login" line. */
   idOnFile: Set<string>;
 }
 

@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { FunctionError } from '../services/functionsClient';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
@@ -88,6 +89,11 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
   // admin reveals it on demand via admin-reveal-id.
   const [revealedId, setRevealedId] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
+  // True once a reveal came back "unavailable" (404) — a legacy identity row
+  // whose ID has not been encrypted yet. It self-heals the next time that user
+  // logs in with ID + password; until then we show a truthful line, never a
+  // fake value or a generic error.
+  const [idLegacyPending, setIdLegacyPending] = useState(false);
 
   // Every KPI is derived LIVE from the source arrays in AppContext — no
   // stored counters anywhere. sendInvitation / applyToJob / an Assignment
@@ -185,12 +191,18 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
   };
 
   const revealId = async () => {
-    if (revealing || revealedId) return;
+    if (revealing || revealedId || idLegacyPending) return;
     setRevealing(true);
     try {
       setRevealedId(await revealUserIdNumber(user.id));
-    } catch {
-      Alert.alert('שגיאה', 'לא ניתן להציג את מספר תעודת הזהות כרגע.');
+    } catch (e) {
+      const unavailable =
+        e instanceof FunctionError && e.code === 'unavailable';
+      if (unavailable) {
+        setIdLegacyPending(true);
+      } else {
+        Alert.alert('שגיאה', 'לא ניתן להציג את מספר תעודת הזהות כרגע.');
+      }
     } finally {
       setRevealing(false);
     }
@@ -485,18 +497,29 @@ const AdminUserDetailsScreen: React.FC<Props> = ({
           <FieldRow label="שם מלא" value={user.fullName} />
           <FieldRow
             label="תעודת זהות"
-            value={user.idNumber ?? revealedId ?? '—'}
-            mono
-            ltr
+            value={
+              user.idNumber ??
+              revealedId ??
+              (idLegacyPending ? 'טרם זמין' : '—')
+            }
+            mono={!idLegacyPending}
+            ltr={!idLegacyPending}
             onPress={
-              !user.idNumber && !revealedId && userHasIdOnFile(user.id)
+              !user.idNumber &&
+              !revealedId &&
+              !idLegacyPending &&
+              userHasIdOnFile(user.id)
                 ? revealId
                 : undefined
             }
           />
           {!user.idNumber && !revealedId && userHasIdOnFile(user.id) && (
             <Text style={styles.emptyLine}>
-              {revealing ? 'מפענח…' : 'הקש/י על השורה כדי להציג את מספר תעודת הזהות'}
+              {revealing
+                ? 'מפענח…'
+                : idLegacyPending
+                ? 'מספר תעודת הזהות של משתמש זה יוצפן אוטומטית בהתחברות הבאה שלו עם ת"ז + סיסמה, ואז יהיה ניתן להצגה כאן.'
+                : 'הקש/י על השורה כדי להציג את מספר תעודת הזהות'}
             </Text>
           )}
           <FieldRow

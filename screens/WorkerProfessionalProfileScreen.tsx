@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { useSelfIdNumber } from '../hooks/useSelfIdNumber';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
 import { Worker } from '../types';
@@ -36,6 +37,9 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
   const insets = useSafeAreaInsets();
   const { currentUser } = useApp();
   const me = currentUser as Worker | undefined;
+  // Own national ID — read-only, decrypted on demand via `reveal-my-id`
+  // (auth.uid() only). Never editable, never persisted.
+  const selfId = useSelfIdNumber();
 
   if (!me || me.role !== 'worker') {
     return (
@@ -175,7 +179,12 @@ const WorkerProfessionalProfileScreen: React.FC<Props> = ({
 
         {/* Contact */}
         <Section title="פרטי קשר">
-          <FieldRow label="ת.ז" value={me.idNumber ?? ''} mono ltr />
+          <FieldRow
+            label="ת.ז"
+            value={selfId.text}
+            mono={selfId.isNumber}
+            ltr={selfId.isNumber}
+          />
           <FieldRow label="טלפון" value={me.phone} ltr />
           <FieldRow label="אימייל" value={me.email} ltr />
         </Section>

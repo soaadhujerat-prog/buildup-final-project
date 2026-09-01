@@ -48,6 +48,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
   const { currentUser, updateWorkerProfile } = useApp();
   const me = currentUser as Worker | undefined;
 
+  const [fullName, setFullName] = useState(me?.fullName ?? '');
   const [phone, setPhone] = useState(me?.phone ?? '');
   const [email, setEmail] = useState(me?.email ?? '');
   const [city, setCity] = useState(me?.city ?? 'תל אביב');
@@ -174,6 +175,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
 
   const handleSave = async () => {
     if (submitting) return;
+    if (!fullName.trim()) return Alert.alert('שגיאה', 'שם מלא חובה');
     if (!phone.trim()) return Alert.alert('שגיאה', 'טלפון חובה');
     if (!isValidIsraeliPhone(phone))
       return Alert.alert('שגיאה', 'מספר טלפון לא תקין');
@@ -196,6 +198,7 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
     setSubmitting(true);
     try {
       await updateWorkerProfile(me.id, {
+        fullName: fullName.trim(),
         avatarUrl: avatarUri,
         phone: normalizePhone(phone),
         email: email.trim(),
@@ -264,6 +267,10 @@ const WorkerProfileEditScreen: React.FC<Props> = ({ onBack }) => {
               </Text>
             </TouchableOpacity>
           </View>
+        </Section>
+
+        <Section title="פרטים אישיים">
+          <Field label="שם מלא" value={fullName} onChange={setFullName} />
         </Section>
 
         <Section title="פרטי קשר">

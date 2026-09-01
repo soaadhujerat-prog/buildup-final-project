@@ -35,6 +35,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const ID_HMAC_PEPPER = Deno.env.get('ID_HMAC_PEPPER') ?? '';
+const ID_ENC_KEY = Deno.env.get('ID_ENC_KEY') ?? '';
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -70,6 +71,84 @@ async function hmacSha256Hex(message: string, key: string): Promise<string> {
   return Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+// AES-256-GCM ID encryption — used ONLY to self-heal a legacy `user_identity`
+// row that has no `id_number_enc` yet, AFTER the password has been verified.
+// Key = ID_ENC_KEY (hex-64 / base64-32), else HKDF-SHA256 from ID_HMAC_PEPPER.
+// Ciphertext: "v1:" + base64(iv(12) || ct || gcmTag(16)). MUST match
+// register/index.ts and admin-reveal-id/index.ts.
+const KDF_INFO = 'buildup/id-number-encryption/v1';
+function b64encode(bytes: Uint8Array): string {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+}
+async function idEncKey(): Promise<CryptoKey> {
+  let raw: Uint8Array;
+  if (/^[0-9a-fA-F]{64}$/.test(ID_ENC_KEY)) {
+    raw = hexToBytes(ID_ENC_KEY);
+  } else if (ID_ENC_KEY.length >= 43) {
+    raw = Uint8Array.from(atob(ID_ENC_KEY), (c) => c.charCodeAt(0)).slice(0, 32);
+  } else {
+    const ikm = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(ID_HMAC_PEPPER),
+      'HKDF',
+      false,
+      ['deriveBits'],
+    );
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode(KDF_INFO) },
+      ikm,
+      256,
+    );
+    raw = new Uint8Array(bits);
+  }
+  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+async function encryptId(plain: string): Promise<string> {
+  const key = await idEncKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plain)),
+  );
+  const blob = new Uint8Array(iv.length + ct.length);
+  blob.set(iv, 0);
+  blob.set(ct, iv.length);
+  return 'v1:' + b64encode(blob);
+}
+
+/**
+ * Legacy self-heal. Called ONLY after the password has been verified for the
+ * user whose id_number_hash matched. If that user's `user_identity` row has no
+ * ciphertext yet, encrypt the ALREADY-VERIFIED normalized ID and store it.
+ * Best-effort: never throws, never blocks login, never logs the plaintext, and
+ * the `is('id_number_enc', null)` guard means an existing value is never
+ * overwritten.
+ */
+async function healLegacyIdEnc(
+  admin: ReturnType<typeof createClient>,
+  profileId: string,
+  hasEnc: boolean,
+  normalizedId: string,
+): Promise<void> {
+  if (hasEnc) return;
+  try {
+    const enc = await encryptId(normalizedId);
+    await admin
+      .from('user_identity')
+      .update({ id_number_enc: enc })
+      .eq('profile_id', profileId)
+      .is('id_number_enc', null);
+  } catch {
+    // healing is best-effort — a failure here must not affect the login result
+  }
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -116,7 +195,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // ---- 3a. approved / blocked user: user_identity -> real session ----
   const { data: identity, error: identityErr } = await admin
     .from('user_identity')
-    .select('profile_id')
+    .select('profile_id, id_number_enc')
     .eq('id_number_hash', hash)
     .maybeSingle();
   if (identityErr) return json({ ok: false, error: 'lookup_failed' }, 500);
@@ -130,6 +209,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const { data: signIn, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
     if (signInErr || !signIn?.session) return json({ ok: false });
+
+    // Password verified for this exact user — safe to encrypt & store the ID
+    // for any legacy row that never got a ciphertext. Best-effort only.
+    await healLegacyIdEnc(
+      admin,
+      identity.profile_id as string,
+      (identity.id_number_enc as string | null) != null,
+      normalized,
+    );
 
     return json({
       ok: true,
