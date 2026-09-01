@@ -191,6 +191,7 @@ const AppNavigator: React.FC = () => {
     getUserById,
     applications,
     conversations,
+    refreshConversations,
     supportTickets,
     registrations,
   } = useApp();
@@ -474,14 +475,22 @@ const AppNavigator: React.FC = () => {
           break;
         }
 
-        // New chat message. relatedId = conversation id → open that thread;
-        // fall back to the inbox if the id can't be matched.
+        // New chat message (Phase 7C). relatedId = conversation id → open that
+        // exact thread. If it isn't in the local inbox yet (Realtime lag / cold
+        // start), still push straight into it and kick a refresh — ChatScreen
+        // renders once `conversations` catches up, and shows its own clean
+        // "השיחה לא נמצאה" state if the caller genuinely can't access it. Never
+        // create a conversation from a notification. Only bail to the inbox
+        // when there's no id at all.
         case 'new_message': {
-          const conv = relatedId
-            ? conversations.find((c) => c.id === relatedId)
-            : undefined;
-          if (conv) push({ name: 'Chat', conversationId: conv.id });
-          else push({ name: 'Messages' });
+          if (!relatedId) {
+            push({ name: 'Messages' });
+            break;
+          }
+          if (!conversations.some((c) => c.id === relatedId)) {
+            void refreshConversations();
+          }
+          push({ name: 'Chat', conversationId: relatedId });
           break;
         }
 

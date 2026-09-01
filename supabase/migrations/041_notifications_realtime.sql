@@ -1,0 +1,21 @@
+-- =============================================================================
+-- 041 · deliver notifications live (Phase 7C fix)
+-- =============================================================================
+-- Bug found on device: a `new_message` notification row is created + persisted
+-- immediately by send_message (040), and refreshNotifications() loads it on
+-- login / app-foreground / pull-to-refresh — but it does NOT appear live. Root
+-- cause: there was NO Realtime subscription on public.notifications. 7C tried to
+-- piggyback notification delivery on the Phase 7B `messages` Realtime event via
+-- a debounced refreshNotifications() inside scheduleConversationsReconcile — an
+-- unreliable coupling (single debounced fetch shared with the inbox reconcile,
+-- errors swallowed, only fired by chat-message events, nothing for other types).
+--
+-- Fix: add public.notifications to the supabase_realtime publication so the
+-- client can open ONE authenticated `postgres_changes` INSERT subscription for
+-- the signed-in user. RLS `notifications_select` (user_id = auth.uid()) is the
+-- privacy boundary per subscriber — exactly as for `messages` in 039. RLS is
+-- NOT weakened or disabled; no new policy, column, type, or grant; notification
+-- creation (040) and the notify-email path are untouched. Forward-only.
+-- =============================================================================
+
+alter publication supabase_realtime add table public.notifications;

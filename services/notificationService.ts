@@ -1,15 +1,18 @@
 // =============================================================================
-// BuildUp – Notification service (Phase 3B, minimal read path)
+// BuildUp – Notification service (read path + Phase 7C live delivery)
 // =============================================================================
-// ONLY what Phase 3B needs: load the signed-in user's real `notifications`
-// rows and toggle `is_read`. No realtime, no push, no email, no scheduling —
-// those are later phases. Server-side Phase 3B actions (block / unblock /
-// licence decisions / reg-number change) create the rows; this reads them.
+// Load the signed-in user's real `notifications` rows, toggle `is_read`, and
+// (Phase 7C fix) subscribe to INSERTs so persisted notifications appear live.
+// Server-side actions (staffing RPCs 029-032, send_message 040, block/unblock,
+// licence decisions, …) create the rows; this only reads / marks / streams.
 //
-// RLS already covers everything (008): a user SELECTs only their own rows and
-// may UPDATE only `is_read` (guard_notification_columns); INSERT/DELETE are
-// revoked from `authenticated`.
+// RLS (008) is the boundary: a user SELECTs only their own rows and may UPDATE
+// only `is_read` (guard_notification_columns); INSERT/DELETE are revoked from
+// `authenticated`. The Realtime subscription (041 added `notifications` to the
+// `supabase_realtime` publication) is filtered by the SAME RLS per subscriber.
 // =============================================================================
+
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import type { AppNotification, NotificationType } from '../types';
 
@@ -75,4 +78,73 @@ export async function markAllNotificationsRead(): Promise<void> {
     .eq('user_id', id)
     .eq('is_read', false);
   if (error) throw error;
+}
+
+/**
+ * Mark every unread `new_message` (chat) notification for ONE conversation read
+ * — in a single server-side UPDATE scoped by `related_id`. Used by the Phase 7C
+ * "active-conversation no-spam" path: when the user is (or just landed) inside a
+ * chat, its chat notifications should not sit unread. RLS `notifications_update_self`
+ * (`user_id = auth.uid()`) + the column-guard trigger keep this to the caller's
+ * own rows and to the `is_read` flag only. Catches notifications the client
+ * hasn't even loaded yet, so there is no local-state timing race.
+ */
+export async function markChatConversationRead(
+  conversationId: string
+): Promise<void> {
+  const id = await uid();
+  if (!id) return;
+  const { error } = await getSupabase()
+    .from('notifications')
+    .update({ is_read: true })
+    .eq('user_id', id)
+    .eq('type', 'new_message')
+    .eq('related_id', conversationId)
+    .eq('is_read', false);
+  if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
+// live delivery (Phase 7C fix) — one INSERT subscription, RLS-filtered
+// ---------------------------------------------------------------------------
+
+/**
+ * Subscribe to INSERTs into `public.notifications` for `userId`. The
+ * `user_id=eq.<uid>` filter narrows the stream server-side; RLS
+ * `notifications_select` (`user_id = auth.uid()`) is still enforced per
+ * subscriber, so no other user's rows can ever be delivered. The handler gets
+ * the mapped `AppNotification`. Returns the channel — the caller (AppContext)
+ * owns its lifecycle: call `unsubscribeNotificationsChannel()` on logout / user
+ * switch / teardown. Backend-gate (`isBackendEnabled()`) is the caller's job.
+ */
+export function subscribeToMyNotifications(
+  userId: string,
+  onInsert: (n: AppNotification) => void
+): RealtimeChannel {
+  const channel = getSupabase()
+    .channel('notifications:inserts')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload) => {
+        const row = payload.new as NotificationRow | undefined;
+        if (!row?.id) return;
+        onInsert(mapRow(row));
+      }
+    )
+    .subscribe();
+  return channel;
+}
+
+/** Tear down a channel from subscribeToMyNotifications(). Safe to call twice. */
+export function unsubscribeNotificationsChannel(
+  channel: RealtimeChannel | null
+): void {
+  if (!channel) return;
+  void getSupabase().removeChannel(channel);
 }

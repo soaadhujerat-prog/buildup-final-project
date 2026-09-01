@@ -477,8 +477,12 @@ interface AppState {
   markConversationRead: (conversationId: string) => Promise<void>;
   /** ChatScreen tells AppContext which thread it is showing (null on leave) so
    *  realtime messages for that thread are treated as already read. Passing a
-   *  non-null id also marks that conversation read. No-op on mock. */
+   *  non-null id also marks that conversation read + clears its chat
+   *  notifications. No-op on mock. */
   setActiveConversation: (conversationId: string | null) => void;
+  /** Mark all unread `new_message` notifications for one conversation read
+   *  (Phase 7C active-chat no-spam). No-op on mock. */
+  markChatNotificationsRead: (conversationId: string) => Promise<void>;
 
   // Support
   openSupportTicket: (
@@ -1351,7 +1355,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, mergeMessages]);
 
-  /** Coalesce a burst of realtime events into one authoritative inbox refetch. */
+  /** Coalesce a burst of chat realtime events into one authoritative inbox
+   *  refetch. (The notification bell is NOT refreshed here — Phase 7C's fix
+   *  gives `public.notifications` its own INSERT subscription below; coupling a
+   *  debounced refreshNotifications() to chat events was the unreliable path
+   *  that missed live delivery on device.) */
   const scheduleConversationsReconcile = useCallback(() => {
     if (conversationsReconcileTimer.current) return;
     conversationsReconcileTimer.current = setTimeout(() => {
@@ -1417,14 +1425,51 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     []
   );
 
+  /** Phase 7C: mark every unread chat (`new_message`) notification for ONE
+   *  conversation read — server-side, scoped by related_id (so it also clears
+   *  ones not yet loaded into `notifications`). Used when the recipient is /
+   *  becomes active in that thread, so a chat they're already looking at never
+   *  leaves a notification sitting unread. Chat's own unreadCount is handled
+   *  separately by markConversationRead (Phase 7B). No-op on the mock path. */
+  const markChatNotificationsRead = useCallback(
+    async (conversationId: string) => {
+      if (!isBackendEnabled()) return;
+      setNotifications((prev) => {
+        let touched = false;
+        const next = prev.map((n) => {
+          if (
+            n.type === 'new_message' &&
+            n.relatedId === conversationId &&
+            !n.isRead
+          ) {
+            touched = true;
+            return { ...n, isRead: true };
+          }
+          return n;
+        });
+        return touched ? next : prev;
+      });
+      try {
+        await notificationService.markChatConversationRead(conversationId);
+      } catch {
+        // reconciled by the next refreshNotifications(); not fatal
+      }
+    },
+    []
+  );
+
   /** Tell AppContext which thread ChatScreen is showing (or null on leave).
-   *  Opening a thread also marks it read. */
+   *  Opening a thread marks its chat unread read (7B) and clears any chat
+   *  notifications already queued for it (7C). */
   const setActiveConversation = useCallback(
     (conversationId: string | null) => {
       activeConversationIdRef.current = conversationId;
-      if (conversationId) void markConversationRead(conversationId);
+      if (conversationId) {
+        void markConversationRead(conversationId);
+        void markChatNotificationsRead(conversationId);
+      }
     },
-    [markConversationRead]
+    [markConversationRead, markChatNotificationsRead]
   );
 
   // --- realtime: one INSERT-on-messages channel, lifecycle tied to the user ---
@@ -1462,16 +1507,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
 
       if (fromOther && isActive) {
-        // Message arrived while its thread is on screen — it's been seen.
+        // Message arrived while its thread is on screen — it's been seen:
+        // clear both the chat unread (7B) and the fresh chat notification (7C).
         void markConversationRead(conversationId);
+        void markChatNotificationsRead(conversationId);
       }
-      // Always reconcile the authoritative unread_count shortly after.
+      // Always reconcile the authoritative unread_count + notification bell.
       scheduleConversationsReconcile();
     },
     [
       currentUser?.id,
       mergeMessages,
       markConversationRead,
+      markChatNotificationsRead,
       scheduleConversationsReconcile,
     ]
   );
@@ -1486,6 +1534,56 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
   }, [currentUser?.id, handleIncomingMessage]);
 
+  // --- realtime: one INSERT-on-notifications channel (Phase 7C live delivery).
+  // Lifecycle tied to currentUser?.id — subscribe on login, removeChannel on
+  // logout / user switch / teardown. RLS + a `user_id=eq.<me>` filter keep it
+  // to THIS user's rows. Merge by id (dedupe vs refreshNotifications), keep
+  // newest-first. A `new_message` notification for the thread currently open is
+  // merged already-read and persisted read (7C no-spam); anything else stays
+  // unread and the bell updates immediately. DB refresh (login / foreground /
+  // pull-to-refresh) stays the authority; this only accelerates delivery.
+  const handleIncomingNotification = useCallback(
+    (n: AppNotification) => {
+      const myId = currentUser?.id;
+      if (!myId || n.userId !== myId) return;
+
+      const forActiveThread =
+        n.type === 'new_message' &&
+        !!n.relatedId &&
+        n.relatedId === activeConversationIdRef.current;
+      const merged: AppNotification = forActiveThread
+        ? { ...n, isRead: true }
+        : n;
+
+      setNotifications((prev) => {
+        if (prev.some((x) => x.id === merged.id)) return prev; // dedupe by id
+        return [merged, ...prev].sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      });
+
+      if (forActiveThread && n.relatedId) {
+        // persist read (server bulk update, scoped by related_id)
+        void markChatNotificationsRead(n.relatedId);
+      }
+    },
+    [currentUser?.id, markChatNotificationsRead]
+  );
+
+  useEffect(() => {
+    if (!isBackendEnabled() || !currentUser) return;
+    let channel: RealtimeChannel | null =
+      notificationService.subscribeToMyNotifications(
+        currentUser.id,
+        handleIncomingNotification
+      );
+    return () => {
+      notificationService.unsubscribeNotificationsChannel(channel);
+      channel = null;
+    };
+  }, [currentUser?.id, handleIncomingNotification]);
+
   // Reconcile from the DB when the app returns to the foreground (Realtime may
   // have missed events while backgrounded — persistence stays the authority).
   useEffect(() => {
@@ -1493,11 +1591,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const sub = ReactNativeAppState.addEventListener('change', (state) => {
       if (state !== 'active' || !currentUser) return;
       void refreshConversations();
+      void refreshNotifications();
       const active = activeConversationIdRef.current;
-      if (active) void hydrateConversationMessages(active);
+      if (active) {
+        void hydrateConversationMessages(active);
+        void markChatNotificationsRead(active);
+      }
     });
     return () => sub.remove();
-  }, [currentUser?.id, refreshConversations, hydrateConversationMessages]);
+  }, [
+    currentUser?.id,
+    refreshConversations,
+    refreshNotifications,
+    hydrateConversationMessages,
+    markChatNotificationsRead,
+  ]);
 
   // Backend: contractor licence-update requests (RLS returns own for a
   // contractor, all for an admin). Frontend-only in the mock path.
@@ -3943,6 +4051,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       hydrateConversationMessages,
       markConversationRead,
       setActiveConversation,
+      markChatNotificationsRead,
 
       openSupportTicket,
       replyToTicket,
@@ -4044,6 +4153,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       hydrateConversationMessages,
       markConversationRead,
       setActiveConversation,
+      markChatNotificationsRead,
       openSupportTicket,
       replyToTicket,
       closeSupportTicket,
