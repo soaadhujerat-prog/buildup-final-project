@@ -1,5 +1,5 @@
 // =============================================================================
-// BuildUp – Chat service (Phase 7A backend foundation — persistence, NO realtime)
+// BuildUp – Chat service (Phase 7A persistence + Phase 7B realtime / read)
 // =============================================================================
 // Real Supabase reads/writes for the CHAT domain when USE_BACKEND=true. Same
 // shape as assignmentsService / invitationsService: no React, data-in/data-out,
@@ -7,22 +7,30 @@
 //
 // The three chat tables (006) keep a SELECT-only surface for `authenticated`
 // (RLS `is_conversation_member`); every write goes through a SECURITY DEFINER
-// RPC added in migration 038:
-//   • get_or_create_direct_conversation(p_other)  — the ONLY way a 1:1 thread
-//       is created. Server derives the caller from auth.uid(), enforces the
-//       worker<->contractor product rule, forbids self-chat, and is race-safe
-//       via the pair_key partial-unique index. Seeds exactly two participant
-//       rows on first creation.
-//   • send_message(p_conversation_id, p_body)     — the ONLY message write.
-//       Server sets sender_id = auth.uid() + created_at, trims the body, rejects
-//       empty / >4000 chars, and requires the caller to be an approved
-//       participant. The messages_touch_conversation trigger (009) keeps
-//       conversations.last_message* current for inbox ordering.
+// RPC:
+//   • get_or_create_direct_conversation(p_other)  (038) — the ONLY way a 1:1
+//       thread is created. Server derives the caller from auth.uid(), enforces
+//       the worker<->contractor rule, forbids self-chat, race-safe via the
+//       pair_key partial-unique index, seeds exactly two participant rows.
+//   • send_message(p_conversation_id, p_body)     (038) — the ONLY message
+//       write. Server sets sender_id = auth.uid() + created_at, trims, rejects
+//       empty / >4000 chars, requires an approved participant. The
+//       messages_touch_conversation trigger keeps conversations.last_message*.
+//   • mark_conversation_read(p_conversation_id)   (039) — sets last_read_at =
+//       now() on the CALLER'S OWN participant row only.
+//   • list_my_conversations()                     (039) — one-shot inbox read:
+//       per conversation → last_message[_at], caller last_read_at,
+//       server-computed unread_count, other participant id. Replaces the old
+//       two-select inbox read (no N+1 unread queries).
 //
-// NO realtime, NO unread/read tracking, NO notifications, NO email in this
-// phase (all Phase 7B). The receiving side sees new messages on the next
-// refresh / reopen.
+// Phase 7B realtime: a single `postgres_changes` INSERT subscription on
+// `public.messages` (added to the supabase_realtime publication in 039). RLS
+// (`messages_select` = is_conversation_member) is the privacy boundary — a
+// subscriber only receives rows for its own conversations. NO typing/presence,
+// NO read receipts, NO push, NO chat notifications/email.
 // =============================================================================
+
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import type { Conversation, Message } from '../types';
 
@@ -55,8 +63,6 @@ interface MessageRow {
   created_at: string;
 }
 
-const CONVERSATION_COLS =
-  'id, last_message, last_message_at, created_at, updated_at';
 const MESSAGE_COLS = 'id, conversation_id, sender_id, content, created_at';
 
 // ---------------------------------------------------------------------------
@@ -80,18 +86,30 @@ export function mapMessageRow(r: MessageRow): Message {
 
 function mapConversationRow(
   r: ConversationRow,
-  participantIds: string[]
+  participantIds: string[],
+  unreadCount = 0
 ): Conversation {
   return {
     id: r.id,
     participantIds,
     lastMessage: r.last_message ?? '',
     lastMessageAt: r.last_message_at ?? r.created_at,
-    unreadCount: 0, // Phase 7B
+    unreadCount,
     messages: [], // hydrated on open via getConversationMessages
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+interface InboxRow {
+  id: string;
+  last_message: string;
+  last_message_at: string | null;
+  created_at: string;
+  updated_at: string;
+  last_read_at: string | null;
+  unread_count: number;
+  other_profile_id: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,37 +186,47 @@ function unwrap<T>(data: unknown): T {
 // reads
 // ---------------------------------------------------------------------------
 
-/** Every conversation the caller participates in (RLS decides), newest activity
- *  first. `messages` starts empty — call getConversationMessages() on open. */
-export async function listMyConversations(): Promise<Conversation[]> {
-  const sb = getSupabase();
+/** Every conversation the caller participates in, newest activity first, with a
+ *  server-computed `unreadCount` (messages from the other party newer than the
+ *  caller's last_read_at). One RPC round trip — no N+1. `messages` starts empty;
+ *  call getConversationMessages() on open. `participantIds` is
+ *  `[currentUserId, otherId]` so the existing screen selectors
+ *  (`participantIds.includes(me)`, `getOtherParticipantId`) keep working. */
+export async function listMyConversations(
+  currentUserId: string
+): Promise<Conversation[]> {
+  const { data, error } = await getSupabase().rpc('list_my_conversations');
+  if (error) throw error;
+  const rows = (data as unknown as InboxRow[] | null) ?? [];
+  return rows.map((r) => {
+    const participantIds = [currentUserId, r.other_profile_id].filter(
+      (x): x is string => !!x
+    );
+    return mapConversationRow(
+      {
+        id: r.id,
+        last_message: r.last_message,
+        last_message_at: r.last_message_at,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      },
+      participantIds,
+      r.unread_count ?? 0
+    );
+  });
+}
 
-  const convR = await sb
-    .from('conversations')
-    .select(CONVERSATION_COLS)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .order('created_at', { ascending: false });
-  if (convR.error) throw convR.error;
-  const rows = (convR.data as unknown as ConversationRow[] | null) ?? [];
-  if (!rows.length) return [];
-
-  const ids = rows.map((r) => r.id);
-  const partR = await sb
-    .from('conversation_participants')
-    .select('conversation_id, profile_id')
-    .in('conversation_id', ids);
-  if (partR.error) throw partR.error;
-
-  const byConv = new Map<string, string[]>();
-  for (const p of (partR.data as unknown as
-    | { conversation_id: string; profile_id: string }[]
-    | null) ?? []) {
-    const list = byConv.get(p.conversation_id) ?? [];
-    list.push(p.profile_id);
-    byConv.set(p.conversation_id, list);
-  }
-
-  return rows.map((r) => mapConversationRow(r, byConv.get(r.id) ?? []));
+/** Mark the caller's own participant row read (last_read_at = server now()).
+ *  Only touches the caller's row; rejects a non-participant / unknown
+ *  conversation. Fire-and-forget from the UI — reconciled by the next
+ *  listMyConversations(). */
+export async function markConversationRead(
+  conversationId: string
+): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_conversation_read', {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw error;
 }
 
 /** Persisted messages for one conversation, oldest -> newest, with a stable
@@ -266,4 +294,40 @@ export async function sendMessage(
   });
   if (error) throw toChatError(error);
   return mapMessageRow(unwrap<MessageRow>(data));
+}
+
+// ---------------------------------------------------------------------------
+// realtime (Phase 7B) — one channel, INSERT on public.messages, RLS-filtered
+// ---------------------------------------------------------------------------
+
+/** Subscribe to new-message INSERTs across ALL of the caller's conversations.
+ *  There is no client-side conversation filter: Supabase Realtime evaluates the
+ *  `messages_select` RLS policy (is_conversation_member) per subscriber, so only
+ *  rows for conversations the signed-in user belongs to are delivered. The
+ *  handler gets the mapped Message plus its conversation id. Returns the channel
+ *  so the caller (AppContext) owns its lifecycle — call unsubscribeChannel() on
+ *  logout / user switch / teardown. No-op safety is the caller's job
+ *  (isBackendEnabled gate). */
+export function subscribeToMyMessages(
+  onInsert: (message: Message, conversationId: string) => void
+): RealtimeChannel {
+  const channel = getSupabase()
+    .channel('chat:messages')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages' },
+      (payload) => {
+        const row = payload.new as MessageRow | undefined;
+        if (!row?.id || !row.conversation_id) return;
+        onInsert(mapMessageRow(row), row.conversation_id);
+      }
+    )
+    .subscribe();
+  return channel;
+}
+
+/** Tear down a channel from subscribeToMyMessages(). Safe to call more than once. */
+export function unsubscribeChannel(channel: RealtimeChannel | null): void {
+  if (!channel) return;
+  void getSupabase().removeChannel(channel);
 }

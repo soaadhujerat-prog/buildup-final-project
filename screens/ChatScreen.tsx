@@ -36,6 +36,7 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
     getUserById,
     sendMessage,
     hydrateConversationMessages,
+    setActiveConversation,
   } = useApp();
   const scrollRef = useRef<ScrollView>(null);
 
@@ -59,11 +60,15 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState(false);
 
-  // Load this thread's persisted history from the backend on open / id change.
-  // No-op on the mock path.
+  // Load this thread's persisted history from the backend on open / id change,
+  // and tell AppContext this thread is active (marks it read now + treats
+  // realtime messages that land while it's on screen as already read). On
+  // leave, clear the active thread. No-op on the mock path.
   useEffect(() => {
     void hydrateConversationMessages(conversationId);
-  }, [conversationId, hydrateConversationMessages]);
+    setActiveConversation(conversationId);
+    return () => setActiveConversation(null);
+  }, [conversationId, hydrateConversationMessages, setActiveConversation]);
 
   // Jump to the newest message on open and whenever a message is added.
   useEffect(() => {

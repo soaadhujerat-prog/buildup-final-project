@@ -17,6 +17,8 @@ import React, {
   ReactNode,
   useCallback,
 } from 'react';
+import { AppState as ReactNativeAppState } from 'react-native';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import {
   Admin,
@@ -470,6 +472,13 @@ interface AppState {
   /** Load one thread's persisted message history into state — called by
    *  ChatScreen on open (no-op on the mock path). */
   hydrateConversationMessages: (conversationId: string) => Promise<void>;
+  /** Mark a conversation read for the signed-in user (server-persisted
+   *  last_read_at). Zeroes that conversation's unread badge. No-op on mock. */
+  markConversationRead: (conversationId: string) => Promise<void>;
+  /** ChatScreen tells AppContext which thread it is showing (null on leave) so
+   *  realtime messages for that thread are treated as already read. Passing a
+   *  non-null id also marks that conversation read. No-op on mock. */
+  setActiveConversation: (conversationId: string | null) => void;
 
   // Support
   openSupportTicket: (
@@ -1285,15 +1294,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser?.id, refreshNotifications]);
 
   // ---------------------------------------------------------------------
-  // Chat — real backend READ layer (Phase 7A, NO realtime)
+  // Chat — real backend read layer (7A persistence) + realtime/unread (7B)
   // ---------------------------------------------------------------------
   // `conversations` is the SAME array MessagesScreen / ChatScreen already read.
-  // The inbox comes from Supabase (RLS: participant-only); each thread's
-  // `messages` stays empty until ChatScreen opens it and calls
-  // hydrateConversationMessages(). Writes go through getOrCreateConversation /
-  // sendMessage (RPC-backed) further down. No silent mock fallback: on a failed
-  // load the list just stays as-is (empty on first load). Cleared on logout so
-  // the next account never inherits a thread.
+  // The inbox comes from list_my_conversations() (RLS participant-only,
+  // server-computed unread_count); each thread's `messages` stays empty until
+  // ChatScreen opens it. Writes go through getOrCreateConversation / sendMessage
+  // (RPC). No silent mock fallback: on a failed load the list stays as-is.
+  // Cleared on logout so the next account never inherits a thread.
+  //
+  // 7B realtime: ONE `postgres_changes` INSERT channel on public.messages
+  // (chatService.subscribeToMyMessages), RLS-filtered per subscriber. On each
+  // event we merge the message by id into its thread (no dup bubble — the
+  // sender's own RPC result is already merged), bump the inbox preview/order,
+  // and either mark-read (thread actively open) or bump unread. A debounced
+  // list_my_conversations() reconciles the authoritative unread_count. The
+  // subscription lifecycle is tied to `currentUser?.id` below.
   const mergeMessages = useCallback(
     (existing: Message[], incoming: Message[]): Message[] => {
       const byId = new Map(existing.map((m) => [m.id, m]));
@@ -1306,10 +1322,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     []
   );
 
+  // Which thread ChatScreen currently has open (a ref, not state — the realtime
+  // handler reads it without re-subscribing). Drives the read-race semantics:
+  // a message that lands while its thread is actively open is marked read;
+  // one that lands for any other thread bumps that thread's unread count.
+  const activeConversationIdRef = useRef<string | null>(null);
+  const conversationsReconcileTimer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+
   const refreshConversations = useCallback(async () => {
     if (!isBackendEnabled() || !currentUser) return;
     try {
-      const fresh = await chatService.listMyConversations();
+      const fresh = await chatService.listMyConversations(currentUser.id);
       // Preserve any messages already hydrated into a thread this session.
       setConversations((prev) => {
         const prevById = new Map(prev.map((c) => [c.id, c]));
@@ -1326,9 +1351,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, mergeMessages]);
 
+  /** Coalesce a burst of realtime events into one authoritative inbox refetch. */
+  const scheduleConversationsReconcile = useCallback(() => {
+    if (conversationsReconcileTimer.current) return;
+    conversationsReconcileTimer.current = setTimeout(() => {
+      conversationsReconcileTimer.current = null;
+      void refreshConversations();
+    }, 300);
+  }, [refreshConversations]);
+
   useEffect(() => {
     if (!isBackendEnabled()) return;
     if (!currentUser) {
+      activeConversationIdRef.current = null;
+      if (conversationsReconcileTimer.current) {
+        clearTimeout(conversationsReconcileTimer.current);
+        conversationsReconcileTimer.current = null;
+      }
       setConversations([]);
       return;
     }
@@ -1355,6 +1394,110 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     },
     [mergeMessages]
   );
+
+  /** Mark a conversation read for the signed-in user (server: last_read_at =
+   *  now() on their own participant row only). Optimistically zeroes the local
+   *  unread badge; the next inbox refetch confirms. No-op on the mock path. */
+  const markConversationRead = useCallback(
+    async (conversationId: string) => {
+      if (!isBackendEnabled()) return;
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId && c.unreadCount
+            ? { ...c, unreadCount: 0 }
+            : c
+        )
+      );
+      try {
+        await chatService.markConversationRead(conversationId);
+      } catch {
+        // reconciled by the next list_my_conversations(); not fatal
+      }
+    },
+    []
+  );
+
+  /** Tell AppContext which thread ChatScreen is showing (or null on leave).
+   *  Opening a thread also marks it read. */
+  const setActiveConversation = useCallback(
+    (conversationId: string | null) => {
+      activeConversationIdRef.current = conversationId;
+      if (conversationId) void markConversationRead(conversationId);
+    },
+    [markConversationRead]
+  );
+
+  // --- realtime: one INSERT-on-messages channel, lifecycle tied to the user ---
+  const handleIncomingMessage = useCallback(
+    (message: Message, conversationId: string) => {
+      const myId = currentUser?.id;
+      if (!myId) return;
+      const fromOther = message.senderId !== myId;
+      const isActive = activeConversationIdRef.current === conversationId;
+
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.id === conversationId);
+        if (idx === -1) {
+          // A thread this client hasn't loaded yet (e.g. the other side just
+          // created the conversation). The unconditional reconcile below pulls
+          // the full inbox (thread + participants + unread_count).
+          return prev;
+        }
+        const c = prev[idx];
+        const updated: Conversation = {
+          ...c,
+          messages: mergeMessages(c.messages, [message]),
+          lastMessage: message.content,
+          lastMessageAt: message.timestamp,
+          updatedAt: message.timestamp,
+          unreadCount:
+            fromOther && !isActive
+              ? (c.unreadCount ?? 0) + 1
+              : c.unreadCount,
+        };
+        const next = prev.slice();
+        next.splice(idx, 1);
+        next.unshift(updated); // newest activity first
+        return next;
+      });
+
+      if (fromOther && isActive) {
+        // Message arrived while its thread is on screen — it's been seen.
+        void markConversationRead(conversationId);
+      }
+      // Always reconcile the authoritative unread_count shortly after.
+      scheduleConversationsReconcile();
+    },
+    [
+      currentUser?.id,
+      mergeMessages,
+      markConversationRead,
+      scheduleConversationsReconcile,
+    ]
+  );
+
+  useEffect(() => {
+    if (!isBackendEnabled() || !currentUser) return;
+    let channel: RealtimeChannel | null =
+      chatService.subscribeToMyMessages(handleIncomingMessage);
+    return () => {
+      chatService.unsubscribeChannel(channel);
+      channel = null;
+    };
+  }, [currentUser?.id, handleIncomingMessage]);
+
+  // Reconcile from the DB when the app returns to the foreground (Realtime may
+  // have missed events while backgrounded — persistence stays the authority).
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    const sub = ReactNativeAppState.addEventListener('change', (state) => {
+      if (state !== 'active' || !currentUser) return;
+      void refreshConversations();
+      const active = activeConversationIdRef.current;
+      if (active) void hydrateConversationMessages(active);
+    });
+    return () => sub.remove();
+  }, [currentUser?.id, refreshConversations, hydrateConversationMessages]);
 
   // Backend: contractor licence-update requests (RLS returns own for a
   // contractor, all for an admin). Frontend-only in the mock path.
@@ -3079,8 +3222,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setConversations((prev) => {
           const rest = prev.filter((c) => c.id !== conv.id);
           const old = prev.find((c) => c.id === conv.id);
-          // keep any messages already hydrated for this thread
-          return [old ? { ...conv, messages: old.messages } : conv, ...rest];
+          // Keep any messages already hydrated for this thread, and DON'T let
+          // get-or-create (which always reports 0) fabricate a read state —
+          // preserve the real unread count; ChatScreen marks it read on open.
+          return [
+            old
+              ? { ...conv, messages: old.messages, unreadCount: old.unreadCount }
+              : conv,
+            ...rest,
+          ];
         });
         return conv;
       }
@@ -3791,6 +3941,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       sendMessage,
       refreshConversations,
       hydrateConversationMessages,
+      markConversationRead,
+      setActiveConversation,
 
       openSupportTicket,
       replyToTicket,
@@ -3890,6 +4042,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       sendMessage,
       refreshConversations,
       hydrateConversationMessages,
+      markConversationRead,
+      setActiveConversation,
       openSupportTicket,
       replyToTicket,
       closeSupportTicket,

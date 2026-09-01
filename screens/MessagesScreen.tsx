@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,7 +19,15 @@ const AVATAR_SIZE = 52;
 
 const MessagesScreen: React.FC<Props> = ({ onBack, onOpenConversation }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, conversations, getUserById } = useApp();
+  const { currentUser, conversations, getUserById, refreshConversations } =
+    useApp();
+
+  // Reconcile the inbox (real unread counts, latest previews) whenever this
+  // screen is shown — covers anything Realtime missed while backgrounded.
+  // No-op on the mock path.
+  useEffect(() => {
+    void refreshConversations();
+  }, [refreshConversations]);
 
   // A conversation is "mine" whenever I'm one of its two participantIds.
   // Ordered by the real last-message time (lastMessageAt DESC), the same
