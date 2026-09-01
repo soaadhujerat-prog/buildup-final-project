@@ -30,7 +30,13 @@ const sameCalendarDay = (a: string, b: string): boolean =>
 
 const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, conversations, getUserById, sendMessage } = useApp();
+  const {
+    currentUser,
+    conversations,
+    getUserById,
+    sendMessage,
+    hydrateConversationMessages,
+  } = useApp();
   const scrollRef = useRef<ScrollView>(null);
 
   const conversation = useMemo(
@@ -52,6 +58,12 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState(false);
+
+  // Load this thread's persisted history from the backend on open / id change.
+  // No-op on the mock path.
+  useEffect(() => {
+    void hydrateConversationMessages(conversationId);
+  }, [conversationId, hydrateConversationMessages]);
 
   // Jump to the newest message on open and whenever a message is added.
   useEffect(() => {
@@ -76,13 +88,13 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
   const otherId = getOtherParticipantId(conversation, currentUser.id);
   const other = otherId ? getUserById(otherId) : undefined;
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     setSendError(false);
     try {
-      sendMessage(conversationId, currentUser.id, text);
+      await sendMessage(conversationId, currentUser.id, text);
       setDraft('');
     } catch {
       setSendError(true);

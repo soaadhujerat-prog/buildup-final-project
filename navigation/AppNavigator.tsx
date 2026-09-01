@@ -333,10 +333,18 @@ const AppNavigator: React.FC = () => {
   // needs to travel through here — each screen resolves the other
   // participant's details itself via getUserById.
   const openChatWith = useCallback(
-    (otherUserId: string) => {
+    async (otherUserId: string) => {
       if (!currentUser) return;
-      const conversation = getOrCreateConversation(currentUser.id, otherUserId);
-      push({ name: 'Chat', conversationId: conversation.id });
+      try {
+        const conversation = await getOrCreateConversation(
+          currentUser.id,
+          otherUserId
+        );
+        push({ name: 'Chat', conversationId: conversation.id });
+      } catch {
+        // Could not open/create the thread (offline, or a disallowed pair on
+        // the backend path). Stay put — the caller screen is unchanged.
+      }
     },
     [currentUser, getOrCreateConversation, push]
   );

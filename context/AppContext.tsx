@@ -98,6 +98,7 @@ import * as assignmentsService from '../services/assignmentsService';
 import * as invitationsService from '../services/invitationsService';
 import * as participantsService from '../services/participantsService';
 import * as favoritesService from '../services/favoritesService';
+import * as chatService from '../services/chatService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -451,12 +452,24 @@ interface AppState {
   ) => Promise<void>;
 
   // Messaging — one conversation per pair of users, WhatsApp-style (no job
-  // scoping: the same two people always share a single thread).
+  // scoping: the same two people always share a single thread). Backend path
+  // (Phase 7A): conversation identity + message writes are server-authoritative
+  // RPCs, so these are async. The mock path resolves synchronously-wrapped.
   getOrCreateConversation: (
     currentUserId: string,
     otherUserId: string
-  ) => Conversation;
-  sendMessage: (conversationId: string, senderId: string, text: string) => Message;
+  ) => Promise<Conversation>;
+  sendMessage: (
+    conversationId: string,
+    senderId: string,
+    text: string
+  ) => Promise<Message>;
+  /** Reload the signed-in user's conversation inbox from the backend
+   *  (no-op on the mock path). Cleared to [] on logout. */
+  refreshConversations: () => Promise<void>;
+  /** Load one thread's persisted message history into state — called by
+   *  ChatScreen on open (no-op on the mock path). */
+  hydrateConversationMessages: (conversationId: string) => Promise<void>;
 
   // Support
   openSupportTicket: (
@@ -832,8 +845,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // dedupeConversations is a safety net that merges any records that ended
   // up sharing the same pair of participants, so a pair never shows up as
   // more than one thread in MessagesScreen.
+  // Backend path starts empty and hydrates from Supabase (refreshConversations
+  // below); the mock path keeps the normalized + deduped MOCK_CONVERSATIONS.
   const [conversations, setConversations] = useState<Conversation[]>(() =>
-    dedupeConversations(MOCK_CONVERSATIONS.map(normalizeConversation))
+    isBackendEnabled()
+      ? []
+      : dedupeConversations(MOCK_CONVERSATIONS.map(normalizeConversation))
   );
   const [notifications, setNotifications] =
     useState<AppNotification[]>(MOCK_NOTIFICATIONS);
@@ -1267,6 +1284,78 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     void refreshNotifications();
   }, [currentUser?.id, refreshNotifications]);
 
+  // ---------------------------------------------------------------------
+  // Chat — real backend READ layer (Phase 7A, NO realtime)
+  // ---------------------------------------------------------------------
+  // `conversations` is the SAME array MessagesScreen / ChatScreen already read.
+  // The inbox comes from Supabase (RLS: participant-only); each thread's
+  // `messages` stays empty until ChatScreen opens it and calls
+  // hydrateConversationMessages(). Writes go through getOrCreateConversation /
+  // sendMessage (RPC-backed) further down. No silent mock fallback: on a failed
+  // load the list just stays as-is (empty on first load). Cleared on logout so
+  // the next account never inherits a thread.
+  const mergeMessages = useCallback(
+    (existing: Message[], incoming: Message[]): Message[] => {
+      const byId = new Map(existing.map((m) => [m.id, m]));
+      incoming.forEach((m) => byId.set(m.id, m));
+      return Array.from(byId.values()).sort((a, b) => {
+        const t = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        return t !== 0 ? t : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+    },
+    []
+  );
+
+  const refreshConversations = useCallback(async () => {
+    if (!isBackendEnabled() || !currentUser) return;
+    try {
+      const fresh = await chatService.listMyConversations();
+      // Preserve any messages already hydrated into a thread this session.
+      setConversations((prev) => {
+        const prevById = new Map(prev.map((c) => [c.id, c]));
+        return fresh.map((c) => {
+          const old = prevById.get(c.id);
+          return old && old.messages.length
+            ? { ...c, messages: mergeMessages(old.messages, []) }
+            : c;
+        });
+      });
+    } catch {
+      // No silent mock fallback — keep whatever is loaded.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, mergeMessages]);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setConversations([]);
+      return;
+    }
+    void refreshConversations();
+  }, [currentUser?.id, refreshConversations]);
+
+  /** Load one thread's persisted history into `conversations[id].messages`.
+   *  Called by ChatScreen on open. No-op on the mock path. */
+  const hydrateConversationMessages = useCallback(
+    async (conversationId: string) => {
+      if (!isBackendEnabled()) return;
+      try {
+        const msgs = await chatService.getConversationMessages(conversationId);
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === conversationId
+              ? { ...c, messages: mergeMessages(c.messages, msgs) }
+              : c
+          )
+        );
+      } catch {
+        // keep whatever is already on screen
+      }
+    },
+    [mergeMessages]
+  );
+
   // Backend: contractor licence-update requests (RLS returns own for a
   // contractor, all for an admin). Frontend-only in the mock path.
   const refreshLicenseRequests = useCallback(async () => {
@@ -1535,6 +1624,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       (a) => a.contractorId && wantContractors.add(a.contractorId)
     );
 
+    // Chat counterparts: the other participant of every conversation in the
+    // inbox. Product rule (worker <-> contractor only) means a contractor's
+    // counterparts are always workers and a worker's are always contractors,
+    // so each id can be routed to the right resolver by the caller's role.
+    const convOtherIds = new Set<string>();
+    conversations.forEach((c) =>
+      c.participantIds.forEach((pid) => {
+        if (pid && pid !== currentUser.id) convOtherIds.add(pid);
+      })
+    );
+
     try {
       if (currentUser.role === 'contractor') {
         wantContractors.add(currentUser.id); // own job "פורסם על ידי"
@@ -1543,6 +1643,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         applications.forEach((a) => a.workerId && wantWorkers.add(a.workerId));
         invitations.forEach((i) => i.workerId && wantWorkers.add(i.workerId));
         assignments.forEach((a) => a.workerId && wantWorkers.add(a.workerId));
+        convOtherIds.forEach((id) => wantWorkers.add(id));
 
         const missingW = [...wantWorkers].filter((id) => !attempts.ids.has(id));
         const missingC = [...wantContractors].filter(
@@ -1575,7 +1676,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await Promise.all(tasks);
       } else {
         // worker: resolve the contractors behind their jobs / invitations /
-        // assignments (workerId always resolves to `currentUser`).
+        // assignments / conversations (workerId always resolves to `currentUser`).
+        convOtherIds.forEach((id) => wantContractors.add(id));
         const missingC = [...wantContractors].filter(
           (id) => !attempts.ids.has(id)
         );
@@ -1597,6 +1699,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     invitations,
     assignments,
     jobs,
+    conversations,
   ]);
 
   useEffect(() => {
@@ -2968,7 +3071,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const getOrCreateConversation = useCallback<
     AppState['getOrCreateConversation']
   >(
-    (currentUserId, otherUserId) => {
+    async (currentUserId, otherUserId) => {
+      if (isBackendEnabled()) {
+        // Server is the authority for conversation identity/ownership — one
+        // atomic RPC, race-safe on the pair_key unique index.
+        const conv = await chatService.getOrCreateDirectConversation(otherUserId);
+        setConversations((prev) => {
+          const rest = prev.filter((c) => c.id !== conv.id);
+          const old = prev.find((c) => c.id === conv.id);
+          // keep any messages already hydrated for this thread
+          return [old ? { ...conv, messages: old.messages } : conv, ...rest];
+        });
+        return conv;
+      }
+
       const existing = findConversation(conversations, currentUserId, otherUserId);
       if (existing) return existing;
 
@@ -2980,7 +3096,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   );
 
   const sendMessage = useCallback<AppState['sendMessage']>(
-    (conversationId, senderId, text) => {
+    async (conversationId, senderId, text) => {
+      if (isBackendEnabled()) {
+        // RPC sets sender_id = auth.uid() + created_at, trims + validates the
+        // body, and requires the caller to be an approved participant.
+        const message = await chatService.sendMessage(conversationId, text);
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === conversationId
+              ? {
+                  ...c,
+                  messages: mergeMessages(c.messages, [message]),
+                  lastMessage: message.content,
+                  lastMessageAt: message.timestamp,
+                  updatedAt: message.timestamp,
+                }
+              : c
+          )
+        );
+        return message;
+      }
+
       const conversation = conversations.find((c) => c.id === conversationId);
       const receiverId =
         conversation?.participantIds.find((id) => id !== senderId) ??
@@ -3001,7 +3137,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       );
       return message;
     },
-    [conversations]
+    [conversations, mergeMessages]
   );
 
   // ---------------------------------------------------------------------
@@ -3653,6 +3789,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       getOrCreateConversation,
       sendMessage,
+      refreshConversations,
+      hydrateConversationMessages,
 
       openSupportTicket,
       replyToTicket,
@@ -3750,6 +3888,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updateContractorRegistrationNumber,
       getOrCreateConversation,
       sendMessage,
+      refreshConversations,
+      hydrateConversationMessages,
       openSupportTicket,
       replyToTicket,
       closeSupportTicket,
