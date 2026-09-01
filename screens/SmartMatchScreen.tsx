@@ -25,6 +25,7 @@ import {
   WorkerContractorRelationship,
 } from '../services/assignmentService';
 import { isOpenForApplications } from '../services/jobStatusService';
+import { sendInvitationErrorText } from '../services/invitationsService';
 import { Contractor, JobPost, SmartMatchResult, Worker } from '../types';
 
 interface Props {
@@ -92,6 +93,7 @@ const SmartMatchScreen: React.FC<Props> = ({
   const [results, setResults] = useState<SmartMatchResult[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [sort, setSort] = useState<SmartSort>('best');
+  const [invitingId, setInvitingId] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({
     available: false,
     worked: false,
@@ -218,14 +220,19 @@ const SmartMatchScreen: React.FC<Props> = ({
   }, [selectedJob, getStaffingProgress]);
 
   // ---- actions ----
-  const handleInvite = (workerId: string, workerName: string) => {
-    if (!selectedJob || !me) return;
-    const created = sendInvitation(selectedJob.id, me.id, workerId);
-    if (!created) {
-      Alert.alert('כל המקומות במשרה כבר אוישו.');
-      return;
+  const handleInvite = async (workerId: string, workerName: string) => {
+    if (!selectedJob || !me || invitingId) return;
+    setInvitingId(workerId);
+    try {
+      const res = await sendInvitation(selectedJob.id, me.id, workerId);
+      if (!res.ok) {
+        Alert.alert('לא ניתן להזמין', sendInvitationErrorText(res.reason ?? 'error'));
+        return;
+      }
+      Alert.alert('הזמנה נשלחה', `ההזמנה נשלחה ל-${workerName}.`);
+    } finally {
+      setInvitingId(null);
     }
-    Alert.alert('הזמנה נשלחה', `ההזמנה נשלחה ל-${workerName}.`);
   };
 
   const resultsSubtitle =

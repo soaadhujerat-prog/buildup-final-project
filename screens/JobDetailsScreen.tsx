@@ -18,6 +18,7 @@ import { isBackendEnabled } from '../config/env';
 import { useApp } from '../context/AppContext';
 import * as jobsService from '../services/jobsService';
 import { ApplicationError } from '../services/applicationsService';
+import { sendInvitationErrorText } from '../services/invitationsService';
 import StatusBadge from '../components/StatusBadge';
 import StaffingProgress from '../components/StaffingProgress';
 import WorkerAvatar from '../components/WorkerAvatar';
@@ -351,7 +352,13 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
         {
           text: 'ביטול הזמנה',
           style: 'destructive',
-          onPress: () => cancelInvitation(inv.id),
+          onPress: () => {
+            if (actionBusy) return;
+            setActionBusy(true);
+            Promise.resolve(cancelInvitation(inv.id))
+              .catch(() => Alert.alert('ביטול ההזמנה נכשל', 'רענן ונסה שוב.'))
+              .finally(() => setActionBusy(false));
+          },
         },
       ]
     );
@@ -377,13 +384,19 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     return !hasActiveAssignment(assignments, job.id, inv.workerId);
   };
 
-  const handleReinviteInvitation = (inv: Invitation) => {
-    const created = sendInvitation(job.id, job.contractorId, inv.workerId);
-    if (!created) {
-      Alert.alert('לא ניתן להזמין', 'כל המקומות במשרה כבר אוישו.');
-      return;
+  const handleReinviteInvitation = async (inv: Invitation) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      const res = await sendInvitation(job.id, job.contractorId, inv.workerId);
+      if (!res.ok) {
+        Alert.alert('לא ניתן להזמין', sendInvitationErrorText(res.reason ?? 'error'));
+        return;
+      }
+      Alert.alert('הזמנה נשלחה', 'נשלחה הזמנה חדשה לעובד.');
+    } finally {
+      setActionBusy(false);
     }
-    Alert.alert('הזמנה נשלחה', 'נשלחה הזמנה חדשה לעובד.');
   };
 
   const headerBadge = getJobHeaderBadge(job, fullyStaffed);

@@ -59,6 +59,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
   const [dialog, setDialog] = useState<
     { mode: 'accept' | 'decline'; inv: Invitation } | null
   >(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // SOURCE: invitations.filter(workerId === me.id)
   const myInvitations = useMemo(
@@ -86,6 +87,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
   };
 
   const handleAccept = (inv: Invitation) => {
+    if (submitting) return;
     if (isJobFullyStaffed(inv.jobId)) {
       Alert.alert('כל המקומות במשרה כבר אוישו.');
       return;
@@ -94,20 +96,33 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
   };
 
   const handleDecline = (inv: Invitation) => {
+    if (submitting) return;
     setDialog({ mode: 'decline', inv });
   };
 
-  const submitDialog = (message: string) => {
-    if (!dialog) return;
+  const submitDialog = async (message: string) => {
+    if (!dialog || submitting) return;
     const { mode, inv } = dialog;
     setDialog(null);
-    const res = respondToInvitation(
-      inv.id,
-      mode === 'accept',
-      message || undefined
-    );
-    if (mode === 'accept' && !res.ok && res.reason === 'full') {
-      Alert.alert('כל המקומות במשרה כבר אוישו.');
+    setSubmitting(true);
+    try {
+      const res = await respondToInvitation(
+        inv.id,
+        mode === 'accept',
+        message || undefined
+      );
+      if (!res.ok) {
+        if (mode === 'accept' && res.reason === 'full') {
+          Alert.alert('כל המקומות במשרה כבר אוישו.');
+        } else {
+          Alert.alert(
+            mode === 'accept' ? 'אישור ההזמנה נכשל' : 'דחיית ההזמנה נכשלה',
+            'ההזמנה אינה זמינה יותר או שאירעה שגיאה. רענן ונסה שוב.'
+          );
+        }
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 

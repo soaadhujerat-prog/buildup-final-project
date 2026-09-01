@@ -32,6 +32,7 @@ import {
   hasActiveAssignment,
   getWorkerContractorRelationship,
 } from '../services/assignmentService';
+import { sendInvitationErrorText } from '../services/invitationsService';
 import { Contractor, Worker } from '../types';
 import {
   workerProfessions,
@@ -77,6 +78,7 @@ const WorkerProfileScreen: React.FC<Props> = ({
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState('');
   const [historyVisible, setHistoryVisible] = useState(false);
+  const [sendingInvite, setSendingInvite] = useState(false);
 
   // Professional-history relationship, derived only from real Assignments.
   const relationship =
@@ -127,22 +129,24 @@ const WorkerProfileScreen: React.FC<Props> = ({
     );
   }
 
-  const handleSendInvite = () => {
-    if (!selectedJobId || !me) return;
-    const created = sendInvitation(
-      selectedJobId,
-      me.id,
-      worker.id,
-      inviteMessage.trim() || undefined
-    );
+  const handleSendInvite = async () => {
+    if (!selectedJobId || !me || sendingInvite) return;
+    const jobId = selectedJobId;
+    const message = inviteMessage.trim() || undefined;
+    setSendingInvite(true);
     setPickerVisible(false);
     setSelectedJobId(null);
     setInviteMessage('');
-    if (!created) {
-      Alert.alert('כל המקומות במשרה כבר אוישו.');
-      return;
+    try {
+      const res = await sendInvitation(jobId, me.id, worker.id, message);
+      if (!res.ok) {
+        Alert.alert('לא ניתן להזמין', sendInvitationErrorText(res.reason ?? 'error'));
+        return;
+      }
+      Alert.alert('הזמנה נשלחה', `ההזמנה נשלחה ל-${worker.fullName}.`);
+    } finally {
+      setSendingInvite(false);
     }
-    Alert.alert('הזמנה נשלחה', `ההזמנה נשלחה ל-${worker.fullName}.`);
   };
 
   return (

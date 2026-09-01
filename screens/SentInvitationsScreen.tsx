@@ -20,6 +20,7 @@ import {
   hasActiveAssignment,
 } from '../services/assignmentService';
 import { isOpenForApplications } from '../services/jobStatusService';
+import { sendInvitationErrorText } from '../services/invitationsService';
 import {
   invitationTimeline,
   assignmentCancelLine,
@@ -60,6 +61,7 @@ const SentInvitationsScreen: React.FC<Props> = ({
     isJobFullyStaffed,
   } = useApp();
   const me = currentUser as Contractor | undefined;
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const handleCancel = (inv: Invitation) => {
     Alert.alert('לבטל את ההזמנה?', 'העובד לא יוכל יותר לאשר את ההזמנה הזו.', [
@@ -67,7 +69,13 @@ const SentInvitationsScreen: React.FC<Props> = ({
       {
         text: 'ביטול הזמנה',
         style: 'destructive',
-        onPress: () => cancelInvitation(inv.id),
+        onPress: () => {
+          if (busyId) return;
+          setBusyId(inv.id);
+          Promise.resolve(cancelInvitation(inv.id))
+            .catch(() => Alert.alert('ביטול ההזמנה נכשל', 'רענן ונסה שוב.'))
+            .finally(() => setBusyId(null));
+        },
       },
     ]);
   };
@@ -98,14 +106,19 @@ const SentInvitationsScreen: React.FC<Props> = ({
     return true;
   };
 
-  const handleReinvite = (inv: Invitation) => {
-    if (!me) return;
-    const created = sendInvitation(inv.jobId, me.id, inv.workerId);
-    if (!created) {
-      Alert.alert('לא ניתן להזמין', 'כל המקומות במשרה כבר אוישו.');
-      return;
+  const handleReinvite = async (inv: Invitation) => {
+    if (!me || busyId) return;
+    setBusyId(inv.id);
+    try {
+      const res = await sendInvitation(inv.jobId, me.id, inv.workerId);
+      if (!res.ok) {
+        Alert.alert('לא ניתן להזמין', sendInvitationErrorText(res.reason ?? 'error'));
+        return;
+      }
+      Alert.alert('הזמנה נשלחה', 'נשלחה הזמנה חדשה לעובד.');
+    } finally {
+      setBusyId(null);
     }
-    Alert.alert('הזמנה נשלחה', 'נשלחה הזמנה חדשה לעובד.');
   };
 
   const [filter, setFilter] = useState<Filter>('all');

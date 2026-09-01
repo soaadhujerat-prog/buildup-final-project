@@ -93,6 +93,7 @@ import * as licenseService from '../services/licenseService';
 import * as jobsService from '../services/jobsService';
 import * as applicationsService from '../services/applicationsService';
 import * as assignmentsService from '../services/assignmentsService';
+import * as invitationsService from '../services/invitationsService';
 import type { SessionUser, LoginResult } from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
@@ -129,6 +130,17 @@ export interface StaffingActionResult {
    *  call failed for another reason (stale application, auth, network); the
    *  screen shows a generic Hebrew failure. */
   reason?: 'full' | 'error';
+}
+
+/** Result of `sendInvitation`. On success `invitation` is the created row. On
+ *  failure `reason` says why NOTHING was created — `'duplicate'` (a live
+ *  pending/accepted invitation already exists for this job+worker) is a
+ *  first-class outcome and is NEVER reported as a successful send. Map `reason`
+ *  to Hebrew with `invitationsService.sendInvitationErrorText`. */
+export interface SendInvitationResult {
+  ok: boolean;
+  invitation?: Invitation;
+  reason?: invitationsService.SendInvitationFailure;
 }
 
 /** The worker job-search screen's search/filter/sort — lifted up here
@@ -325,31 +337,47 @@ interface AppState {
   withdrawApplication: (applicationId: string) => Promise<void>;
 
   // Invitations (contractor -> worker)
-  /** Send an invitation. Returns `null` (nothing created) when the job is
-   *  already fully staffed — the caller should surface
-   *  "כל המקומות במשרה כבר אוישו." */
+  /** Phase 5C-1: re-pull `invitations` from Supabase for the current user
+   *  (worker → addressed to them, contractor → sent by them, admin → all).
+   *  No-op on the mock path. Called from the load effect and after every
+   *  send / respond / cancel on the backend path. */
+  refreshInvitations: () => Promise<void>;
+  /** Send an invitation. Backend path (Phase 5C-1): the `send_invitation` RPC
+   *  (owning approved contractor · approved worker target · job open & not
+   *  full · one-live rule) whose persisted row is merged into `invitations`.
+   *  Returns a `SendInvitationResult`: `{ ok: true, invitation }` when a NEW
+   *  row was created, otherwise `{ ok: false, reason }` where `reason` is
+   *  `'duplicate'` (a live pending/accepted invitation already exists — no row
+   *  created, NOT a success), `'full'`, `'ineligible'` or `'error'`. The DB
+   *  uniqueness/security rules are unchanged — this only maps the RPC's
+   *  refusal to a typed result. `contractorId` is ignored on the backend path
+   *  (auth.uid() is authoritative). Mock path mirrors the same result shape. */
   sendInvitation: (
     jobId: string,
     contractorId: string,
     workerId: string,
     message?: string
-  ) => Invitation | null;
-  /** Accept / decline an invitation, with an optional free-text note from
-   *  the worker (stored on invitation.responseMessage, shown to the
-   *  contractor and included in their notification). Accepting is refused
-   *  (returns `{ ok: false, reason: 'full' }`, no state change) when the job
-   *  is already fully staffed. Declining always succeeds. */
+  ) => Promise<SendInvitationResult>;
+  /** Accept / decline an invitation, with an optional free-text note from the
+   *  worker (stored on invitation.responseMessage). Backend path (Phase 5C-1):
+   *  the atomic `respond_to_invitation` RPC — accept also creates ONE real
+   *  assignment (source='invitation') under a job-row lock (no overbooking),
+   *  then invitations + assignments + jobs are re-pulled. Returns
+   *  `{ ok:false, reason:'full' }` when the job filled first,
+   *  `{ ok:false, reason:'error' }` on any other failure. Mock path unchanged. */
   respondToInvitation: (
     invitationId: string,
     accepted: boolean,
     message?: string
-  ) => StaffingActionResult;
-  /** Contractor withdraws their own still-`pending` invitation. Never
-   *  deletes the record — flips status to 'cancelled' and stamps
+  ) => Promise<StaffingActionResult>;
+  /** Contractor withdraws their own still-`pending` invitation. Never deletes
+   *  the record — flips status to 'cancelled' (reason 'manual') and stamps
    *  `cancelledAt`. A no-op on any non-pending invitation (an accepted
    *  invitation already produced an Assignment and must go through the
-   *  staffing-cancellation flow instead, never this one). */
-  cancelInvitation: (invitationId: string) => void;
+   *  staffing-cancellation flow instead, never this one). Backend path
+   *  (Phase 5C-1): the `cancel_invitation` RPC, then `invitations` is
+   *  re-pulled. Mock path unchanged. */
+  cancelInvitation: (invitationId: string) => Promise<void>;
 
   // Assignments (real staffing)
   /** Cancel an ACTIVE assignment — a staffed worker leaving the job, from
@@ -1329,6 +1357,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser?.id, currentUser?.role, refreshAssignments]);
 
   // ---------------------------------------------------------------------
+  // Invitations — real backend READ layer (Phase 5C-1)
+  // ---------------------------------------------------------------------
+  // One flat list, RLS-scoped by the DB (worker → addressed to them,
+  // contractor → sent by them, admin → all), kept in the SAME `invitations`
+  // array every screen/selector already reads. Mutations go through the
+  // send_invitation / respond_to_invitation / cancel_invitation RPCs (030);
+  // this only reads. No-op on the mock path (MOCK_INVITATIONS).
+  const refreshInvitations = useCallback(async () => {
+    if (!isBackendEnabled() || !currentUser) return;
+    try {
+      setInvitations(await invitationsService.listVisibleInvitations());
+    } catch {
+      // No silent mock fallback — keep whatever is loaded.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, currentUser?.role]);
+
+  useEffect(() => {
+    if (!isBackendEnabled()) return;
+    if (!currentUser) {
+      setInvitations([]);
+      return;
+    }
+    void refreshInvitations();
+  }, [currentUser?.id, currentUser?.role, refreshInvitations]);
+
+  // ---------------------------------------------------------------------
   // Admin actions
   // ---------------------------------------------------------------------
 
@@ -2016,17 +2071,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // ---------------------------------------------------------------------
 
   const sendInvitation = useCallback<AppState['sendInvitation']>(
-    (jobId, contractorId, workerId, message) => {
+    async (jobId, contractorId, workerId, message) => {
+      if (isBackendEnabled()) {
+        // Phase 5C-1: send_invitation RPC. contractor_id / worker_id / job_id /
+        // status / timestamps are all server-side; eligibility (owner approved
+        // contractor · approved worker · job open & not full · one-live rule)
+        // is enforced by the RPC. A refusal maps to { ok:false, reason } — a
+        // pre-existing live invitation is `'duplicate'` and is NEVER reported
+        // as a successful send (no row was created).
+        try {
+          const created = await invitationsService.sendInvitationBackend(
+            jobId,
+            workerId,
+            message
+          );
+          setInvitations((prev) => [
+            created,
+            ...prev.filter((i) => i.id !== created.id),
+          ]);
+          return { ok: true, invitation: created };
+        } catch (e) {
+          if (e instanceof invitationsService.InvitationError) {
+            if (e.code === 'duplicate') return { ok: false, reason: 'duplicate' };
+            if (e.code === 'full') return { ok: false, reason: 'full' };
+            if (e.code === 'ineligible') return { ok: false, reason: 'ineligible' };
+          }
+          return { ok: false, reason: 'error' };
+        }
+      }
+
       // Duplicate prevention looks only at *active* invitations
       // (pending / accepted) for this worker+job. A historical
       // declined/cancelled/expired record must never block a re-invite.
+      // A live invitation is `'duplicate'` — nothing is created and it is
+      // NOT a success (mirrors the backend path).
       const activeDupe = invitations.find(
         (i) =>
           i.jobId === jobId &&
           i.workerId === workerId &&
           (i.status === 'pending' || i.status === 'accepted')
       );
-      if (activeDupe) return activeDupe;
+      if (activeDupe) return { ok: false, reason: 'duplicate' };
 
       // Overbooking guard — a fully-staffed job takes no new invitations.
       const job0 = jobs.find((j) => j.id === jobId);
@@ -2034,7 +2119,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         job0 &&
         computeIsJobFullyStaffed(assignments, jobId, job0.workersNeeded)
       ) {
-        return null;
+        return { ok: false, reason: 'full' };
       }
 
       const inv: Invitation = {
@@ -2059,13 +2144,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           : 'התקבלה הזמנה חדשה לעבודה',
         relatedId: inv.id,
       });
-      return inv;
+      return { ok: true, invitation: inv };
     },
     [invitations, jobs, assignments, contractors, pushNotification]
   );
 
   const cancelInvitation = useCallback<AppState['cancelInvitation']>(
-    (invitationId) => {
+    async (invitationId) => {
+      if (isBackendEnabled()) {
+        // Phase 5C-1: cancel_invitation RPC (owning approved contractor, still
+        // pending -> cancelled/'manual'). Re-pull so the row reflects the DB.
+        try {
+          await invitationsService.cancelInvitationBackend(invitationId);
+        } finally {
+          await refreshInvitations();
+        }
+        return;
+      }
       setInvitations((prev) =>
         prev.map((i) =>
           i.id === invitationId && i.status === 'pending'
@@ -2079,11 +2174,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         )
       );
     },
-    []
+    [refreshInvitations]
   );
 
   const respondToInvitation = useCallback<AppState['respondToInvitation']>(
-    (invitationId, accepted, message) => {
+    async (invitationId, accepted, message) => {
+      if (isBackendEnabled()) {
+        // Phase 5C-1: one atomic RPC. Accept also creates a real assignment
+        // (source='invitation') under a job-row lock (no overbooking); we then
+        // re-pull invitations + assignments + jobs, because job_registration_state
+        // (full / closed for capacity) may have changed. No client-side capacity
+        // math, no manual job close. assignments_reconcile (009) still owns the
+        // "auto-cancel other pending invitations when full" behaviour.
+        try {
+          const updated =
+            await invitationsService.respondToInvitationBackend(
+              invitationId,
+              accepted,
+              message
+            );
+          setInvitations((prev) =>
+            prev.map((i) => (i.id === updated.id ? updated : i))
+          );
+          if (accepted) {
+            await Promise.all([
+              refreshInvitations(),
+              refreshAssignments(),
+              refreshJobs(),
+            ]);
+          } else {
+            await refreshInvitations();
+          }
+          return { ok: true };
+        } catch (e) {
+          if (
+            e instanceof invitationsService.InvitationError &&
+            e.code === 'full'
+          ) {
+            return { ok: false, reason: 'full' };
+          }
+          return { ok: false, reason: 'error' };
+        }
+      }
+
       const existing = invitations.find((i) => i.id === invitationId);
       if (!existing) return { ok: false };
       const job = jobs.find((j) => j.id === existing.jobId);
@@ -2138,7 +2271,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
       return { ok: true };
     },
-    [invitations, jobs, assignments, workers, pushNotification]
+    [
+      invitations,
+      jobs,
+      assignments,
+      workers,
+      pushNotification,
+      refreshInvitations,
+      refreshAssignments,
+      refreshJobs,
+    ]
   );
 
   // ---------------------------------------------------------------------
@@ -3064,6 +3206,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       jobsError,
       applicationsLoading,
       refreshJobs,
+      refreshInvitations,
       admins,
       workers,
       contractors,
@@ -3166,6 +3309,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       jobsError,
       applicationsLoading,
       refreshJobs,
+      refreshInvitations,
       admins,
       workers,
       contractors,
