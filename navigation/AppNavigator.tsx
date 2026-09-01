@@ -39,6 +39,7 @@ import LoginScreen from '../screens/LoginScreen';
 import SignUpScreen from '../screens/SignUpScreen';
 import AdminLoginScreen from '../screens/AdminLoginScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import VerifyRecoveryCodeScreen from '../screens/VerifyRecoveryCodeScreen';
 import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 import RegistrationPendingScreen from '../screens/RegistrationPendingScreen';
 import RegistrationRejectedScreen from '../screens/RegistrationRejectedScreen';
@@ -100,8 +101,13 @@ type Route =
   | { name: 'SignUp'; role: CustomerRole }
   | { name: 'AdminLogin' }
   | { name: 'ForgotPassword' }
-  // Reached from the emailed password-recovery deep link once a real
-  // backend exists — no in-app screen navigates here yet.
+  // Step 2 of CODE-based recovery: enter the one-time code emailed by
+  // Supabase Auth. Pushed from ForgotPassword; on success the app flips
+  // `passwordRecoveryActive` and the top-level gate shows ResetPassword.
+  | { name: 'VerifyRecoveryCode'; email: string }
+  // Shown by the `passwordRecoveryActive` gate once a recovery session is
+  // live (after the code is verified). Also kept as a plain route for
+  // completeness.
   | { name: 'ResetPassword' }
   | { name: 'RegistrationPending'; registrationId: string }
   | { name: 'RegistrationRejected'; registrationId: string }
@@ -177,6 +183,7 @@ const AppNavigator: React.FC = () => {
     currentUser,
     sessionLoading,
     passwordRecoveryActive,
+    beginPasswordRecovery,
     clearPasswordRecovery,
     logout,
     getOrCreateConversation,
@@ -388,17 +395,20 @@ const AppNavigator: React.FC = () => {
         Alert.alert('לא זמין', 'הפריט שאליו ההתראה מפנה אינו זמין עוד.');
 
       switch (notification.type) {
-        // Worker applied to a job → contractor opens THAT job (its details
-        // screen lists the candidates). relatedId = application id.
+        // Worker applied to (or re-applied for) one of the contractor's jobs.
+        // relatedId = the JOB id (server payload: migrations 032 / 033 / 034
+        // pass `v_job.id::text`, NOT an application id — the old
+        // `applications.find(id === relatedId)` here always missed and hit
+        // `entityGone()`). Destination is the "בקשות שהתקבלו" tab, which lists
+        // every candidate across the contractor's jobs (it has no per-job
+        // filter, so nothing to scope). That tab always exists, so a valid
+        // notification never shows "לא זמין"; a later accept/reject just means
+        // the row now appears under a different status chip.
         case 'job_application':
         case 'job_request': {
           if (role !== 'contractor') break;
-          const app = relatedId
-            ? applications.find((a) => a.id === relatedId)
-            : undefined;
-          const job = app ? getJobById(app.jobId) : undefined;
-          if (job) push({ name: 'ContractorJobDetails', jobId: job.id });
-          else entityGone();
+          setContractorTab('applications-received');
+          resetTo(null);
           break;
         }
 
@@ -631,7 +641,21 @@ const AppNavigator: React.FC = () => {
     );
   }
   if (route?.name === 'ForgotPassword') {
-    return <ForgotPasswordScreen onBack={goBack} />;
+    return (
+      <ForgotPasswordScreen
+        onBack={goBack}
+        onCodeSent={(email) => push({ name: 'VerifyRecoveryCode', email })}
+      />
+    );
+  }
+  if (route?.name === 'VerifyRecoveryCode') {
+    return (
+      <VerifyRecoveryCodeScreen
+        email={route.email}
+        onBack={goBack}
+        onVerified={beginPasswordRecovery}
+      />
+    );
   }
   if (route?.name === 'ResetPassword') {
     return <ResetPasswordScreen onBack={goWelcome} />;

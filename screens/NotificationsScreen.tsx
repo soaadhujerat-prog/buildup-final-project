@@ -1,10 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -112,9 +113,20 @@ const NotificationsScreen: React.FC<Props> = ({ onBack, onNavigate }) => {
   const {
     currentUser,
     notifications,
+    refreshNotifications,
     markNotificationRead,
     markAllNotificationsRead,
   } = useApp();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshNotifications();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const myNotifications = useMemo(() => {
     if (!currentUser) return [];
@@ -173,6 +185,9 @@ const NotificationsScreen: React.FC<Props> = ({ onBack, onNavigate }) => {
           data={myNotifications}
           keyExtractor={(n) => n.id}
           contentContainerStyle={{ paddingTop: Spacing.md }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
           ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
           renderItem={({ item }) => {
             const { name, tint, bg } = iconForType(item.type);

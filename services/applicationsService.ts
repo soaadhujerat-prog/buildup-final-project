@@ -165,6 +165,45 @@ export async function reapplyToJobBackend(
 }
 
 /**
+ * Reactivate the worker's OWN current-cycle `accepted` application after they
+ * cancelled their OWN assignment (034 RPC — CASE 1). The row flips back to
+ * 'pending' with a fresh `applied_at`; no second row is created,
+ * recruitment_cycle is untouched, the `cancelled` assignment (history) stays.
+ * The RPC proves server-side that the caller owns the application, that the
+ * caller's LATEST assignment on the job is `cancelled` with
+ * `cancelled_by = 'worker'` and originates from this application, that no live
+ * assignment remains, and that the job is still open with a free slot — so a
+ * contractor-cancelled (CASE 2) or completed (CASE 3) placement is refused, as
+ * is a full / closed job. Emits exactly one contractor "new candidate"
+ * notification. Returns the reactivated row.
+ */
+export async function reapplyAfterCancellationBackend(
+  jobId: string,
+  message?: string
+): Promise<Application> {
+  const trimmed = (message ?? '').trim();
+  const { data, error } = await getSupabase().rpc('reapply_after_cancellation', {
+    p_job_id: jobId,
+    p_message: trimmed ? trimmed : null,
+  });
+  if (error) {
+    // P0001 = not a worker-cancelled placement / job closed / live assignment
+    // exists · P0002 = no application or assignment history · 42501 = not an
+    // approved worker · 23514 (check_violation) = job filled first. Every case
+    // is "can't apply right now".
+    if (
+      ['P0001', 'P0002', '42501', '23514'].includes(error.code ?? '') ||
+      /fully staffed/i.test(error.message ?? '')
+    ) {
+      throw new ApplicationError('ineligible');
+    }
+    throw error;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return mapApplicationRow(row as unknown as ApplicationRow);
+}
+
+/**
  * Contractor accept / reject a pending application on their own job (029 RPC —
  * one atomic transaction). On accept the RPC also creates exactly one 'active'
  * assignment under a job-row lock, so concurrent accepts on a 1-slot job can't

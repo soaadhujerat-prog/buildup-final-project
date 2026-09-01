@@ -17,12 +17,6 @@ import type { Session } from '@supabase/supabase-js';
 
 import { getSupabase } from './supabaseClient';
 
-/** Where the emailed password-recovery link should send the user back to.
- *  Matches the `scheme` in app.json. Capturing this link in a running app
- *  needs a dev-client / standalone build (Expo Go can't own a custom scheme);
- *  `updatePassword` still works from any valid recovery session. */
-const RECOVERY_REDIRECT_URL = 'buildup://reset-password';
-
 export type AuthChangeEvent =
   | 'INITIAL_SESSION'
   | 'SIGNED_IN'
@@ -140,22 +134,46 @@ export const onAuthStateChange = (
 };
 
 /**
- * Send a password-recovery email. Recovery is by email (independent of the
- * ID+password login). NEVER rejects for "user not found" — the caller always
- * shows the same generic "if this email exists…" message. Only a 5xx (a truly
- * broken backend) propagates.
+ * Send a password-recovery email carrying a one-time CODE (OTP).
+ *
+ * Mobile recovery is CODE-based, not link-based: `resetPasswordForEmail`
+ * generates Supabase Auth's native `recovery` OTP; the emailed template renders
+ * it via `{{ .Token }}` (see the deployment note in passwordResetService). The
+ * user types that code back into the app — no clickable deep link, no browser,
+ * no `redirectTo` / Site-URL dependency (that was the Safari/localhost bug).
+ *
+ * NEVER rejects for "user not found" — the caller always shows the same generic
+ * "if this email exists…" message. Only a 5xx (a truly broken backend)
+ * propagates.
  */
 export const requestPasswordReset = async (email: string): Promise<void> => {
-  const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
-    redirectTo: RECOVERY_REDIRECT_URL,
-  });
+  const { error } = await getSupabase().auth.resetPasswordForEmail(email);
   if (error && typeof error.status === 'number' && error.status >= 500) {
     throw error;
   }
 };
 
-/** Set a new password for the CURRENT session (a PASSWORD_RECOVERY session, or
- *  a normally signed-in user). */
+/**
+ * Verify the recovery CODE the user copied from the email. On success Supabase
+ * Auth establishes the recovery session (native `verifyOtp`, `type: 'recovery'`
+ * — no custom token is minted anywhere), which is what `updatePassword` then
+ * runs against. Rejects on a wrong / expired / already-used code so the UI can
+ * show a clean Hebrew message. The token is never logged or persisted by us.
+ */
+export const verifyRecoveryOtp = async (
+  email: string,
+  token: string
+): Promise<void> => {
+  const { error } = await getSupabase().auth.verifyOtp({
+    email,
+    token,
+    type: 'recovery',
+  });
+  if (error) throw error;
+};
+
+/** Set a new password for the CURRENT session (the recovery session opened by
+ *  `verifyRecoveryOtp`, or a normally signed-in user). */
 export const updatePassword = async (newPassword: string): Promise<void> => {
   const { error } = await getSupabase().auth.updateUser({ password: newPassword });
   if (error) throw error;

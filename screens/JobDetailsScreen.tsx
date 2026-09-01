@@ -487,7 +487,16 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
               </Text>
             </View>
           ) : null}
-          {jobOpen && renderApplyButton('הגש מועמדות מחדש')}
+          {/* Only a placement the WORKER gave up can be re-applied to
+              (reapply_after_cancellation, 034). A contractor cancellation does
+              NOT restore eligibility — show why instead of a dead button. */}
+          {jobOpen && myAssignment?.cancelledBy === 'worker' ? (
+            renderApplyButton('הגש מועמדות מחדש')
+          ) : jobOpen ? (
+            <Text style={styles.workerStatusTime}>
+              הקבלן ביטל את השיבוץ, ולכן לא ניתן להגיש מועמדות מחדש למשרה זו.
+            </Text>
+          ) : null}
         </View>
       );
     }

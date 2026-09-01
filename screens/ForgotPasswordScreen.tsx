@@ -17,6 +17,10 @@ import { requestPasswordReset } from '../services/passwordResetService';
 
 interface Props {
   onBack: () => void;
+  /** Recovery request accepted — move to the code-entry step with this email.
+   *  Called for EVERY well-formed address (enumeration-safe): the generic
+   *  "if this email exists…" copy is shown on the next screen too. */
+  onCodeSent: (email: string) => void;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -24,9 +28,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Password-recovery request — shared by both Worker and Contractor login
  *  (recovery is by email regardless of role; ordinary login stays ID +
  *  password). Never confirms or denies whether the email is registered —
- *  always shows the same generic outcome message, so the UI can't be used
- *  to enumerate accounts. */
-const ForgotPasswordScreen: React.FC<Props> = ({ onBack }) => {
+ *  always advances to the code-entry step with the same generic message, so
+ *  the UI can't be used to enumerate accounts. Recovery is CODE-based (a
+ *  one-time code emailed by Supabase Auth), not a clickable link. */
+const ForgotPasswordScreen: React.FC<Props> = ({ onBack, onCodeSent }) => {
   const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState('');
@@ -35,18 +40,22 @@ const ForgotPasswordScreen: React.FC<Props> = ({ onBack }) => {
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = async () => {
-    if (submitting) return;
+    if (submitting || submitted) return;
     setError(null);
-    if (!EMAIL_RE.test(email.trim())) {
+    const trimmed = email.trim();
+    if (!EMAIL_RE.test(trimmed)) {
       setError('כתובת אימייל לא תקינה');
       return;
     }
     setSubmitting(true);
     try {
-      await requestPasswordReset(email.trim());
+      await requestPasswordReset(trimmed);
     } finally {
       setSubmitting(false);
       setSubmitted(true);
+      // Brief confirmation, then straight to the OTP step. Same outcome
+      // whether or not the address is registered.
+      setTimeout(() => onCodeSent(trimmed), 900);
     }
   };
 
@@ -80,7 +89,7 @@ const ForgotPasswordScreen: React.FC<Props> = ({ onBack }) => {
         </View>
         <View style={styles.subtitleRow}>
           <Text style={styles.subtitle}>
-            הזן את כתובת האימייל שאיתה נרשמת למערכת ונשלח אליך קישור לאיפוס
+            הזן את כתובת האימייל שאיתה נרשמת למערכת ונשלח אליך קוד לאיפוס
             הסיסמה.
           </Text>
         </View>
@@ -124,7 +133,7 @@ const ForgotPasswordScreen: React.FC<Props> = ({ onBack }) => {
                 color={Colors.success}
               />
               <Text style={styles.successText}>
-                אם קיימת כתובת אימייל תואמת במערכת, יישלח אליה קישור לאיפוס
+                אם קיימת כתובת אימייל תואמת במערכת, יישלח אליה קוד לאיפוס
                 הסיסמה.
               </Text>
             </View>
@@ -137,7 +146,7 @@ const ForgotPasswordScreen: React.FC<Props> = ({ onBack }) => {
             disabled={submitting}
           >
             <Text style={styles.submitBtnText}>
-              {submitting ? 'שולח...' : 'שלח קישור לאיפוס'}
+              {submitting ? 'שולח...' : 'שלח קוד לאיפוס'}
             </Text>
           </TouchableOpacity>
         </View>

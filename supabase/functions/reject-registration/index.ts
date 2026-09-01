@@ -15,6 +15,9 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
+import { sendEmail } from '../_shared/email.ts';
+import { registrationRejected } from '../_shared/emailTemplates.ts';
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
@@ -82,5 +85,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (error) {
     return json({ ok: false, error: 'rejection_failed' }, rpcStatus((error as { code?: string }).code));
   }
+
+  // Best-effort rejection email (only on a real reject, not a revert). The
+  // applicant has no profiles row yet, so the LEGITIMATE contact address is the
+  // one on the pre-created auth user: `register` creates it with the exact
+  // email the applicant typed (validated), `registrations` stores NO email
+  // (migration 016), and the admin pending list already shows this same
+  // `auth.users.email`. sendEmail() additionally rejects any synthetic-looking
+  // address. A mail failure NEVER affects the rejection.
+  if (!revert) {
+    try {
+      const { data: reg } = await admin
+        .from('registrations')
+        .select('auth_user_id, data')
+        .eq('id', registrationId)
+        .maybeSingle();
+      const authUserId = (reg as { auth_user_id?: string } | null)?.auth_user_id ?? '';
+      const fullName =
+        ((reg as { data?: { fullName?: string } } | null)?.data?.fullName ?? '') || '';
+      if (authUserId) {
+        const { data: u } = await admin.auth.admin.getUserById(authUserId);
+        const to = u?.user?.email ?? '';
+        if (to) {
+          const { subject, html } = registrationRejected(fullName, reason);
+          await sendEmail({ to, subject, html });
+        }
+      }
+    } catch (e) {
+      console.error('[reject-registration] email step failed', { name: (e as Error)?.name });
+    }
+  }
+
   return json({ ok: true });
 });

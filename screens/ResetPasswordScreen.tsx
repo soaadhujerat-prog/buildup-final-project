@@ -25,14 +25,14 @@ interface Props {
   onBack: () => void;
 }
 
-/** Sets a new password. In the real flow this screen is only reached from
- *  the emailed password-recovery link (a genuine Supabase recovery
- *  session), which AppNavigator doesn't have a way to receive yet — so for
- *  now it has no live entry point in the app. The screen and its
- *  validation are already shaped for that connection: swapping
- *  `updatePassword` for `supabase.auth.updateUser({ password })` is the
- *  only change needed once the deep link exists. No token/session is
- *  faked here in the meantime. */
+/** Sets a new password. Reached ONLY after the emailed recovery CODE is
+ *  verified: VerifyRecoveryCodeScreen calls
+ *  `supabase.auth.verifyOtp({ type: 'recovery' })` (native Supabase Auth — no
+ *  custom token), which opens the recovery session, then flips
+ *  `passwordRecoveryActive`, which routes AppNavigator's top-level gate here.
+ *  `updatePassword` is `supabase.auth.updateUser({ password })` on that
+ *  recovery session; the shared `utils/passwordPolicy` rules are enforced
+ *  below. `onBack` here signs the recovery session out and returns to Welcome. */
 const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
   const insets = useSafeAreaInsets();
 
@@ -76,9 +76,9 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
       await updatePassword(newPassword);
       setSubmitted(true);
     } catch {
-      // Backend enabled and the update genuinely failed (e.g. no live recovery
-      // session). Surface it — no silent success.
-      setError('לא ניתן לעדכן את הסיסמה כעת. פתח/י מחדש את הקישור שנשלח למייל ונסה/י שוב.');
+      // Backend enabled and the update genuinely failed (e.g. the recovery
+      // session expired). Surface it — no silent success.
+      setError('לא ניתן לעדכן את הסיסמה כעת. חזור/חזרי למסך הכניסה ובקש/י קוד איפוס חדש.');
     } finally {
       setSubmitting(false);
     }

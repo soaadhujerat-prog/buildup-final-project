@@ -65,6 +65,7 @@ import {
   buildAssignmentFromApplication,
   buildAssignmentFromInvitation,
   hasActiveAssignment,
+  getWorkerJobAssignment,
   getActiveAssignedWorkersCount,
   isJobFullyStaffed as computeIsJobFullyStaffed,
   getStaffingProgress as computeStaffingProgress,
@@ -208,9 +209,13 @@ interface AppState {
    *  this clears, so Login / a dashboard never flash before we know who is
    *  signed in. Always `false` when the backend flag is off. */
   sessionLoading: boolean;
-  /** A Supabase PASSWORD_RECOVERY session is active (app was opened from the
-   *  emailed reset link). The navigator routes straight to ResetPassword. */
+  /** A Supabase recovery session is active. The navigator routes straight to
+   *  ResetPasswordScreen. Set once the emailed recovery CODE is verified
+   *  (VerifyRecoveryCodeScreen), or from a `PASSWORD_RECOVERY` auth event. */
   passwordRecoveryActive: boolean;
+  /** Enter recovery mode after `verifyRecoveryCode` succeeded — the recovery
+   *  session is live, so route to ResetPasswordScreen. */
+  beginPasswordRecovery: () => void;
   clearPasswordRecovery: () => void;
   loginAsCustomer: (
     identifier: string,
@@ -543,6 +548,11 @@ interface AppState {
   ) => boolean;
 
   // Notifications
+  /** Phase 6: re-pull the signed-in user's real notifications from Supabase
+   *  (server-authoritative rows written in-transaction by the staffing RPCs /
+   *  triggers). No-op on the mock path. Runs from the session-load effect;
+   *  screens may also call it (e.g. pull-to-refresh). */
+  refreshNotifications: () => Promise<void>;
   markNotificationRead: (notificationId: string) => void;
   markAllNotificationsRead: (userId: string) => void;
 
@@ -616,6 +626,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     DEFAULT_JOB_SEARCH_STATE
   );
 
+  const beginPasswordRecovery = useCallback(
+    () => setPasswordRecoveryActive(true),
+    []
+  );
   const clearPasswordRecovery = useCallback(
     () => setPasswordRecoveryActive(false),
     []
@@ -2060,20 +2074,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         // enforced server-side; no mock notification for a real job.
         //   • a current-cycle WITHDRAWN row exists  -> reactivate it in place
         //     (reapply_to_job RPC — no second row, same id, fresh applied_at).
+        //   • an ACCEPTED row whose latest assignment the WORKER cancelled
+        //     (assignment.status='cancelled', cancelledBy='worker') -> CASE 1
+        //     reactivation in place (reapply_after_cancellation RPC — 034; the
+        //     server re-proves the worker-cancel, so a contractor-cancelled or
+        //     completed placement is refused). Phase 5A deliberately left that
+        //     row `accepted`, so a plain INSERT would hit the UNIQUE guard and
+        //     surface "כבר הגשת מועמדות למשרה זו." — this is the sanctioned path.
         //   • otherwise -> a real INSERT.
-        // pending / accepted / rejected rows never reach here — the JobDetails
-        // action bar shows no apply button for them.
+        // A still-pending row never reaches here — the JobDetails action bar
+        // shows no apply button for it.
         const uid = currentUser?.id;
-        const withdrawnRow = uid
-          ? applications.find(
-              (a) =>
-                a.jobId === jobId &&
-                a.workerId === uid &&
-                a.status === 'withdrawn'
-            )
+        const mineForJob = uid
+          ? applications.filter((a) => a.jobId === jobId && a.workerId === uid)
+          : [];
+        const withdrawnRow = mineForJob.find((a) => a.status === 'withdrawn');
+        const acceptedRow = mineForJob.find((a) => a.status === 'accepted');
+        const myLatestAssignment = uid
+          ? getWorkerJobAssignment(assignments, jobId, uid)
           : undefined;
+        const workerCancelledPlacement =
+          !!acceptedRow &&
+          myLatestAssignment?.status === 'cancelled' &&
+          myLatestAssignment.cancelledBy === 'worker';
         const created = withdrawnRow
           ? await applicationsService.reapplyToJobBackend(jobId, message)
+          : workerCancelledPlacement
+          ? await applicationsService.reapplyAfterCancellationBackend(
+              jobId,
+              message
+            )
           : await applicationsService.applyToJobBackend(jobId, message);
         setApplications((prev) => [
           created,
@@ -3383,6 +3413,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       currentUser,
       sessionLoading,
       passwordRecoveryActive,
+      beginPasswordRecovery,
       clearPasswordRecovery,
       jobSearchState,
       updateJobSearchState,
@@ -3465,6 +3496,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       requestContractorLicenseRenewal,
       hasRenewalRequestBeenSent,
 
+      refreshNotifications,
       markNotificationRead,
       markAllNotificationsRead,
 
@@ -3486,6 +3518,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       currentUser,
       sessionLoading,
       passwordRecoveryActive,
+      beginPasswordRecovery,
       clearPasswordRecovery,
       jobSearchState,
       updateJobSearchState,
@@ -3557,6 +3590,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       getPendingLicenseRequestForContractor,
       requestContractorLicenseRenewal,
       hasRenewalRequestBeenSent,
+      refreshNotifications,
       markNotificationRead,
       markAllNotificationsRead,
       getUserById,
