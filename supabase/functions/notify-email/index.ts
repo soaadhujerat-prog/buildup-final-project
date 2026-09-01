@@ -30,13 +30,34 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const NOTIFY_EMAIL_SECRET = Deno.env.get('NOTIFY_EMAIL_SECRET') ?? '';
 
-// Only these notification types are also emailed (instruction G). Invitation
-// accepted/declined and assignment completed stay in-app only.
+// Only these notification types are also emailed. Each row is written ONCE, in
+// the same transaction as its authoritative state change, by a SECURITY DEFINER
+// RPC / trigger that guards the transition (respond_to_application,
+// admin_block_user / admin_unblock_user — early-return when already in the
+// target state, review_contractor_license_update — raises if not 'pending'), so
+// there is exactly one row, hence one email, per real event. This function
+// stays best-effort: a Resend failure is logged and still returns HTTP 200 (no
+// webhook retry, no duplicate) — the account/licence state is already committed.
+//
+//   • account_blocked / account_unblocked  — an Admin changed the user's
+//     ability to use BuildUp. A blocked user may not be able to rely on the
+//     in-app notification, so email is the authoritative channel here.
+//   • license_update_approved / _rejected  — materially affects contractor use;
+//     the rejection body already carries the admin's reason.
+//
+// Invitation accepted/declined, assignment completed, and registration
+// approved/rejected are NOT here: the first two are in-app only by design; the
+// registration mails are sent directly by the approve-/reject-registration
+// Edge Functions (no notifications row is written for them — no double send).
 const EMAIL_TYPES = new Set([
   'application_accepted',
   'application_rejected',
   'invitation_received',
   'assignment_cancelled',
+  'account_blocked',
+  'account_unblocked',
+  'license_update_approved',
+  'license_update_rejected',
 ]);
 
 const json = (b: unknown, s = 200): Response =>
