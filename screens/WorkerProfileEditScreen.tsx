@@ -30,11 +30,8 @@ import CityPickerField from '../components/CityPickerField';
 import HorizontalChipPicker from '../components/HorizontalChipPicker';
 import CertificationsField from '../components/CertificationsField';
 import WorkerAvatar from '../components/WorkerAvatar';
-import {
-  AREAS_ISRAEL,
-  PROFESSIONS_BY_CATEGORY,
-  PROFESSION_CATEGORIES,
-} from '../data/mockData';
+import { PROFESSIONS_BY_CATEGORY, PROFESSION_CATEGORIES } from '../data/professions';
+import { AREAS_ISRAEL } from '../data/areas';
 import { Certification, ProfessionCategory, Worker } from '../types';
 import { isValidIsraeliPhone, normalizePhone } from '../utils/helpers';
 import { workerProfessions, normalizeCertifications } from '../utils/normalize';

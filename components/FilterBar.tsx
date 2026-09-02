@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
-import { PROFESSION_CATEGORIES, CITIES_ISRAEL } from '../data/mockData';
+import { PROFESSION_CATEGORIES } from '../data/professions';
+import { CITIES_ISRAEL } from '../data/israelCities';
 
 interface FilterBarProps {
   onFilterChange: (filters: {

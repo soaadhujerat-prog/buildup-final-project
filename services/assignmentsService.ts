@@ -1,7 +1,7 @@
 // =============================================================================
 // BuildUp – Assignments service (Phase 5B READ layer + Phase 5C-2 lifecycle)
 // =============================================================================
-// Reads `assignments` from Supabase when USE_BACKEND=true. The table has only a
+// Reads `assignments` from Supabase. The table has only a
 // SELECT RLS policy (008) and INSERT/UPDATE/DELETE are revoked from
 // `authenticated`, so a direct client mutation is impossible. Every write goes
 // through a SECURITY DEFINER RPC:

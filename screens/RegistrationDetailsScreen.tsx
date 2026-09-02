@@ -39,7 +39,6 @@ import {
   contractorAreas,
   normalizeCertifications,
 } from '../utils/normalize';
-import { isBackendEnabled } from '../config/env';
 import {
   RegistrationError,
   revealRegistrationIdNumber,
@@ -88,13 +87,13 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   const [approveModalVisible, setApproveModalVisible] = useState(false);
   const [approveMessage, setApproveMessage] = useState('');
   const [idImageViewerVisible, setIdImageViewerVisible] = useState(false);
-  // Backend: the applicant's ID number is not in `reg.data` (HMAC + ciphertext
-  // only). Fetch the decrypted value via the admin-only `admin-reveal-id` path.
+  // The applicant's ID number is not in `reg.data` (HMAC + ciphertext only).
+  // Fetch the decrypted value via the admin-only `admin-reveal-id` path.
   const [revealedId, setRevealedId] = useState<string | null>(null);
 
   const dataIdNumber = reg?.data.idNumber;
   useEffect(() => {
-    if (!isBackendEnabled() || dataIdNumber) return;
+    if (dataIdNumber) return;
     let alive = true;
     revealRegistrationIdNumber(registrationId)
       .then((id) => {

@@ -115,7 +115,7 @@ export async function markChatConversationRead(
  * subscriber, so no other user's rows can ever be delivered. The handler gets
  * the mapped `AppNotification`. Returns the channel — the caller (AppContext)
  * owns its lifecycle: call `unsubscribeNotificationsChannel()` on logout / user
- * switch / teardown. Backend-gate (`isBackendEnabled()`) is the caller's job.
+ * switch / teardown. The caller owns the lifecycle.
  */
 export function subscribeToMyNotifications(
   userId: string,

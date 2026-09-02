@@ -20,12 +20,8 @@ import CityPickerField from '../components/CityPickerField';
 import HorizontalChipPicker from '../components/HorizontalChipPicker';
 import DocumentUploadField from '../components/DocumentUploadField';
 import DatePickerField from '../components/DatePickerField';
-import {
-  AREAS_ISRAEL,
-  PROFESSIONS_BY_CATEGORY,
-  PROFESSION_CATEGORIES,
-  PROJECT_TYPES,
-} from '../data/mockData';
+import { PROFESSIONS_BY_CATEGORY, PROFESSION_CATEGORIES } from '../data/professions';
+import { AREAS_ISRAEL, PROJECT_TYPES } from '../data/areas';
 import {
   Certification,
   ContractorRegistrationData,

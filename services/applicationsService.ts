@@ -1,8 +1,7 @@
 // =============================================================================
 // BuildUp – Applications service (Phase 5A · real job-application layer)
 // =============================================================================
-// Real Supabase reads/writes for the APPLICATION domain when USE_BACKEND=true.
-// The mock path (AppContext + MOCK_APPLICATIONS) is untouched.
+// Real Supabase reads/writes for the APPLICATION domain.
 //
 // SECURITY MODEL — all server-authoritative, nothing re-implemented here:
 //   • submit  = plain INSERT. RLS `applications_insert` enforces

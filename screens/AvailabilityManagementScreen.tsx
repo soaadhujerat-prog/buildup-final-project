@@ -21,7 +21,7 @@ import {
 } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import DatePickerField from '../components/DatePickerField';
-import { AREAS_ISRAEL } from '../data/mockData';
+import { AREAS_ISRAEL } from '../data/areas';
 import { Worker } from '../types';
 
 interface Props {

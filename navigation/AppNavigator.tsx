@@ -624,7 +624,7 @@ const AppNavigator: React.FC = () => {
 
   // ---- Auth/status screens --------------------------------------------------
 
-  // Backend session restore in flight (USE_BACKEND=true only) — hold on the
+  // Backend session restore in flight — hold on the
   // splash so we never flash Login or a dashboard before we know who, if
   // anyone, is signed in. `onFinish` is a no-op: AppContext flips
   // `sessionLoading` off when the restore settles.

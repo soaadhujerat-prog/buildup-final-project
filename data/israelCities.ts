@@ -3,9 +3,9 @@
  * CityPickerField wherever the app asks for a "עיר מגורים" (city of
  * residence) — worker/contractor sign-up and profile editing.
  *
- * This is intentionally a much broader list than CITIES_ISRAEL in
- * mockData.ts, which stays small on purpose (it only powers "all cities"
- * filter chips elsewhere in the app and must not be touched here).
+ * `RAW_ISRAEL_CITIES` below is intentionally a much broader list than the
+ * short curated `CITIES_ISRAEL` export (which powers the compact "all cities"
+ * filter-bar dropdown elsewhere in the app).
  *
  * Every locality carries approximate coordinates (used for nearest-match
  * when "use my current location" is picked) and, for well-known places,
@@ -201,6 +201,26 @@ export const ISRAEL_CITIES_DATA: IsraelCity[] = Array.from(dedupedByName.values(
 
 /** Flat, sorted list of canonical Hebrew names — what CityPickerField renders. */
 export const ISRAEL_CITIES: string[] = ISRAEL_CITIES_DATA.map((c) => c.name);
+
+/** Short curated city list for the compact filter-bar city dropdown. `'כל הערים'`
+ *  is a UI-only "all" sentinel. The full searchable list is `ISRAEL_CITIES`. */
+export const CITIES_ISRAEL = [
+  'כל הערים',
+  'תל אביב',
+  'ירושלים',
+  'חיפה',
+  'ראשון לציון',
+  'פתח תקווה',
+  'אשדוד',
+  'נתניה',
+  'באר שבע',
+  'בני ברק',
+  'רמת גן',
+  'הרצליה',
+  'רחובות',
+  'נצרת',
+  'אשקלון',
+];
 
 const normalizeForMatch = (s: string) =>
   s

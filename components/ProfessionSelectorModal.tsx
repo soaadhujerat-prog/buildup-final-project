@@ -10,7 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
-import { PROFESSION_CATEGORIES, PROFESSIONS_BY_CATEGORY } from '../data/mockData';
+import { PROFESSION_CATEGORIES, PROFESSIONS_BY_CATEGORY } from '../data/professions';
 import Sheet from './Sheet';
 
 const CATEGORIES = PROFESSION_CATEGORIES.filter((c) => c !== 'כל המקצועות');
@@ -44,8 +44,8 @@ type Step = 'category' | 'profession';
 const ALL_IN_CATEGORY = '__ALL__';
 
 /** Two-step hierarchical picker: תחום מקצועי → מקצוע ספציפי.
- *  Uses only PROFESSION_CATEGORIES / PROFESSIONS_BY_CATEGORY — the taxonomy
- *  already defined in mockData, never invented values. */
+ *  Uses only PROFESSION_CATEGORIES / PROFESSIONS_BY_CATEGORY — the shared
+ *  profession taxonomy (data/professions.ts), never invented values. */
 const ProfessionSelectorModal: React.FC<Props> = ({
   visible,
   onClose,

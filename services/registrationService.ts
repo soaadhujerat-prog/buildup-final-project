@@ -4,7 +4,7 @@
 // Backend registration + admin approval, on top of the Edge Functions
 // (`register`, `approve-registration`, `reject-registration`) and the
 // `admin_list_registrations` RPC. UI-agnostic; used by AppContext only when
-// `isBackendEnabled()` is true. The mock path in AppContext is untouched.
+// the user is signed in.
 //
 // Nothing sensitive round-trips here: the raw ID number / password go straight
 // into the `register` Edge Function body and are never stored; a registration

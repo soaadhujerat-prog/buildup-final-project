@@ -16,7 +16,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
-import { isBackendEnabled } from '../config/env';
 import { useApp } from '../context/AppContext';
 import * as jobsService from '../services/jobsService';
 import DatePickerField from '../components/DatePickerField';
@@ -32,7 +31,7 @@ import {
   toCanonicalDateOnly,
   toPickerDate,
 } from '../utils/helpers';
-import { PROFESSIONS_BY_CATEGORY } from '../data/mockData';
+import { PROFESSIONS_BY_CATEGORY } from '../data/professions';
 import { jobProfessions } from '../utils/normalize';
 import { Contractor, JobPost, ProfessionCategory } from '../types';
 
@@ -337,11 +336,6 @@ const PostJobForm: React.FC<FormProps> = ({
 
     setSubmitting(true);
     try {
-      // Mock path keeps its original ~0.5s "מפרסם…/שומר…" beat; the backend
-      // path is genuinely async so it doesn't need (or want) a fake delay.
-      if (!isBackendEnabled()) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
       if (isEditMode && jobId) {
         // This save is a real content edit — and only here, not for any
         // technical/operational change — so updatedAt is stamped explicitly.
@@ -685,7 +679,7 @@ const PostJobScreen: React.FC<Props> = (props) => {
   const { getJobById } = useApp();
   const fromContext = props.jobId ? getJobById(props.jobId) : undefined;
 
-  const needsFetch = !!props.jobId && isBackendEnabled();
+  const needsFetch = !!props.jobId;
   const [fetched, setFetched] = useState<JobPost | null>(null);
   const [phase, setPhase] = useState<'idle' | 'loading' | 'error'>(
     needsFetch ? 'loading' : 'idle'

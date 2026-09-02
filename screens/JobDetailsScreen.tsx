@@ -14,7 +14,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
-import { isBackendEnabled } from '../config/env';
 import { useApp } from '../context/AppContext';
 import * as jobsService from '../services/jobsService';
 import { ApplicationError } from '../services/applicationsService';
@@ -112,7 +111,6 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     sendInvitation,
     setJobAcceptingApplications,
     deleteJob,
-    canDeleteJob,
     isFavoriteContractor,
     toggleFavoriteContractor,
   } = useApp();
@@ -131,8 +129,8 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
   // One in-flight guard for the contractor job actions (close / reopen /
   // delete) so a double-tap can't fire two backend mutations.
   const [actionBusy, setActionBusy] = useState(false);
-  // Backend hard-delete eligibility (null = not yet known / not applicable).
-  // Mock path keeps using the synchronous canDeleteJob selector.
+  // Hard-delete eligibility from job_is_deletable (null = not yet known / not
+  // applicable).
   const [backendDeletable, setBackendDeletable] = useState<boolean | null>(null);
 
   const contractor = getUserById(job.contractorId) as Contractor | undefined;
@@ -192,13 +190,11 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
 
   // Hard delete is allowed only for a job that never generated any activity.
   // Anything else (applications / invitations / assignments) → the job is part
-  // of someone's history and can only be CLOSED to registration.
-  //   mock path    → the synchronous canDeleteJob selector.
-  //   backend path → job_is_deletable RPC (the mock staffing arrays are empty),
-  //                  resolved by the effect below. The DB delete trigger stays
-  //                  authoritative if this value is momentarily stale.
+  // of someone's history and can only be CLOSED to registration. The
+  // `job_is_deletable` RPC decides, resolved by the effect below; the DB delete
+  // trigger stays authoritative if this value is momentarily stale.
   useEffect(() => {
-    if (!isBackendEnabled() || !isContractorOwner) {
+    if (!isContractorOwner) {
       setBackendDeletable(null);
       return;
     }
@@ -217,9 +213,7 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     };
   }, [job.id, isContractorOwner]);
 
-  const canHardDelete =
-    isContractorOwner &&
-    (isBackendEnabled() ? backendDeletable === true : canDeleteJob(job.id));
+  const canHardDelete = isContractorOwner && backendDeletable === true;
 
   // Worker viewing this contractor — professional-history relationship,
   // derived only from real Assignments (same badge the contractor sees on the
@@ -268,11 +262,7 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     setApplyDialogOpen(false);
     setApplying(true);
     try {
-      // Mock path keeps its original ~0.5s "שולח…" beat; the backend path is
-      // genuinely async (real INSERT, server-checked eligibility).
-      if (!isBackendEnabled()) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
+      // Genuinely async: real INSERT, server-checked eligibility.
       await applyToJob(job.id, currentUser.id, message || undefined);
       Alert.alert(
         'הבקשה נשלחה',
@@ -1561,10 +1551,6 @@ const JobDetailsScreen: React.FC<Props> = (props) => {
   useEffect(() => {
     if (fromContext) {
       setPhase('idle');
-      return;
-    }
-    if (!isBackendEnabled()) {
-      setPhase('notfound');
       return;
     }
     let alive = true;

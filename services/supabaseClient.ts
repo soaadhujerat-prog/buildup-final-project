@@ -9,8 +9,7 @@
 //
 // Phase 2 status: consumed by the auth layer (services/authService.ts,
 // services/authSession.ts, services/profileService.ts) ONLY when
-// `isBackendEnabled()` is true. With `EXPO_PUBLIC_USE_BACKEND=false` nothing
-// here is reached and the app still runs entirely on mock data. Jobs / staffing
+// the user is signed in. Jobs / staffing
 // / chat / smart-match remain on mock data until their own phases.
 // =============================================================================
 
@@ -30,7 +29,7 @@ let client: SupabaseClient | null = null;
  * Lazily create (once) and return the shared Supabase client.
  *
  * Throws a clear, actionable error when the public config is missing. In later
- * phases, call sites should only reach here when `isBackendEnabled()` is true.
+ * phases,
  */
 export const getSupabase = (): SupabaseClient => {
   if (!hasSupabaseConfig()) {

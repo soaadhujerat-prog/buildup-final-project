@@ -19,7 +19,7 @@
 // notification / email side effect: favoriting is a silent preference action.
 // AppContext keeps the results in the same `favoriteWorkers` /
 // `favoriteContractors` arrays every selector already reads. No-op on the mock
-// path (call sites are gated on `isBackendEnabled()`).
+// path.
 // =============================================================================
 
 import { getSupabase } from './supabaseClient';

@@ -32,10 +32,10 @@ export interface BaseUser {
    *
    * OPTIONAL (Phase 2): a Supabase-backed `SessionUser` never carries a
    * plaintext ID — the backend stores it only as a server-side HMAC on
-   * `user_identity` (Phase 1 decision #1) and never returns it to the client.
-   * The mock data + mock login path still populate and match on it, so nothing
-   * changes when `EXPO_PUBLIC_USE_BACKEND=false`. UI that shows this value must
-   * tolerate `undefined` (e.g. `value={user.idNumber ?? ''}`).
+   * `user_identity` (Phase 1 decision #1) and never returns it to the client,
+   * so it is normally `undefined` on a session user (the own-profile screens
+   * fetch it on demand via the `reveal-my-id` Edge Function). UI that shows
+   * this value must tolerate `undefined` (e.g. `value={user.idNumber ?? ''}`).
    */
   idNumber?: string;
   fullName: string;
@@ -582,7 +582,7 @@ export type CompensationStatus =
  *    skills 12 · distance 11 · sharedHistory 5 · semantic 5.
  *  Profession carries the most weight AND acts as a gate — a worker whose
  *  trade is not one the job asked for is capped well below a real match
- *  (see smartMatchService.computeSmartMatch).
+ *  (enforced by the `smart-match` Edge Function).
  *
  *  A `null` factor means "not assessable" — either no real data for it
  *  (e.g. no coordinates → distance stays city-level, no comparable rate →

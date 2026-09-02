@@ -1,7 +1,7 @@
 // =============================================================================
 // BuildUp – Participants service (real profile resolution for staffing)
 // =============================================================================
-// When EXPO_PUBLIC_USE_BACKEND=true, a signed-in worker / contractor needs the
+//, a signed-in worker / contractor needs the
 // REAL profile of the people referenced by their applications / invitations /
 // assignments / jobs (the admin path already has the full directory via
 // adminUserService.loadUserDirectory). This service resolves those UUIDs to the

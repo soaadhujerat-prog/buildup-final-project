@@ -21,7 +21,7 @@
 //
 // No realtime channel here (Support is not live chat): AppContext re-reads via
 // refreshSupportTickets() after every write and when a support notification
-// arrives. No-op on the mock path — every call site is gated on isBackendEnabled().
+// arrives.
 // =============================================================================
 
 import type {

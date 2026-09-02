@@ -118,7 +118,7 @@ const SmartMatchScreen: React.FC<Props> = ({
     }
     let cancelled = false;
     setStatus('loading');
-    getSmartMatches({ jobId: selectedJob.id, jobs, workers, assignments })
+    getSmartMatches({ jobId: selectedJob.id })
       .then((r) => {
         if (!cancelled) {
           setResults(r);

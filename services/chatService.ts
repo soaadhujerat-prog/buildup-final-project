@@ -1,7 +1,7 @@
 // =============================================================================
 // BuildUp – Chat service (Phase 7A persistence + Phase 7B realtime / read)
 // =============================================================================
-// Real Supabase reads/writes for the CHAT domain when USE_BACKEND=true. Same
+// Real Supabase reads/writes for the CHAT domain. Same
 // shape as assignmentsService / invitationsService: no React, data-in/data-out,
 // AppContext owns the arrays + setState.
 //
@@ -307,7 +307,7 @@ export async function sendMessage(
  *  handler gets the mapped Message plus its conversation id. Returns the channel
  *  so the caller (AppContext) owns its lifecycle — call unsubscribeChannel() on
  *  logout / user switch / teardown. No-op safety is the caller's job
- *  (isBackendEnabled gate). */
+ * . */
 export function subscribeToMyMessages(
   onInsert: (message: Message, conversationId: string) => void
 ): RealtimeChannel {

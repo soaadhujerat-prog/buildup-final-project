@@ -1,8 +1,7 @@
 // =============================================================================
 // BuildUp – Invitations service (Phase 5C-1 · real contractor→worker layer)
 // =============================================================================
-// Real Supabase reads/writes for the INVITATION domain when USE_BACKEND=true.
-// The mock path (AppContext + MOCK_INVITATIONS) is untouched.
+// Real Supabase reads/writes for the INVITATION domain.
 //
 // SECURITY MODEL — all server-authoritative, nothing re-implemented here
 // (migration 030). The client has NO direct INSERT / UPDATE / DELETE on

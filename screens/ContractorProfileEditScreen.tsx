@@ -27,7 +27,7 @@ import StatusBadge from '../components/StatusBadge';
 import DocumentUploadField from '../components/DocumentUploadField';
 import AttachedDocument from '../components/AttachedDocument';
 import DatePickerField from '../components/DatePickerField';
-import { AREAS_ISRAEL } from '../data/mockData';
+import { AREAS_ISRAEL } from '../data/areas';
 import { Contractor, UploadedDocument } from '../types';
 import {
   isValidIsraeliPhone,
