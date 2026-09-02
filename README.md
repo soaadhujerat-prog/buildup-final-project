@@ -568,11 +568,35 @@ Blocking is an **account status change, never data deletion**. Every historical 
 
 ## ⚙️ Installation
 
-```bash
-git clone https://github.com/soaadhujerat-prog/buildup-final-project.git
-cd buildup-final-project
-npm install
-```
+BuildUp is primarily intended to be run and demonstrated using **Expo Go on a physical Android or iPhone device**.
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/soaadhujerat-prog/buildup-final-project.git
+   ```
+
+2. **Enter the project directory**
+
+   ```bash
+   cd buildup-final-project
+   ```
+
+3. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+4. **Configure `.env`** — copy `.env.example` to `.env` and fill in your Supabase project values (see [Environment Configuration](#-environment-configuration)).
+
+5. **Start Expo**
+
+   ```bash
+   npx expo start
+   ```
+
+6. **Open the project in Expo Go** on a physical Android or iPhone device — scan the QR code shown in the terminal (Android: scan from inside the Expo Go app; iPhone: scan with the Camera app). The phone and the computer must be on the same network.
 
 Requirements: a recent LTS release of **Node.js** (as expected by Expo SDK 54) and **npm**. No global Expo CLI install is required — the project uses `npx expo`.
 
@@ -606,14 +630,18 @@ EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
 npx expo start
 ```
 
-Then open the project in **Expo Go** (Android / iOS) or in an Android emulator / iOS simulator. The app connects directly to the Supabase project named in your `.env`.
+**BuildUp is primarily intended to be run and demonstrated using Expo Go on a physical mobile device.** After `npx expo start`, scan the QR code from the terminal with **Expo Go** on a physical Android or iPhone device to launch the app. The app connects directly to the Supabase project named in your `.env`.
 
-Other scripts (`package.json`):
+An Android emulator or iOS simulator can optionally be used as a development alternative (`npm run android` / `npm run ios`), but the physical-device Expo Go flow is the recommended way to run and present the project.
+
+### Additional Scripts
+
+These are convenience / development commands and are **not** required to run the project:
 
 | Script | Action |
 | --- | --- |
 | `npm start` | `expo start` |
-| `npm run android` / `npm run ios` / `npm run web` | Start with a target platform |
+| `npm run android` / `npm run ios` / `npm run web` | Start with a target platform (emulator / simulator / web) |
 | `npm run typecheck` | `tsc --noEmit` (strict) |
 | `npm run gen:types` | Regenerate `types/database.types.ts` from the Supabase schema |
 
