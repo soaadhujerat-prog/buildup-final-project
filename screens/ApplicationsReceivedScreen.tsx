@@ -362,6 +362,9 @@ const ApplicationRow: React.FC<{
           <View style={styles.headlineRow}>
             <StatusBadge label={label} tone={tone} small />
             <Text style={styles.workerName}>{workerName}</Text>
+            {worker?.status === 'blocked' && (
+              <StatusBadge label="חשבון חסום" tone="danger" small />
+            )}
           </View>
           <Text style={styles.workerMeta}>
             {workerProfession} · {workerExperience} שנות ניסיון · {workerCity}

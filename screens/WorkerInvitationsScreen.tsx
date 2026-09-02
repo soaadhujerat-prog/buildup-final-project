@@ -214,6 +214,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }
                 contractorAvatarUrl={contractor?.avatarUrl}
+                contractorBlocked={contractor?.status === 'blocked'}
                 assignment={
                   me
                     ? getWorkerJobAssignment(assignments, item.jobId, me.id)
@@ -295,6 +296,7 @@ const InvitationCard: React.FC<{
   jobFull: boolean;
   contractorName: string;
   contractorAvatarUrl?: string;
+  contractorBlocked?: boolean;
   assignment: Assignment | undefined;
   onPressJob: () => void;
   onAccept: () => void;
@@ -307,6 +309,7 @@ const InvitationCard: React.FC<{
   jobFull,
   contractorName,
   contractorAvatarUrl,
+  contractorBlocked,
   assignment,
   onPressJob,
   onAccept,
@@ -354,8 +357,11 @@ const InvitationCard: React.FC<{
           size={32}
           style={styles.contractorIcon}
         />
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, gap: 4, alignItems: 'flex-end' }}>
           <Text style={styles.contractorName}>{contractorName}</Text>
+          {contractorBlocked && (
+            <StatusBadge label="חשבון הקבלן חסום" tone="danger" small />
+          )}
         </View>
       </TouchableOpacity>
 

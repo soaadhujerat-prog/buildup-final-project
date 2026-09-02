@@ -29,6 +29,7 @@ import {
   AppNotification,
 } from '../types';
 import { LoginResult } from '../context/AppContext';
+import { findConversation } from '../services/conversationService';
 
 type CustomerRole = 'contractor' | 'worker';
 
@@ -336,6 +337,28 @@ const AppNavigator: React.FC = () => {
   const openChatWith = useCallback(
     async (otherUserId: string) => {
       if (!currentUser) return;
+
+      // Account status has UI priority over any "send message" affordance.
+      // A blocked counterpart: never (re)create a thread — `send_message` /
+      // `get_or_create_direct_conversation` (046/038) reject it server-side and
+      // the tap would look unresponsive. If a historical thread is already in
+      // the loaded inbox, open it read-only (ChatScreen shows the inactive
+      // banner + disabled composer); otherwise explain, don't fail silently.
+      const other = getUserById(otherUserId) as { status?: string } | undefined;
+      if (other?.status === 'blocked') {
+        const existing = findConversation(
+          conversations,
+          currentUser.id,
+          otherUserId
+        );
+        if (existing) {
+          push({ name: 'Chat', conversationId: existing.id });
+        } else {
+          Alert.alert('לא ניתן לשלוח הודעה', 'החשבון אינו פעיל במערכת');
+        }
+        return;
+      }
+
       try {
         const conversation = await getOrCreateConversation(
           currentUser.id,
@@ -347,7 +370,7 @@ const AppNavigator: React.FC = () => {
         // the backend path). Stay put — the caller screen is unchanged.
       }
     },
-    [currentUser, getOrCreateConversation, push]
+    [currentUser, getOrCreateConversation, push, getUserById, conversations]
   );
 
   const handleLogout = useCallback(() => {

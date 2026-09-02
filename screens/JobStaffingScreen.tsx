@@ -380,7 +380,11 @@ const ActiveWorkerCard: React.FC<{
       <WorkerAvatar worker={row.worker} size={44} />
       <View style={{ flex: 1 }}>
         <View style={styles.cardTopline}>
-          <View style={styles.statusDot} />
+          {row.worker.status === 'blocked' ? (
+            <StatusBadge label="חשבון חסום" tone="danger" small />
+          ) : (
+            <View style={styles.statusDot} />
+          )}
           <Text style={styles.workerName}>{row.worker.fullName}</Text>
         </View>
         <Text style={styles.workerMeta} numberOfLines={1}>
@@ -459,6 +463,9 @@ const HistoryWorkerCard: React.FC<{
           <View style={styles.cardTopline}>
             <StatusBadge label={badgeLabel} tone={badgeTone} small />
             <Text style={styles.workerName}>{row.worker.fullName}</Text>
+            {row.worker.status === 'blocked' && (
+              <StatusBadge label="חשבון חסום" tone="danger" small />
+            )}
           </View>
           <Text style={styles.stampText}>
             {assignmentStaffedLine(row.assignment)}

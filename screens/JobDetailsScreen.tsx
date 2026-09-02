@@ -562,7 +562,11 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
     return (
       <View style={[styles.actionBtn, styles.appliedBox]}>
         <Text style={styles.appliedText}>
-          {fullyStaffed ? 'השיבוץ למשרה הושלם' : 'המשרה סגורה להרשמה'}
+          {contractor?.status === 'blocked'
+            ? 'הקבלן אינו פעיל במערכת'
+            : fullyStaffed
+            ? 'השיבוץ למשרה הושלם'
+            : 'המשרה סגורה להרשמה'}
         </Text>
       </View>
     );
@@ -872,6 +876,11 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
                 </TouchableOpacity>
               )}
             </View>
+            {contractor.status === 'blocked' && (
+              <View style={{ marginTop: 12, alignItems: 'flex-end' }}>
+                <StatusBadge label="הקבלן אינו פעיל במערכת" tone="danger" />
+              </View>
+            )}
             {isWorker && (
               <View style={styles.relationshipBlock}>
                 <StatusBadge
@@ -1144,6 +1153,13 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
                                 >
                                   {w.fullName}
                                 </Text>
+                                {w.status === 'blocked' && (
+                                  <StatusBadge
+                                    label="חשבון חסום"
+                                    tone="danger"
+                                    small
+                                  />
+                                )}
                               </View>
                               <Text
                                 style={styles.candidateMeta}
@@ -1280,6 +1296,13 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
                             <Text style={styles.invName} numberOfLines={1}>
                               {w?.fullName ?? '—'}
                             </Text>
+                            {w?.status === 'blocked' && (
+                              <StatusBadge
+                                label="חשבון חסום"
+                                tone="danger"
+                                small
+                              />
+                            )}
                           </View>
                         </TouchableOpacity>
 

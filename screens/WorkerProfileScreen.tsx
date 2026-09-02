@@ -129,6 +129,10 @@ const WorkerProfileScreen: React.FC<Props> = ({
     );
   }
 
+  // Account status overrides marketplace availability in every hero indicator
+  // below. `is_available` is never mutated on block — this is presentation only.
+  const workerBlocked = worker.status === 'blocked';
+
   const handleSendInvite = async () => {
     if (!selectedJobId || !me || sendingInvite) return;
     const jobId = selectedJobId;
@@ -181,7 +185,9 @@ const WorkerProfileScreen: React.FC<Props> = ({
           <WorkerAvatar worker={worker} size={72} />
           <View style={styles.heroBody}>
             <View style={styles.heroNameRow}>
-              {worker.isAvailable && (
+              {/* Account status has UI priority over marketplace availability:
+                  a blocked worker never shows the green "available" dot. */}
+              {!workerBlocked && worker.isAvailable && (
                 <View style={styles.availDot}>
                   <View style={styles.availDotInner} />
                 </View>
@@ -194,8 +200,20 @@ const WorkerProfileScreen: React.FC<Props> = ({
             </Text>
             <View style={styles.heroBadges}>
               <StatusBadge
-                label={worker.isAvailable ? 'זמין מיד' : 'לא זמין כעת'}
-                tone={worker.isAvailable ? 'success' : 'neutral'}
+                label={
+                  workerBlocked
+                    ? 'חשבון חסום'
+                    : worker.isAvailable
+                    ? 'זמין מיד'
+                    : 'לא זמין כעת'
+                }
+                tone={
+                  workerBlocked
+                    ? 'danger'
+                    : worker.isAvailable
+                    ? 'success'
+                    : 'neutral'
+                }
                 small
               />
             </View>
@@ -374,11 +392,13 @@ const WorkerProfileScreen: React.FC<Props> = ({
             style={styles.inviteBtn}
             onPress={() => setPickerVisible(true)}
             activeOpacity={0.85}
-            disabled={invitableJobs.length === 0}
+            disabled={invitableJobs.length === 0 || workerBlocked}
           >
             <Ionicons name="paper-plane" size={20} color={Colors.white} />
             <Text style={styles.inviteText}>
-              {invitableJobs.length === 0
+              {workerBlocked
+                ? 'החשבון אינו פעיל במערכת'
+                : invitableJobs.length === 0
                 ? 'אין משרות פתוחות להזמנה'
                 : 'הזמן לעבודה'}
             </Text>

@@ -241,6 +241,9 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                       <Text style={styles.title} numberOfLines={1}>
                         {item.job.title}
                       </Text>
+                      {contractor?.status === 'blocked' && (
+                        <StatusBadge label="חשבון הקבלן חסום" tone="danger" small />
+                      )}
                     </View>
                     <Text style={styles.sub} numberOfLines={1}>
                       {jobProfessions(item.job).join(', ')} · {item.job.city}

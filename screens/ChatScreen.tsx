@@ -92,10 +92,15 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
 
   const otherId = getOtherParticipantId(conversation, currentUser.id);
   const other = otherId ? getUserById(otherId) : undefined;
+  // The counterpart's LIVE resolved profile status (via the existing
+  // conversation/participant resolution — no separate source of truth). When
+  // they are blocked the composer is disabled; server-side send_message (046)
+  // stays the authority in case status changes between render and send.
+  const otherBlocked = !!other && 'status' in other && other.status === 'blocked';
 
   const handleSend = async () => {
     const text = draft.trim();
-    if (!text || sending) return;
+    if (!text || sending || otherBlocked) return;
     setSending(true);
     setSendError(false);
     try {
@@ -156,7 +161,7 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
         })}
       </ScrollView>
 
-      {sendError && (
+      {sendError && !otherBlocked && (
         <View style={styles.errorBanner}>
           <Ionicons name="alert-circle" size={16} color={Colors.danger} />
           <Text style={styles.errorBannerText}>
@@ -165,29 +170,38 @@ const ChatScreen: React.FC<Props> = ({ conversationId, onBack }) => {
         </View>
       )}
 
-      <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
-        <TouchableOpacity
-          style={[styles.sendBtn, sending && { opacity: 0.6 }]}
-          onPress={handleSend}
-          activeOpacity={0.85}
-          disabled={!draft.trim() || sending}
-          accessibilityLabel="שלח הודעה"
+      {otherBlocked ? (
+        <View
+          style={[styles.blockedNotice, { paddingBottom: insets.bottom + 10 }]}
         >
-          <Ionicons
-            name="send"
-            size={18}
-            color={draft.trim() && !sending ? Colors.white : Colors.textMuted}
+          <Ionicons name="alert-circle" size={16} color={Colors.danger} />
+          <Text style={styles.blockedNoticeText}>החשבון אינו פעיל במערכת</Text>
+        </View>
+      ) : (
+        <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
+          <TouchableOpacity
+            style={[styles.sendBtn, sending && { opacity: 0.6 }]}
+            onPress={handleSend}
+            activeOpacity={0.85}
+            disabled={!draft.trim() || sending}
+            accessibilityLabel="שלח הודעה"
+          >
+            <Ionicons
+              name="send"
+              size={18}
+              color={draft.trim() && !sending ? Colors.white : Colors.textMuted}
+            />
+          </TouchableOpacity>
+          <TextInput
+            style={styles.input}
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="כתוב הודעה..."
+            placeholderTextColor={Colors.textMuted}
+            multiline
           />
-        </TouchableOpacity>
-        <TextInput
-          style={styles.input}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="כתוב הודעה..."
-          placeholderTextColor={Colors.textMuted}
-          multiline
-        />
-      </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 };
@@ -261,6 +275,23 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  blockedNotice: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    backgroundColor: Colors.white,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  blockedNoticeText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    writingDirection: 'rtl',
   },
 
   notFound: {
