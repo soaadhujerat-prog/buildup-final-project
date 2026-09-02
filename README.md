@@ -588,7 +588,7 @@ BuildUp is primarily intended to be run and demonstrated using **Expo Go on a ph
    npm install
    ```
 
-4. **Configure `.env`** — copy `.env.example` to `.env` and fill in your Supabase project values (see [Environment Configuration](#-environment-configuration)).
+4. **_(optional)_ Point at a different Supabase project** — the repo already ships with the BuildUp demo project's public Supabase config, so a fresh clone connects with no setup. To use your own project instead, copy `.env.example` to `.env` and set the two values (see [Environment Configuration](#-environment-configuration)).
 
 5. **Start Expo**
 
@@ -604,23 +604,34 @@ Requirements: a recent LTS release of **Node.js** (as expected by Expo SDK 54) a
 
 ## 🔧 Environment Configuration
 
-Copy the template and fill in your Supabase project values:
+**A local `.env` is optional.** The app ships with the BuildUp demo project's
+**public** Supabase configuration (project URL + publishable key) as the default
+in [`config/env.ts`](config/env.ts), so `git clone && npm install && npx expo start`
+connects with no additional setup.
+
+Create a `.env` (git-ignored) only to run the app against a **different** Supabase
+project — any value set there overrides the committed default:
 
 ```bash
 cp .env.example .env
-```
-
-`.env` (git-ignored) contains **only public runtime configuration**:
-
-```bash
+# then set:
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
 ```
 
 - `EXPO_PUBLIC_SUPABASE_URL` — `https://<project-ref>.supabase.co`
-- `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — the publishable key (`sb_publishable_...`); public by design, access is governed by RLS on the server.
+- `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — the publishable key (`sb_publishable_...`).
 
-**Server-side secrets are configured separately as Supabase Edge Function secrets and are never part of the React Native bundle.** By category (names only): the service-role key (privileged Edge Functions), the ID HMAC pepper and ID encryption key (identity hashing / reveal), the OpenAI key (Smart Match), and the email provider key + notify webhook secret (transactional email). Never place real values in `.env.example` or in source.
+### Why the publishable key can live in the repo
+
+The publishable key is a **client key**: it is designed to ship inside the app
+bundle and only grants the Postgres `anon` role. Row Level Security is enabled on
+every table and `anon` is **revoked from all tables**
+([`supabase/migrations/008_rls.sql`](supabase/migrations/008_rls.sql)), so the key
+on its own can read or write nothing until a user signs in — and then only what
+that user's row-level policies allow. It is **not** the service-role key.
+
+**Server-side secrets are configured separately as Supabase Edge Function secrets and are never part of the React Native bundle.** By category (names only): the service-role key (privileged Edge Functions), the ID HMAC pepper and ID encryption key (identity hashing / reveal), the OpenAI key (Smart Match), and the email provider key + notify webhook secret (transactional email). Never place real values in `.env.example` or commit any server secret.
 
 ---
 
