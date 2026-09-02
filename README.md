@@ -23,6 +23,7 @@ BuildUp is a full-stack mobile application: a **React Native + Expo** client wit
 - [Problem & Solution](#-problem--solution)
 - [User Roles](#-user-roles)
 - [Key Features](#-key-features)
+- [User Flow](#-user-flow)
 - [Smart Match](#-smart-match)
 - [Maps & Location](#-maps--location)
 - [System Architecture](#-system-architecture)
@@ -148,6 +149,60 @@ The scope is deliberately bounded: BuildUp organizes and ranks — it does not p
 | **Admin management** | Registration, identity, licence and account-status governance. |
 | **Blocked-account lifecycle** | Blocking removes a user from *new* marketplace activity while preserving all history; unblocking restores eligibility from live data. |
 | **Private file storage** | Five private buckets; database rows hold object paths; files are served via short-lived signed URLs. |
+
+---
+
+## 🔄 User Flow
+
+The main paths through the app for each role. Every step maps to a screen that already exists in `screens/`.
+
+```mermaid
+flowchart TD
+    Login["Login (ID number + password)"]
+
+    subgraph WorkerFlow["👷 Worker"]
+        WDash["Worker Dashboard"]
+        WBrowse["Available Jobs / Nearby Jobs"]
+        WDetails["Job Details"]
+        WAct["Apply to job / Respond to Invitation"]
+        WAssign["My Assignments"]
+        WDash --> WBrowse --> WDetails --> WAct --> WAssign
+        WDash --> WInv["My Invitations"] --> WAct
+    end
+
+    subgraph ContractorFlow["🏗️ Contractor"]
+        CDash["Contractor Dashboard"]
+        CJobs["Manage Jobs (post / edit)"]
+        CReq["Applications received / Sent Invitations"]
+        CFind["Worker Search / Nearby Workers"]
+        CSmart["Smart Match"]
+        CStaff["Job Staffing / Assignments"]
+        CDash --> CJobs --> CReq --> CStaff
+        CJobs --> CFind --> CReq
+        CJobs --> CSmart --> CReq
+    end
+
+    subgraph AdminFlow["🛡️ Admin"]
+        ADash["Admin Dashboard"]
+        AReg["Pending Registrations"]
+        AUsers["User Directory"]
+        ALic["Licence Attention / Renewal Review"]
+        ASup["Support Management"]
+        ABlock["Block / Unblock Users"]
+        ADash --> AReg
+        ADash --> AUsers --> ABlock
+        ADash --> ALic
+        ADash --> ASup
+    end
+
+    Login --> WDash
+    Login --> CDash
+    Login --> ADash
+
+    Shared["Chat · Notifications · Support"]
+    WAssign --> Shared
+    CStaff --> Shared
+```
 
 ---
 
@@ -630,16 +685,9 @@ These are deliberate deployment / design choices, not gaps:
 
 ---
 
-## 📸 Screenshots
+## 📱 Screenshots
 
-> Screenshots are not committed to this repository. Add them under `docs/screenshots/` and link them here.
-
-| Area | Screens |
-| --- | --- |
-| **Worker experience** | _Dashboard · Available / Nearby Jobs · My Applications · My Assignments_ |
-| **Contractor experience** | _Post / Manage Job · Applications received · Job Staffing · Worker Search_ |
-| **Smart Match** | _Job picker · Ranked candidates · Score breakdown_ |
-| **Admin dashboard** | _Registration queue · User details · Licence attention · Support_ |
+Application screenshots will be added here to showcase the main Worker, Contractor, Smart Match, and Admin flows.
 
 ---
 
