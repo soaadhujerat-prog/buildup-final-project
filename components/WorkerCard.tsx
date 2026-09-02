@@ -12,6 +12,9 @@ interface WorkerCardProps {
   onPress?: () => void;
   isFavorite: boolean;
   onToggleFavorite: () => void;
+  /** Contractor→worker residence distance in km (Phase 10 "nearby workers").
+   *  Undefined = unknown city data → no distance row (never a fake "0 ק"מ"). */
+  distanceKm?: number;
 }
 
 /** The single shared worker result card — used by SearchWorkersScreen and
@@ -22,6 +25,7 @@ const WorkerCard: React.FC<WorkerCardProps> = ({
   onPress,
   isFavorite,
   onToggleFavorite,
+  distanceKm,
 }) => {
   return (
     <View style={styles.card}>
@@ -82,6 +86,14 @@ const WorkerCard: React.FC<WorkerCardProps> = ({
                 {worker.city}
               </Text>
             </View>
+            {distanceKm != null && (
+              <View style={styles.metaItem}>
+                <Ionicons name="navigate-outline" size={14} color={Colors.textSecondary} />
+                <Text style={styles.metaText} numberOfLines={1}>
+                  {`כ-${Math.round(distanceKm)} ק"מ מאזור המגורים שלך`}
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.rateBadge}>
             <Text style={styles.rateValue}>₪{worker.dailyRate}</Text>

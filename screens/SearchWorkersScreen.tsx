@@ -12,12 +12,16 @@ import FilterBottomSheet, {
   DEFAULT_WORKER_FILTERS,
   filterWorkers,
   isFiltersActive,
+  workerWithinRadius,
 } from '../components/FilterBottomSheet';
 import SortBottomSheet, {
   SortOption,
   sortWorkers,
   getSortLabel,
 } from '../components/SortBottomSheet';
+import { Contractor } from '../types';
+import { residenceCityDistanceKm } from '../utils/distance';
+import { cityCoords } from '../data/israelCities';
 
 interface Props {
   onBack: () => void;
@@ -39,7 +43,11 @@ const SearchWorkersScreen: React.FC<Props> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { workers, currentUser, getFavoriteWorkerIds, toggleFavoriteWorker } = useApp();
-  const contractorId = currentUser?.role === 'contractor' ? currentUser.id : null;
+  const me = currentUser?.role === 'contractor' ? (currentUser as Contractor) : null;
+  const contractorId = me?.id ?? null;
+  // Contractor RESIDENCE city (from their real profile) — the fixed endpoint
+  // for the "nearby workers" convenience. City-level only; no GPS, no address.
+  const contractorCity = me?.city ?? '';
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<WorkerFilters>(DEFAULT_WORKER_FILTERS);
@@ -64,6 +72,22 @@ const SearchWorkersScreen: React.FC<Props> = ({
     [workers]
   );
 
+  // Phase 10 — deterministic contractor→worker residence distance over the REAL
+  // loaded workers: contractor residence city centroid → worker residence city
+  // centroid. No GPS, no address, no job. Recomputes on contractor-city change
+  // and on the worker list changing, so a user switch never leaks stale data.
+  const hasContractorLocation = useMemo(
+    () => !!cityCoords(contractorCity),
+    [contractorCity]
+  );
+  const distanceByWorkerId = useMemo(() => {
+    const map: Record<string, number | undefined> = {};
+    for (const w of approvedWorkers) {
+      map[w.id] = residenceCityDistanceKm(contractorCity, w.city);
+    }
+    return map;
+  }, [approvedWorkers, contractorCity]);
+
   const allSkills = useMemo(() => {
     const set = new Set<string>();
     approvedWorkers.forEach((w) => w.skills.forEach((s) => set.add(s)));
@@ -84,9 +108,21 @@ const SearchWorkersScreen: React.FC<Props> = ({
         : filtered,
     [filtered, filters.favoritesOnly, favoriteWorkerIds]
   );
+  // "מרחק מאזור המגורים" — viewer-relative, applied here (like favoritesOnly),
+  // never inside filterWorkers. Unknown-distance workers only survive "כל
+  // המרחקים".
+  const withinRadius = useMemo(
+    () =>
+      filters.radiusKm == null
+        ? filteredWithFavorites
+        : filteredWithFavorites.filter((w) =>
+            workerWithinRadius(w.id, filters.radiusKm, distanceByWorkerId)
+          ),
+    [filteredWithFavorites, filters.radiusKm, distanceByWorkerId]
+  );
   const results = useMemo(
-    () => sortWorkers(filteredWithFavorites, sort),
-    [filteredWithFavorites, sort]
+    () => sortWorkers(withinRadius, sort, distanceByWorkerId),
+    [withinRadius, sort, distanceByWorkerId]
   );
 
   const filtersActive = isFiltersActive(filters);
@@ -134,6 +170,14 @@ const SearchWorkersScreen: React.FC<Props> = ({
         key: 'city',
         label: filters.city,
         onRemove: () => setFilters((f) => ({ ...f, city: '' })),
+      });
+    }
+
+    if (filters.radiusKm != null) {
+      list.push({
+        key: 'radius',
+        label: `עד ${filters.radiusKm} ק"מ`,
+        onRemove: () => setFilters((f) => ({ ...f, radiusKm: null })),
       });
     }
 
@@ -335,6 +379,7 @@ const SearchWorkersScreen: React.FC<Props> = ({
               onPress={() => onOpenWorkerProfile(item.id)}
               isFavorite={favoriteWorkerIds.includes(item.id)}
               onToggleFavorite={() => handleToggleFavorite(item.id)}
+              distanceKm={distanceByWorkerId[item.id]}
             />
           )}
         />
@@ -349,6 +394,8 @@ const SearchWorkersScreen: React.FC<Props> = ({
         onApply={setFilters}
         allSkills={allSkills}
         favoriteWorkerIds={favoriteWorkerIds}
+        distanceByWorkerId={distanceByWorkerId}
+        hasContractorLocation={hasContractorLocation}
       />
 
       <SortBottomSheet

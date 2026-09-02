@@ -237,7 +237,7 @@ const SmartMatchScreen: React.FC<Props> = ({
 
   const resultsSubtitle =
     sort === 'distance'
-      ? 'מסודרים לפי קרבה למיקום'
+      ? 'מסודרים לפי קרבה למיקום העבודה'
       : sort === 'compensation'
       ? 'מסודרים לפי התאמה לתקציב'
       : 'מסודרים לפי רמת ההתאמה';
@@ -391,7 +391,7 @@ const SmartMatchScreen: React.FC<Props> = ({
             />
             {canSortDistance && (
               <SortChip
-                label="הקרובים ביותר"
+                label="הקרובים ביותר למשרה"
                 active={sort === 'distance'}
                 onPress={() => setSort('distance')}
               />

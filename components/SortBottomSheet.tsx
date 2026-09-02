@@ -11,13 +11,22 @@ import Sheet from './Sheet';
 // a real recommendation, and there's no Smart Match scoring behind this yet
 // (that lands later, backed by real AI matching). 'default' also never
 // appears in SORT_OPTIONS, so the sheet never shows a "default" row.
-export type SortOption = 'default' | 'expDesc' | 'expAsc' | 'rateAsc' | 'rateDesc';
+export type SortOption =
+  | 'default'
+  | 'expDesc'
+  | 'expAsc'
+  | 'rateAsc'
+  | 'rateDesc'
+  | 'nearest';
 
 export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: 'expDesc', label: 'ניסיון: מהגבוה לנמוך' },
   { value: 'expAsc', label: 'ניסיון: מהנמוך לגבוה' },
   { value: 'rateAsc', label: 'תעריף: מהנמוך לגבוה' },
   { value: 'rateDesc', label: 'תעריף: מהגבוה לנמוך' },
+  // Contractor worker search only — distance from the contractor's residence
+  // city to the worker's residence city (Phase 10). Unknown distances last.
+  { value: 'nearest', label: 'הקרובים אליי' },
 ];
 
 /** Label for the active-sort chip; null for 'default' (no chip shown). */
@@ -25,7 +34,13 @@ export const getSortLabel = (sort: SortOption): string | null =>
   SORT_OPTIONS.find((o) => o.value === sort)?.label ?? null;
 
 /** Pure sort — applied after filtering, never mutates its input. */
-export const sortWorkers = (workers: Worker[], sort: SortOption): Worker[] => {
+export const sortWorkers = (
+  workers: Worker[],
+  sort: SortOption,
+  /** Contractor→worker residence distance per worker id (Phase 10). Required
+   *  only for the 'nearest' sort; workers with no entry sort last. */
+  distanceByWorkerId?: Record<string, number | undefined>
+): Worker[] => {
   if (sort === 'default') return workers;
   const sorted = [...workers];
   switch (sort) {
@@ -41,6 +56,12 @@ export const sortWorkers = (workers: Worker[], sort: SortOption): Worker[] => {
     case 'rateDesc':
       sorted.sort((a, b) => b.dailyRate - a.dailyRate);
       break;
+    case 'nearest': {
+      const d = (id: string) =>
+        distanceByWorkerId?.[id] ?? Number.POSITIVE_INFINITY;
+      sorted.sort((a, b) => d(a.id) - d(b.id));
+      break;
+    }
   }
   return sorted;
 };

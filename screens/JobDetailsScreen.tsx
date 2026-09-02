@@ -25,6 +25,7 @@ import WorkerAvatar from '../components/WorkerAvatar';
 import ContractorAvatar from '../components/ContractorAvatar';
 import ResponseDialog from '../components/ResponseDialog';
 import SharedWorkHistorySheet from '../components/SharedWorkHistorySheet';
+import JobLocationCard from '../components/JobLocationCard';
 import { getJobHeaderBadge, isOpenForApplications } from '../services/jobStatusService';
 import {
   getWorkerJobAssignment,
@@ -962,6 +963,14 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
             </View>
           </View>
         )}
+
+        {/* Location (Phase 10) — city + address + optional exact worksite pin */}
+        <JobLocationCard
+          city={job.city}
+          address={job.address}
+          lat={job.lat}
+          lon={job.lon}
+        />
 
         {/* Practical info */}
         <View style={styles.section}>

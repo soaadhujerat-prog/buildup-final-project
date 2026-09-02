@@ -23,6 +23,8 @@ import DatePickerField from '../components/DatePickerField';
 import CityPickerField from '../components/CityPickerField';
 import ProfessionSelectorModal from '../components/ProfessionSelectorModal';
 import WorksiteImagesField from '../components/WorksiteImagesField';
+import WorksiteLocationField from '../components/WorksiteLocationField';
+import type { WorksiteCoords } from '../components/WorksiteMapPicker';
 import {
   formatRatePerUnit,
   isPastCalendarDate,
@@ -103,6 +105,13 @@ const PostJobForm: React.FC<FormProps> = ({
   );
   const [city, setCity] = useState(existingJob?.city ?? '');
   const [address, setAddress] = useState(existingJob?.address ?? '');
+  // Optional exact worksite pin (Phase 10). Seeded from the saved job so an
+  // unrelated edit re-sends the same coordinate and never resets it.
+  const [worksite, setWorksite] = useState<WorksiteCoords | null>(
+    existingJob?.lat != null && existingJob?.lon != null
+      ? { lat: existingJob.lat, lon: existingJob.lon }
+      : null
+  );
   const [startDate, setStartDate] = useState(initialStartDate);
   const [duration, setDuration] = useState(existingJob?.duration ?? '');
   const [hourlyRate, setHourlyRate] = useState(
@@ -143,6 +152,10 @@ const PostJobForm: React.FC<FormProps> = ({
       professions: existingJob ? jobProfessions(existingJob) : [],
       city: existingJob?.city ?? '',
       address: existingJob?.address ?? '',
+      worksite:
+        existingJob?.lat != null && existingJob?.lon != null
+          ? { lat: existingJob.lat, lon: existingJob.lon }
+          : null,
       startDate: initialStartDate,
       duration: existingJob?.duration ?? '',
       hourlyRate: existingJob?.hourlyRate ? String(existingJob.hourlyRate) : '',
@@ -164,6 +177,7 @@ const PostJobForm: React.FC<FormProps> = ({
       professions,
       city,
       address,
+      worksite,
       startDate,
       duration,
       hourlyRate,
@@ -219,7 +233,7 @@ const PostJobForm: React.FC<FormProps> = ({
     if (!city.trim()) next.city = 'יש לבחור עיר';
 
     const addrT = address.trim();
-    if (!addrT) next.address = 'כתובת מדויקת חובה';
+    if (!addrT) next.address = 'כתובת אתר העבודה חובה';
     else if (addrT.length < 3) next.address = 'הכתובת שהוזנה קצרה מדי';
 
     if (!startDate.trim()) {
@@ -295,6 +309,12 @@ const PostJobForm: React.FC<FormProps> = ({
       professionCategory: profCategory as ProfessionCategory,
       city,
       address: address.trim(),
+      // Exact worksite pin (Phase 10). Always sent as a pair: a value persists
+      // it, `null` clears any previous pin. update_job leaves lat/lon untouched
+      // only when NEITHER key is present — which never happens from here — so
+      // re-sending the seeded coordinate on an unrelated edit is a safe no-op.
+      lat: worksite ? worksite.lat : null,
+      lon: worksite ? worksite.lon : null,
       // Persist the canonical date-only shape regardless of what the picker
       // handed us; a value the user never touched normalises straight back to
       // the same "YYYY-MM-DD" already in the database.
@@ -461,14 +481,15 @@ const PostJobForm: React.FC<FormProps> = ({
 
         <Section title="מיקום וזמן" icon="location-outline">
           <CityPickerField
-            label="עיר"
+            label="עיר המשרה"
             value={city}
             onChange={setCity}
             placeholder="בחר עיר"
             error={errors.city}
+            modalTitle="בחירת עיר המשרה"
           />
           <Field
-            label="כתובת מדויקת"
+            label="כתובת אתר העבודה"
             value={address}
             onChange={setAddress}
             placeholder="למשל: רוטשילד 25, תל אביב"
@@ -487,6 +508,14 @@ const PostJobForm: React.FC<FormProps> = ({
             onChange={setDuration}
             placeholder="למשל: 3 שבועות"
             error={errors.duration}
+          />
+        </Section>
+
+        <Section title="מיקום מדויק של העבודה" icon="map-outline">
+          <WorksiteLocationField
+            city={city}
+            value={worksite}
+            onChange={setWorksite}
           />
         </Section>
 
@@ -582,6 +611,7 @@ const PostJobForm: React.FC<FormProps> = ({
               <PreviewChip icon="briefcase-outline" text={previewProfession} />
             )}
             {!!city && <PreviewChip icon="location-outline" text={city} />}
+            {!!worksite && <PreviewChip icon="map" text="מיקום מדויק במפה" />}
             {!!startDate && <PreviewChip icon="calendar-outline" text={startDate} />}
             {urgent && <PreviewChip icon="flash" text="דחוף" tone="danger" />}
           </View>

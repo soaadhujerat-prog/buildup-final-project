@@ -337,6 +337,12 @@ export interface JobPost {
   // Structured as discrete city/address fields on purpose (not one free-text
   // "location" string) so a future latitude/longitude/placeId (Google
   // Places) addition can slot in alongside them without reshaping the model.
+  /** Phase 10: the EXACT worksite coordinate the contractor pinned on a map.
+   *  `undefined` / `null` => no precise pin; Smart Match then falls back to
+   *  the job's city centroid (never the contractor's home). Persisted through
+   *  create_job / update_job (migration 045), which validate the range. */
+  lat?: number | null;
+  lon?: number | null;
   startDate: string;
   endDate?: string;
   duration: string;

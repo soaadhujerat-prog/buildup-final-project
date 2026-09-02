@@ -163,6 +163,8 @@ export function mapJobRow(
     professionCategory: categoryLabel as ProfessionCategory,
     city: row.city_name,
     address: row.address,
+    lat: row.lat ?? undefined,
+    lon: row.lon ?? undefined,
     startDate: row.start_date,
     endDate: row.end_date ?? undefined,
     duration: row.duration,
@@ -358,6 +360,8 @@ type JobWritable = Partial<
     | 'professions'
     | 'city'
     | 'address'
+    | 'lat'
+    | 'lon'
     | 'startDate'
     | 'endDate'
     | 'duration'
@@ -382,6 +386,12 @@ function buildPayload(src: JobWritable): Record<string, unknown> {
   put('professions', src.professions);
   put('city', src.city);
   put('address', src.address?.trim());
+  // Worksite coordinates (Phase 10). Sent as a pair whenever the key is
+  // present on the patch — `null` is a real value here (clears the pin); the
+  // RPC leaves lat/lon untouched only when NEITHER key is sent. create always
+  // sends both; edit sends both because PostJobForm seeds them from the job.
+  if ('lat' in src) d.lat = typeof src.lat === 'number' ? src.lat : null;
+  if ('lon' in src) d.lon = typeof src.lon === 'number' ? src.lon : null;
   if ('startDate' in src) d.startDate = toDbDate(src.startDate);
   if ('endDate' in src) d.endDate = toDbDate(src.endDate ?? undefined);
   put('duration', src.duration?.trim());

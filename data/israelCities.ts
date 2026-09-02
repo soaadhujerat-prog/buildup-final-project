@@ -231,6 +231,19 @@ export const findCityByNameOrAlias = (raw: string | null | undefined): IsraelCit
   );
 };
 
+/**
+ * Approximate centroid of a city by its canonical Hebrew name (or a known
+ * alias). Used to centre the worksite map when a contractor opens it after
+ * picking a city, and as the Smart Match distance fallback source when a job
+ * has no exact pin. Returns `undefined` for an unknown name.
+ */
+export const cityCoords = (
+  name: string | null | undefined
+): { lat: number; lon: number } | undefined => {
+  const c = findCityByNameOrAlias(name);
+  return c ? { lat: c.lat, lon: c.lon } : undefined;
+};
+
 const toRad = (deg: number) => (deg * Math.PI) / 180;
 
 const haversineKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {

@@ -10,12 +10,20 @@ import Sheet from './Sheet';
 // 'newest' produces, but silently (no chip). 'newest' is a real, honest
 // sort criterion (an objective fact about the data) — unlike "מומלץ", it
 // never implies a recommendation, so it's a normal, always-visible option.
-export type JobSortOption = 'default' | 'newest' | 'rateDesc' | 'rateAsc';
+export type JobSortOption =
+  | 'default'
+  | 'newest'
+  | 'rateDesc'
+  | 'rateAsc'
+  | 'nearest';
 
 export const JOB_SORT_OPTIONS: { value: JobSortOption; label: string }[] = [
   { value: 'newest', label: 'החדש ביותר' },
   { value: 'rateDesc', label: 'תעריף: מהגבוה לנמוך' },
   { value: 'rateAsc', label: 'תעריף: מהנמוך לגבוה' },
+  // Worker job search only — distance from the worker's residence city to the
+  // job worksite (Phase 10). Jobs with an unknown distance sort last.
+  { value: 'nearest', label: 'הקרובות אליי' },
 ];
 
 export const getJobSortLabel = (sort: JobSortOption): string | null =>
@@ -32,7 +40,13 @@ const sortableRate = (job: JobPost): number => job.dailyRate ?? job.hourlyRate ?
  *  the worker-search sort's same convention — 'newest' is a distinct,
  *  explicit choice the user can make, even though it's the same order the
  *  data mock happens to already ship in. */
-export const sortJobs = (jobs: JobPost[], sort: JobSortOption): JobPost[] => {
+export const sortJobs = (
+  jobs: JobPost[],
+  sort: JobSortOption,
+  /** Worker→job distance per job id (Phase 10). Required only for the
+   *  'nearest' sort; jobs with no entry (unknown distance) sort last. */
+  distanceByJobId?: Record<string, number | undefined>
+): JobPost[] => {
   if (sort === 'default') return jobs;
   const sorted = [...jobs];
   switch (sort) {
@@ -45,6 +59,11 @@ export const sortJobs = (jobs: JobPost[], sort: JobSortOption): JobPost[] => {
     case 'rateAsc':
       sorted.sort((a, b) => sortableRate(a) - sortableRate(b));
       break;
+    case 'nearest': {
+      const d = (id: string) => distanceByJobId?.[id] ?? Number.POSITIVE_INFINITY;
+      sorted.sort((a, b) => d(a.id) - d(b.id));
+      break;
+    }
   }
   return sorted;
 };

@@ -12,6 +12,7 @@ import JobFilterBottomSheet, {
   DEFAULT_JOB_FILTERS,
   filterJobs,
   isJobFiltersActive,
+  jobWithinRadius,
 } from '../components/JobFilterBottomSheet';
 import JobSortBottomSheet, {
   JobSortOption,
@@ -20,6 +21,8 @@ import JobSortBottomSheet, {
 } from '../components/JobSortBottomSheet';
 import { Contractor, Worker } from '../types';
 import { useRememberedScroll } from '../utils/scrollMemory';
+import { workerJobDistanceKm } from '../utils/distance';
+import { cityCoords } from '../data/israelCities';
 
 interface Props {
   onBack: () => void;
@@ -87,6 +90,17 @@ const AvailableJobsScreen: React.FC<Props> = ({
   // never job.status — those are two separate concepts (jobStatusService).
   const openJobs = useMemo(() => jobs.filter(isOpenForApplications), [jobs]);
 
+  // Phase 10 — deterministic worker→job distance over the REAL fetched jobs:
+  // worker residence CITY centroid → job worksite (exact pin, else job city
+  // centroid). No GPS, no address geocoding, no contractor location.
+  const workerCity = me?.city ?? '';
+  const hasWorkerLocation = useMemo(() => !!cityCoords(workerCity), [workerCity]);
+  const distanceByJobId = useMemo(() => {
+    const map: Record<string, number | undefined> = {};
+    for (const j of openJobs) map[j.id] = workerJobDistanceKm(j, workerCity);
+    return map;
+  }, [openJobs, workerCity]);
+
   const contractorLabelById = useMemo(() => {
     const map: Record<string, string> = {};
     openJobs.forEach((j) => {
@@ -108,9 +122,20 @@ const AvailableJobsScreen: React.FC<Props> = ({
         : filtered,
     [filtered, filters.favoriteContractorsOnly, favoriteContractorIds]
   );
+  // "מרחק מאזור המגורים" — viewer-relative, applied here (like favoriteContractorsOnly),
+  // never inside filterJobs. Unknown-distance jobs only survive "כל המרחקים".
+  const withinRadius = useMemo(
+    () =>
+      filters.radiusKm == null
+        ? filteredWithFavContractors
+        : filteredWithFavContractors.filter((j) =>
+            jobWithinRadius(j.id, filters.radiusKm, distanceByJobId)
+          ),
+    [filteredWithFavContractors, filters.radiusKm, distanceByJobId]
+  );
   const results = useMemo(
-    () => sortJobs(filteredWithFavContractors, sort),
-    [filteredWithFavContractors, sort]
+    () => sortJobs(withinRadius, sort, distanceByJobId),
+    [withinRadius, sort, distanceByJobId]
   );
 
   const filtersActive = isJobFiltersActive(filters);
@@ -151,6 +176,14 @@ const AvailableJobsScreen: React.FC<Props> = ({
         key: 'city',
         label: filters.city,
         onRemove: () => setFilters((f) => ({ ...f, city: '' })),
+      });
+    }
+
+    if (filters.radiusKm != null) {
+      list.push({
+        key: 'radius',
+        label: `עד ${filters.radiusKm} ק"מ`,
+        onRemove: () => setFilters((f) => ({ ...f, radiusKm: null })),
       });
     }
 
@@ -357,6 +390,7 @@ const AvailableJobsScreen: React.FC<Props> = ({
               job={item}
               contractorName={contractorLabelById[item.contractorId] || '—'}
               onPress={() => onOpenJobDetails(item.id)}
+              distanceKm={distanceByJobId[item.id]}
             />
           )}
         />
@@ -371,6 +405,8 @@ const AvailableJobsScreen: React.FC<Props> = ({
         onApply={setFilters}
         contractorLabelById={contractorLabelById}
         favoriteContractorIds={favoriteContractorIds}
+        distanceByJobId={distanceByJobId}
+        hasWorkerLocation={hasWorkerLocation}
       />
 
       <JobSortBottomSheet

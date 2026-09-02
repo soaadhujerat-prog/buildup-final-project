@@ -32,9 +32,23 @@ export interface JobFilters {
   // favoritesOnly in the worker-search FilterBottomSheet — it's applied by
   // the screen itself, never inside filterJobs below.
   favoriteContractorsOnly: boolean;
+  // "מרחק מאזור המגורים" (Phase 10) — max km from the worker's residence CITY
+  // centroid to the job worksite. `null` = כל המרחקים. Also viewer-relative,
+  // so applied by the screen / preview, never inside filterJobs.
+  radiusKm: number | null;
   minRate: string;
   maxRate: string;
 }
+
+/** Single-select radius options for "מרחק מאזור המגורים". Coarse values
+ *  on purpose — the worker endpoint is a city centroid, so the distance is
+ *  approximate. */
+export const JOB_RADIUS_OPTIONS: { value: number | null; label: string }[] = [
+  { value: 10, label: 'עד 10 ק"מ' },
+  { value: 20, label: 'עד 20 ק"מ' },
+  { value: 30, label: 'עד 30 ק"מ' },
+  { value: null, label: 'כל המרחקים' },
+];
 
 export const DEFAULT_JOB_FILTERS: JobFilters = {
   professionCategory: '',
@@ -42,6 +56,7 @@ export const DEFAULT_JOB_FILTERS: JobFilters = {
   city: '',
   urgentOnly: false,
   favoriteContractorsOnly: false,
+  radiusKm: null,
   minRate: '',
   maxRate: '',
 };
@@ -98,8 +113,22 @@ export const isJobFiltersActive = (f: JobFilters): boolean =>
   !!f.city ||
   f.urgentOnly ||
   f.favoriteContractorsOnly ||
+  f.radiusKm != null ||
   !!f.minRate.trim() ||
   !!f.maxRate.trim();
+
+/** Viewer-relative radius predicate — mirrors the screen's live filter.
+ *  A job with an unknown distance is EXCLUDED from any specific radius and
+ *  only shown under "כל המרחקים". Never fabricates 0. */
+export const jobWithinRadius = (
+  jobId: string,
+  radiusKm: number | null,
+  distanceByJobId: Record<string, number | undefined> | undefined
+): boolean => {
+  if (radiusKm == null) return true;
+  const d = distanceByJobId?.[jobId];
+  return d != null && d <= radiusKm;
+};
 
 interface Props {
   visible: boolean;
@@ -110,6 +139,12 @@ interface Props {
   onApply: (filters: JobFilters) => void;
   contractorLabelById: Record<string, string>;
   favoriteContractorIds: string[];
+  /** Worker→job distance per job id (Phase 10) — drives the
+   *  "מרחק מאזור המגורים" section + an accurate preview count. */
+  distanceByJobId?: Record<string, number | undefined>;
+  /** False when the worker has no resolvable residence city — the radius
+   *  section then explains why it is unavailable instead of filtering to 0. */
+  hasWorkerLocation?: boolean;
 }
 
 /** "סינון משרות" — the main filter bottom sheet for the worker job search.
@@ -124,6 +159,8 @@ const JobFilterBottomSheet: React.FC<Props> = ({
   onApply,
   contractorLabelById,
   favoriteContractorIds,
+  distanceByJobId,
+  hasWorkerLocation = true,
 }) => {
   const [draft, setDraft] = useState<JobFilters>(filters);
   const [professionModalVisible, setProfessionModalVisible] = useState(false);
@@ -133,10 +170,16 @@ const JobFilterBottomSheet: React.FC<Props> = ({
   }, [visible, filters]);
 
   const previewCount = (() => {
-    const base = filterJobs(jobs, searchQuery, draft, contractorLabelById);
-    return draft.favoriteContractorsOnly
-      ? base.filter((j) => favoriteContractorIds.includes(j.contractorId)).length
-      : base.length;
+    let base = filterJobs(jobs, searchQuery, draft, contractorLabelById);
+    if (draft.favoriteContractorsOnly) {
+      base = base.filter((j) => favoriteContractorIds.includes(j.contractorId));
+    }
+    if (draft.radiusKm != null) {
+      base = base.filter((j) =>
+        jobWithinRadius(j.id, draft.radiusKm, distanceByJobId)
+      );
+    }
+    return base.length;
   })();
 
   const handleApply = () => {
@@ -219,8 +262,44 @@ const JobFilterBottomSheet: React.FC<Props> = ({
                   value={draft.city}
                   onChange={(city) => setDraft((d) => ({ ...d, city }))}
                   placeholder="כל הערים"
+                  modalTitle="בחירת עיר"
                 />
               </View>
+
+              {/* מרחק מאזור המגורים (Phase 10) */}
+              <Text style={styles.sectionLabel}>מרחק מאזור המגורים</Text>
+              {hasWorkerLocation ? (
+                <>
+                  <Text style={styles.radiusHint}>
+                    מרחק אווירי מאזור המגורים שלך למיקום העבודה. משרות ללא נתוני
+                    מיקום מוצגות רק תחת "כל המרחקים".
+                  </Text>
+                  {JOB_RADIUS_OPTIONS.map((opt) => {
+                    const active = draft.radiusKm === opt.value;
+                    return (
+                      <TouchableOpacity
+                        key={String(opt.value)}
+                        style={styles.row}
+                        onPress={() =>
+                          setDraft((d) => ({ ...d, radiusKm: opt.value }))
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={active ? 'radio-button-on' : 'radio-button-off'}
+                          size={20}
+                          color={active ? Colors.primary : Colors.textMuted}
+                        />
+                        <Text style={styles.rowValue}>{opt.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </>
+              ) : (
+                <Text style={styles.radiusHint}>
+                  כדי לסנן לפי מרחק, בחר/י עיר מגורים בפרופיל.
+                </Text>
+              )}
 
               {/* דחיפות */}
               <Text style={styles.sectionLabel}>דחיפות</Text>
@@ -330,6 +409,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   sectionLabelNoMargin: { marginTop: 0, marginBottom: 0 },
+  radiusHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    lineHeight: 17,
+    marginBottom: Spacing.sm,
+  },
   sectionHeaderRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',

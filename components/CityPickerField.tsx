@@ -23,6 +23,10 @@ interface Props {
   onChange: (city: string) => void;
   placeholder?: string;
   error?: string;
+  /** Title of the picker modal. Defaults to the residence wording; the job
+   *  create/edit + job-search flows pass a job-city wording instead. The
+   *  underlying city list is identical either way. */
+  modalTitle?: string;
 }
 
 const normalize = (s: string) => s.trim().toLowerCase().replace(/[\s-]+/g, ' ');
@@ -38,6 +42,7 @@ const CityPickerField: React.FC<Props> = ({
   onChange,
   placeholder = 'בחר עיר מגורים',
   error,
+  modalTitle = 'בחירת עיר מגורים',
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -144,7 +149,7 @@ const CityPickerField: React.FC<Props> = ({
                 >
                   <Ionicons name="close" size={24} color={Colors.text} />
                 </TouchableOpacity>
-                <Text style={styles.sheetTitle}>בחירת עיר מגורים</Text>
+                <Text style={styles.sheetTitle}>{modalTitle}</Text>
                 <View style={styles.sheetHeaderSpacer} />
               </View>
 

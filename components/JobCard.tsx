@@ -11,6 +11,9 @@ interface JobCardProps {
   job: JobPost;
   contractorName: string;
   onPress: () => void;
+  /** Worker→job distance in km (Phase 10 "nearby jobs"). Undefined = unknown
+   *  location data → no distance row is shown (never a fake "0 ק"מ"). */
+  distanceKm?: number;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -28,7 +31,12 @@ const formatShortPostedDate = (iso: string): string => {
  *  whole-card tappable, with an explicit "צפה בפרטי המשרה" affordance so
  *  it's clear it leads somewhere. No AI/recommendation labels — Smart
  *  Match scoring is a future backend feature, not simulated here. */
-const JobCard: React.FC<JobCardProps> = ({ job, contractorName, onPress }) => {
+const JobCard: React.FC<JobCardProps> = ({
+  job,
+  contractorName,
+  onPress,
+  distanceKm,
+}) => {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.headRow}>
@@ -68,6 +76,14 @@ const JobCard: React.FC<JobCardProps> = ({ job, contractorName, onPress }) => {
               {job.duration}
             </Text>
           </View>
+          {distanceKm != null && (
+            <View style={styles.metaItem}>
+              <Ionicons name="navigate-outline" size={14} color={Colors.textSecondary} />
+              <Text style={styles.metaText} numberOfLines={1}>
+                {`כ-${Math.round(distanceKm)} ק"מ מאזור המגורים שלך`}
+              </Text>
+            </View>
+          )}
         </View>
         <View style={styles.rateBadge}>
           {!!job.hourlyRate && <RateLine amount={job.hourlyRate} unit="שעה" />}
