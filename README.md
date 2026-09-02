@@ -672,15 +672,23 @@ Migrations are applied to the Supabase project with the Supabase CLI (`supabase 
 
 ## 🧪 Testing & Quality
 
-The project's automated quality gate is **TypeScript static validation**:
+The project has two automated quality gates:
 
 ```bash
-npm run typecheck
+npm run typecheck   # TypeScript static validation (strict)
+npm test            # Vitest unit tests for selected pure domain helpers
 ```
 
 `tsconfig.json` extends the Expo base config with `strict: true`. The `supabase/functions/` directory (Deno runtime) is excluded from the app typecheck.
 
-Beyond the typecheck, the application has been exercised against the **real Supabase backend** through a manual regression pass covering:
+The `npm test` suite runs with **Vitest** and covers a small set of framework-free domain helpers only — no React Native components, no Supabase, no network:
+
+- **distance / location rules** (`utils/distance.ts`) — Haversine distance, exact-map-pin precedence over the job city centroid, the city-centroid fallback, `undefined` (never a fabricated `0`) for unresolved locations, the worker-residence-city → job-worksite rule, and residence-city-to-residence-city distance;
+- **password policy** (`utils/passwordPolicy.ts`) — the 8-character minimum, the letter and digit requirements, the absence of a symbol requirement, and the per-rule `passwordChecks()` reporting.
+
+This is a focused unit layer, not full coverage: there is no end-to-end, UI, or integration automation, and no ESLint configuration in this repository.
+
+Beyond these gates, the application has been exercised against the **real Supabase backend** through a manual regression pass covering:
 
 - role / session bootstrap and status gating (pending / rejected / blocked);
 - registration → admin approval → live profile materialization;
@@ -691,7 +699,7 @@ Beyond the typecheck, the application has been exercised against the **real Supa
 - maps / location and the distance model;
 - private Storage access via signed URLs.
 
-> There is no Jest / unit-test suite and no ESLint configuration in this repository; the statements above describe the checks that exist.
+> The unit tests use Vitest (not Jest). The manual regression above is a documented checklist run against the live backend, not an automated integration suite.
 
 ---
 
