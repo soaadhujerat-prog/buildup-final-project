@@ -163,7 +163,22 @@ const SmartMatchScreen: React.FC<Props> = ({
     const out: Row[] = [];
     results.forEach((result) => {
       const worker = workers.find((w) => w.id === result.workerId);
-      if (!worker) return;
+      if (!worker) {
+        // Defensive only. After the server-side eligibility fix (Smart Match
+        // candidates must be is_available=true, which the contractor can always
+        // resolve via the normal worker-discovery RLS path) every returned
+        // candidate should be joinable here. A miss now means a transient race
+        // (pool still hydrating / worker flipped availability mid-session) — skip
+        // the row rather than fabricate a Worker or render fallback data.
+        if (__DEV__) {
+          // opaque ids only — no PII
+          console.warn(
+            '[SmartMatch] unresolved candidate, skipping row:',
+            result.workerId
+          );
+        }
+        return;
+      }
       out.push({
         result,
         worker,

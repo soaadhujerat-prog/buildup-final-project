@@ -900,6 +900,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     workerIds = workerIds.filter((id) => wpBy.has(id));
     if (workerIds.length === 0) return json({ results: [] });
 
+    // ---- 6b. HARD candidate eligibility: available for NEW work ----
+    // Product rule (Final Backend Audit): a worker who has explicitly set
+    // is_available = false is NOT newly recommended by Smart Match — even if
+    // they have an old application / invitation / chat / completed assignment
+    // with this contractor. Historical relationships stay reachable through the
+    // normal app screens; they do not override is_available=false for a NEW
+    // job's recommendations. This also guarantees every returned candidate is
+    // resolvable by the contractor through the normal worker-discovery RLS path
+    // (can_view_profile -> "contractor viewing an is_available worker"), so the
+    // client can never silently drop a result it cannot join. Availability-FIT
+    // scoring (available_from vs job start) is unchanged and still runs below.
+    workerIds = workerIds.filter(
+      (id) =>
+        (wpBy.get(id) as { is_available?: unknown } | undefined)?.is_available ===
+        true
+    );
+    if (workerIds.length === 0) return json({ results: [] });
+
     for (const r of arr<Record<string, unknown>>(wpRows)) {
       if (r.city_id != null) cityIds.add(Number(r.city_id));
     }

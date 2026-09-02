@@ -759,8 +759,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [contractors, setContractors] = useState<Contractor[]>(
     isBackendEnabled() ? [] : MOCK_CONTRACTORS
   );
+  // Backend: the admin registrations queue is loaded from Supabase
+  // (listRegistrationsForAdmin, approved-admin only) and a just-submitted
+  // sign-up is prepended in memory for the pending/rejected status screens.
+  // Starts EMPTY so the admin dashboard never flashes mock pending counts /
+  // cards before the real queue resolves. Mock path keeps MOCK_REGISTRATIONS.
   const [registrations, setRegistrations] = useState<RegistrationRecord[]>(
-    MOCK_REGISTRATIONS
+    isBackendEnabled() ? [] : MOCK_REGISTRATIONS
   );
 
   // Phase 4A: on the real backend path jobs are loaded from Supabase (see
@@ -877,8 +882,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ? []
       : dedupeConversations(MOCK_CONVERSATIONS.map(normalizeConversation))
   );
-  const [notifications, setNotifications] =
-    useState<AppNotification[]>(MOCK_NOTIFICATIONS);
+  // Backend path starts empty and hydrates from Supabase (refreshNotifications
+  // below, RLS-scoped) + the realtime INSERT channel; the mock path keeps the
+  // seeded local notifications. Starting empty on the backend path keeps the
+  // bell / NotificationsScreen from briefly showing mock rows at cold start.
+  const [notifications, setNotifications] = useState<AppNotification[]>(
+    isBackendEnabled() ? [] : MOCK_NOTIFICATIONS
+  );
   // Backend path starts empty and hydrates from Supabase (refreshSupportTickets
   // below, RLS-scoped); the mock path keeps the seeded local tickets.
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() =>
@@ -933,7 +943,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // "review due" / "expiring soon" / "expired". Each notification carries a
   // stable dedupeKey (contractorId + kind + the relevant date), so the same
   // state never notifies twice — no setInterval, no fake cron, no email.
+  //
+  // BACKEND (USE_BACKEND=true): DISABLED. `notifications` is a read-through of
+  // real `public.notifications` rows and nothing server-side ever writes a
+  // `license_attention` row — injecting client-only, non-persistent ones here
+  // would pollute the real list (stale after relaunch, wrong unread count).
+  // The admin still gets the signal from the AdminDashboard "licence attention"
+  // card + AdminLicenseAttentionScreen, both derived live from the real
+  // contractor directory.
   useEffect(() => {
+    if (isBackendEnabled()) return;
     if (currentUser?.role !== 'admin') return;
     const adminId = currentUser.id;
     contractors.forEach((c) => {
