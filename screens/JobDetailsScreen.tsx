@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -1647,12 +1647,20 @@ const FieldRow: React.FC<{ label: string; value: string; ltr?: boolean }> = ({
 // ---------------------------------------------------------------------------
 // Gate: resolve the job first, then render the full detail view.
 //
-// Mock path: `getJobById` (a synchronous AppContext selector) is the only
-// source — behaviour is unchanged.
-// Backend path (Phase 4A): if the id is not in the currently loaded `jobs`
-// set (deep link / notification / route param to a job outside the loaded
-// pool), fall back to jobsService.getJobById() with real loading / not-found
-// / error states. No UI redesign — the not-found view is the original one.
+// `getJobById` (a synchronous AppContext selector) gives an INSTANT render from
+// whatever is already loaded — but the browse pool (`listOpenJobs` /
+// `listContractorJobs`) is deliberately lightweight and carries NO worksite
+// images (those need per-job signed URLs from the private `worksite-images`
+// bucket). So on every mount / jobId change we ALSO fetch the full detail via
+// jobsService.getJobById(), which resolves `worksiteImages` /
+// `worksiteImagePaths` + a fresh registration state, and prefer that result.
+//
+//   detail fetch OK            -> render the detailed job (has images)
+//   detail fetch fails/absent  -> keep showing the context copy if we have one
+//   neither context nor detail -> the original loading / not-found / error view
+//
+// The effect keys on `props.jobId` ONLY — never on `fromContext` identity — so a
+// context list refresh can't trigger a re-fetch loop.
 // ---------------------------------------------------------------------------
 const JobDetailsScreen: React.FC<Props> = (props) => {
   const insets = useSafeAreaInsets();
@@ -1664,13 +1672,18 @@ const JobDetailsScreen: React.FC<Props> = (props) => {
     'idle'
   );
 
+  // Always-current view of "is there a context copy to fall back to", read
+  // inside the async callbacks without making the effect depend on it.
+  const hasContextRef = useRef(!!fromContext);
+  hasContextRef.current = !!fromContext;
+
   useEffect(() => {
-    if (fromContext) {
-      setPhase('idle');
-      return;
-    }
     let alive = true;
-    setPhase('loading');
+    // New target job: drop any detail object fetched for a previous id, and
+    // only show the blocking loader when we have nothing to render yet.
+    setFetched(null);
+    setPhase(hasContextRef.current ? 'idle' : 'loading');
+
     jobsService
       .getJobById(props.jobId)
       .then((j) => {
@@ -1679,18 +1692,28 @@ const JobDetailsScreen: React.FC<Props> = (props) => {
           setFetched(j);
           setPhase('idle');
         } else {
-          setPhase('notfound');
+          // Not on the backend. Keep a context copy visible if we have one;
+          // otherwise show the original not-found view.
+          setPhase(hasContextRef.current ? 'idle' : 'notfound');
         }
       })
       .catch(() => {
-        if (alive) setPhase('error');
+        if (!alive) return;
+        // Detail fetch failed — do NOT blank the screen when a context copy
+        // exists; only surface the error when there is nothing else to show.
+        setPhase(hasContextRef.current ? 'idle' : 'error');
       });
+
     return () => {
       alive = false;
     };
-  }, [props.jobId, fromContext]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.jobId]);
 
-  const job = fromContext ?? fetched ?? undefined;
+  // The detailed fetch (signed worksite images + fresh registration state) is
+  // the preferred representation; the context list object is the instant-render
+  // fallback while it loads or if it fails.
+  const job = fetched ?? fromContext ?? undefined;
   if (job) return <JobDetailsContent {...props} job={job} />;
 
   return (
