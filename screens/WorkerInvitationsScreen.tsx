@@ -47,7 +47,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
   const {
     currentUser,
     invitations,
-    jobs,
+    getJobById,
     assignments,
     getUserById,
     respondToInvitation,
@@ -199,7 +199,10 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
             <View style={{ height: Spacing.sm }} />
           )}
           renderItem={({ item }) => {
-            const job = jobs.find((j) => j.id === item.jobId);
+            // getJobById also resolves a job that has since filled / closed
+            // (via AppContext's relatedJobs cache), so a historical accepted /
+            // declined invitation keeps its real title / city / rate.
+            const job = getJobById(item.jobId);
             const contractor = getUserById(item.contractorId) as
               | Contractor
               | undefined;

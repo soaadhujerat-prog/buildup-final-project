@@ -50,7 +50,7 @@ const MyApplicationsScreen: React.FC<Props> = ({
     currentUser,
     applications,
     applicationsLoading,
-    jobs,
+    getJobById,
     assignments,
     getUserById,
     withdrawApplication,
@@ -196,7 +196,10 @@ const MyApplicationsScreen: React.FC<Props> = ({
           }
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => {
-            const job = jobs.find((j) => j.id === item.jobId);
+            // getJobById also resolves jobs the worker is tied to that have
+            // since filled / closed (via AppContext's relatedJobs cache), so an
+            // accepted request keeps its title / company / city / rate.
+            const job = getJobById(item.jobId);
             const contractor = job
               ? (getUserById(job.contractorId) as Contractor | undefined)
               : undefined;

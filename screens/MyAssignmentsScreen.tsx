@@ -41,7 +41,10 @@ interface Props {
 }
 
 interface AssignmentRow {
-  job: JobPost;
+  // May be undefined for the brief window before a job that is no longer in the
+  // open pool (filled / closed) is hydrated into `relatedJobs`. The row is
+  // still shown — a real assignment must never disappear from the list/counts.
+  job: JobPost | undefined;
   assignment: Assignment;
 }
 
@@ -114,12 +117,12 @@ const MyAssignmentsScreen: React.FC<Props> = ({
   // invitation (see AppContext.respondToApplication/respondToInvitation).
   const assignments = useMemo<AssignmentRow[]>(() => {
     if (!me) return [];
+    // Never drop a row when its job cannot be resolved yet — a job that has
+    // filled up or closed for registration is fetched into `relatedJobs` and
+    // resolves within a tick; until then the card shows a neutral title. An
+    // active assignment must never silently vanish from the list or the counts.
     return getAssignmentsForWorker(me.id)
-      .map((assignment) => {
-        const job = getJobById(assignment.jobId);
-        return job ? { job, assignment } : null;
-      })
-      .filter((x): x is AssignmentRow => !!x)
+      .map((assignment) => ({ assignment, job: getJobById(assignment.jobId) }))
       .sort(
         (a, b) =>
           new Date(b.assignment.createdAt).getTime() -
@@ -210,9 +213,9 @@ const MyAssignmentsScreen: React.FC<Props> = ({
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           renderItem={({ item }) => {
-            const contractor = getUserById(item.job.contractorId) as
-              | Contractor
-              | undefined;
+            const contractor = item.job
+              ? (getUserById(item.job.contractorId) as Contractor | undefined)
+              : undefined;
             const sourceLabel =
               item.assignment.source === 'application'
                 ? 'בקשה שאושרה'
@@ -222,7 +225,7 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                 <TouchableOpacity
                   style={styles.rowMain}
                   activeOpacity={0.85}
-                  onPress={() => onOpenJobDetails(item.job.id)}
+                  onPress={() => item.job && onOpenJobDetails(item.job.id)}
                 >
                   <View style={styles.iconCircle}>
                     <Ionicons
@@ -239,14 +242,16 @@ const MyAssignmentsScreen: React.FC<Props> = ({
                         small
                       />
                       <Text style={styles.title} numberOfLines={1}>
-                        {item.job.title}
+                        {item.job?.title ?? 'משרה'}
                       </Text>
                       {contractor?.status === 'blocked' && (
                         <StatusBadge label="חשבון הקבלן חסום" tone="danger" small />
                       )}
                     </View>
                     <Text style={styles.sub} numberOfLines={1}>
-                      {jobProfessions(item.job).join(', ')} · {item.job.city}
+                      {item.job
+                        ? `${jobProfessions(item.job).join(', ')} · ${item.job.city}`
+                        : 'פרטי המשרה נטענים…'}
                     </Text>
                     <View style={styles.metaRow}>
                       {contractor && (

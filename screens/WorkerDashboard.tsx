@@ -60,6 +60,7 @@ const WorkerDashboard: React.FC<Props> = ({
   const {
     currentUser,
     jobs,
+    getJobById,
     applications,
     invitations,
     assignments,
@@ -343,7 +344,9 @@ const WorkerDashboard: React.FC<Props> = ({
           <EmptyRow text="עדיין לא קיבלת הזמנות מקבלנים" />
         ) : (
           recentInvitations.map((inv) => {
-            const job = jobs.find((j) => j.id === inv.jobId);
+            // getJobById also resolves a since-filled / closed job (relatedJobs
+            // cache) so a recent invitation row keeps its real title.
+            const job = getJobById(inv.jobId);
             return (
               <TouchableOpacity
                 key={inv.id}

@@ -704,6 +704,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // load failure reads as a failure and not as an empty result.
   const [jobsError, setJobsError] = useState<boolean>(false);
 
+  // Jobs referenced by the signed-in worker / contractor through their OWN
+  // applications / invitations / assignments but which are NOT in the open
+  // `jobs` pool — e.g. a job that filled up or was closed for registration
+  // after the user was already involved with it. Kept in a SEPARATE array so a
+  // full/closed job never leaks back into the browse / search / Smart Match /
+  // "recommended" surfaces (all of which read `jobs`, the open-for-applications
+  // pool). Only the id-based selectors (getJobById / getStaffingProgress /
+  // isJobFullyStaffed) fall through to it, so a real assignment / application /
+  // invitation always resolves its job title / company / city / rate on the
+  // user's own related & history screens. Hydrated lazily by id via
+  // jobsService.getJobById (RLS lets a referenced worker read the row).
+  const [relatedJobs, setRelatedJobs] = useState<JobPost[]>([]);
+
   // APPLICATIONS / invitations / assignments load from Supabase (see the
   // refresh* effects below), so they start empty — no stale staffing row can
   // ever attach itself to a real job UUID.
@@ -1361,6 +1374,78 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser?.id, currentUser?.role, refreshInvitations]);
 
   // ---------------------------------------------------------------------
+  // Related jobs — resolve the jobs behind the user's own staffing rows
+  // ---------------------------------------------------------------------
+  // A worker's `jobs` array is ONLY the open browse pool (listOpenJobs), so a
+  // job they applied to / were invited to / are staffed on that has since
+  // filled or closed is absent from it — getJobById would return undefined and
+  // their My Requests / My Assignments / Invitations rows would lose the job
+  // title / company / city / rate. Here we fetch exactly those missing jobs by
+  // id (RLS still lets a referenced worker read the row) and keep them in the
+  // side `relatedJobs` array — never merged into `jobs`, so nothing here can
+  // re-surface a full/closed job in discovery. Each id is attempted once per
+  // session (per identity); a failed fetch is not retried in a loop.
+  const relatedJobAttemptsRef = useRef<{ uid: string | null; ids: Set<string> }>(
+    { uid: null, ids: new Set() }
+  );
+
+  const resolveRelatedJobs = useCallback(async () => {
+    if (!currentUser || currentUser.role === 'admin') return; // admin loads all jobs
+
+    const st = relatedJobAttemptsRef.current;
+    if (st.uid !== currentUser.id) {
+      relatedJobAttemptsRef.current = { uid: currentUser.id, ids: new Set() };
+      if (st.uid !== null) setRelatedJobs([]); // drop the previous user's set
+    }
+    const attempts = relatedJobAttemptsRef.current;
+
+    const referenced = new Set<string>();
+    applications.forEach((a) => a.jobId && referenced.add(a.jobId));
+    invitations.forEach((i) => i.jobId && referenced.add(i.jobId));
+    assignments.forEach((a) => a.jobId && referenced.add(a.jobId));
+
+    const inPool = new Set(jobs.map((j) => j.id));
+    const missing = [...referenced].filter(
+      (id) => !inPool.has(id) && !attempts.ids.has(id)
+    );
+    if (missing.length === 0) return;
+
+    missing.forEach((id) => attempts.ids.add(id)); // mark attempted up-front
+    try {
+      const fetched = (
+        await Promise.all(
+          missing.map((id) => jobsService.getJobById(id).catch(() => null))
+        )
+      ).filter((j): j is JobPost => !!j);
+      if (fetched.length === 0) return;
+      setRelatedJobs((prev) => {
+        const byId = new Map(prev.map((j) => [j.id, j]));
+        fetched.forEach((j) => byId.set(j.id, j));
+        return Array.from(byId.values());
+      });
+    } catch {
+      // keep whatever resolved; unresolved ids show the neutral fallback and
+      // are retried only on the next identity change (not in a loop).
+    }
+  }, [
+    currentUser?.id,
+    currentUser?.role,
+    applications,
+    invitations,
+    assignments,
+    jobs,
+  ]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setRelatedJobs([]);
+      relatedJobAttemptsRef.current = { uid: null, ids: new Set() };
+      return;
+    }
+    void resolveRelatedJobs();
+  }, [currentUser?.id, resolveRelatedJobs]);
+
+  // ---------------------------------------------------------------------
   // Favorites — real backend READ layer (viewer-specific bookmark lists)
   // ---------------------------------------------------------------------
   // Two independent relationships, hydrated into the SAME arrays the selectors
@@ -1473,6 +1558,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const wantContractors = new Set<string>();
     jobs.forEach((j) => j.contractorId && wantContractors.add(j.contractorId));
+    relatedJobs.forEach(
+      (j) => j.contractorId && wantContractors.add(j.contractorId)
+    );
     invitations.forEach(
       (i) => i.contractorId && wantContractors.add(i.contractorId)
     );
@@ -1555,6 +1643,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     invitations,
     assignments,
     jobs,
+    relatedJobs,
     conversations,
   ]);
 
@@ -2437,9 +2526,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     [workers, contractors, admins]
   );
 
+  // Resolves from the open pool first, then the side `relatedJobs` cache — so a
+  // job the user is genuinely tied to (applied / invited / staffed) still
+  // resolves after it fills up or closes for registration, without that job
+  // ever entering the browse pool.
   const getJobById = useCallback<AppState['getJobById']>(
-    (id) => jobs.find((j) => j.id === id),
-    [jobs]
+    (id) =>
+      jobs.find((j) => j.id === id) ?? relatedJobs.find((j) => j.id === id),
+    [jobs, relatedJobs]
   );
 
   const getApplicationsForJob = useCallback<AppState['getApplicationsForJob']>(
@@ -2487,19 +2581,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const getStaffingProgress = useCallback<AppState['getStaffingProgress']>(
     (jobId) => {
-      const job = jobs.find((j) => j.id === jobId);
+      const job =
+        jobs.find((j) => j.id === jobId) ??
+        relatedJobs.find((j) => j.id === jobId);
       return computeStaffingProgress(assignments, jobId, job?.workersNeeded ?? 0);
     },
-    [assignments, jobs]
+    [assignments, jobs, relatedJobs]
   );
 
   const isJobFullyStaffed = useCallback<AppState['isJobFullyStaffed']>(
     (jobId) => {
-      const job = jobs.find((j) => j.id === jobId);
+      const job =
+        jobs.find((j) => j.id === jobId) ??
+        relatedJobs.find((j) => j.id === jobId);
       if (!job) return false;
       return computeIsJobFullyStaffed(assignments, jobId, job.workersNeeded);
     },
-    [assignments, jobs]
+    [assignments, jobs, relatedJobs]
   );
 
   const getNotificationsForUser = useCallback<
