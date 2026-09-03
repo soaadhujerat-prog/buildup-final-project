@@ -200,7 +200,6 @@ const AppNavigator: React.FC = () => {
     getOrCreateConversation,
     getJobById,
     getUserById,
-    applications,
     conversations,
     refreshConversations,
     supportTickets,
@@ -484,21 +483,20 @@ const AppNavigator: React.FC = () => {
 
         // A decision landed on the worker's application → worker opens THAT
         // job, where their application row shows the new status.
-        // relatedId = application id.
+        // relatedId = the JOB id (server payload: 032_staffing_notifications
+        // passes `v_job.id::text`, NOT an application id — the old
+        // `applications.find(id === relatedId)` here always missed and fell to
+        // the tab). `getJobById` resolves it (open pool or the hydrated
+        // `relatedJobs` side-cache, which the worker's own application fills).
         case 'application_accepted':
-        case 'application_rejected':
-        case 'job_accepted':
-        case 'job_rejected': {
+        case 'application_rejected': {
           if (role !== 'worker') break;
-          const app = relatedId
-            ? applications.find((a) => a.id === relatedId)
-            : undefined;
-          const job = app ? getJobById(app.jobId) : undefined;
+          const job = relatedId ? getJobById(relatedId) : undefined;
           if (job) {
             push({ name: 'WorkerJobDetails', jobId: job.id });
           } else {
-            // Job/application no longer around — the applications list is a
-            // real screen, so land there rather than nag.
+            // Job no longer resolvable — the applications list is a real
+            // screen, so land there rather than nag.
             setWorkerTab('my-applications');
             resetTo(null);
           }
@@ -651,7 +649,6 @@ const AppNavigator: React.FC = () => {
       currentUser,
       push,
       resetTo,
-      applications,
       conversations,
       supportTickets,
       registrations,

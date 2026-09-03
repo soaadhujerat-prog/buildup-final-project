@@ -43,6 +43,7 @@ import {
   RegistrationError,
   revealRegistrationIdNumber,
 } from '../services/registrationService';
+import { getSignedUrl, SIGNED_URL_TTL } from '../services/storageService';
 
 /** Generic, non-leaking message for a failed admin registration action. */
 function regActionErrMsg(e: unknown): string {
@@ -90,6 +91,11 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   // The applicant's ID number is not in `reg.data` (HMAC + ciphertext only).
   // Fetch the decrypted value via the admin-only `admin-reveal-id` path.
   const [revealedId, setRevealedId] = useState<string | null>(null);
+  // The ID-document URL in `reg.data.idDocument.uri` was signed when the
+  // registrations queue was loaded into context — after the TTL it stops
+  // working. Re-sign from the stable `storagePath` on mount so the thumbnail /
+  // preview stay valid in a long admin session (tap-to-open re-signs AGAIN).
+  const [freshIdDocUrl, setFreshIdDocUrl] = useState<string | null>(null);
 
   const dataIdNumber = reg?.data.idNumber;
   useEffect(() => {
@@ -107,6 +113,26 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
     };
   }, [registrationId, dataIdNumber]);
 
+  const idDocStoragePath = reg?.data.idDocument?.storagePath;
+  useEffect(() => {
+    if (!idDocStoragePath) {
+      setFreshIdDocUrl(null);
+      return;
+    }
+    let alive = true;
+    setFreshIdDocUrl(null);
+    getSignedUrl('id-documents', idDocStoragePath, SIGNED_URL_TTL.document)
+      .then((url) => {
+        if (alive) setFreshIdDocUrl(url);
+      })
+      .catch(() => {
+        if (alive) setFreshIdDocUrl(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [idDocStoragePath]);
+
   if (!reg) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
@@ -122,6 +148,10 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
   const data = reg.data;
   const wd = isWorker ? (data as WorkerRegistrationData) : null;
   const cd = !isWorker ? (data as ContractorRegistrationData) : null;
+
+  // Prefer the freshly re-signed ID-document URL; fall back to the (possibly
+  // stale) context URL only until the re-sign resolves.
+  const idDocUri = freshIdDocUrl ?? data.idDocument?.uri;
 
   // The live user this registration created (only once approved). This is a
   // real foreign-key lookup — never a duplicated user object.
@@ -179,8 +209,22 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
     );
   };
 
-  const openIdDocumentFile = async (uri: string) => {
+  const openIdDocumentFile = async (doc: {
+    uri: string;
+    storagePath?: string;
+  }) => {
     try {
+      // Re-sign immediately before opening so we never hand the OS an expired
+      // token; fall back to the URL we already have if the re-sign fails.
+      let uri = doc.uri;
+      if (doc.storagePath) {
+        const fresh = await getSignedUrl(
+          'id-documents',
+          doc.storagePath,
+          SIGNED_URL_TTL.document
+        );
+        if (fresh) uri = fresh;
+      }
       const canOpen = await Linking.canOpenURL(uri);
       if (!canOpen) throw new Error('cannot open');
       await Linking.openURL(uri);
@@ -364,7 +408,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
               activeOpacity={0.85}
             >
               <Image
-                source={{ uri: data.idDocument.uri }}
+                source={{ uri: idDocUri }}
                 style={styles.idPhotoImage}
                 resizeMode="cover"
               />
@@ -373,7 +417,12 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
           ) : (
             <TouchableOpacity
               style={styles.idFileCard}
-              onPress={() => openIdDocumentFile(data.idDocument!.uri)}
+              onPress={() =>
+                openIdDocumentFile({
+                  uri: idDocUri ?? data.idDocument!.uri,
+                  storagePath: data.idDocument!.storagePath,
+                })
+              }
               activeOpacity={0.85}
             >
               <View style={styles.idFileIconWrap}>
@@ -707,7 +756,7 @@ const RegistrationDetailsScreen: React.FC<Props> = ({
               <Ionicons name="close" size={28} color={Colors.white} />
             </TouchableOpacity>
             <Image
-              source={{ uri: data.idDocument.uri }}
+              source={{ uri: idDocUri }}
               style={styles.imageViewerImage}
               resizeMode="contain"
             />

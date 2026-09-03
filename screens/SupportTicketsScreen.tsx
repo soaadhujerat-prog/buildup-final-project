@@ -41,8 +41,13 @@ const SupportTicketsScreen: React.FC<Props> = ({
   ticketsOverride,
 }) => {
   const insets = useSafeAreaInsets();
-  const { currentUser, supportTickets, supportTicketsLoading, getUserById } =
-    useApp();
+  const {
+    currentUser,
+    supportTickets,
+    supportTicketsLoading,
+    getUserById,
+    registrations,
+  } = useApp();
 
   const overridden = ticketsOverride !== undefined;
   const isAdmin = !overridden && currentUser?.role === 'admin';
@@ -152,7 +157,13 @@ const SupportTicketsScreen: React.FC<Props> = ({
               ticket={item}
               isAdmin={isAdmin}
               userName={
-                isAdmin ? getUserById(item.userId)?.fullName ?? '—' : ''
+                !isAdmin
+                  ? ''
+                  : item.source === 'registration'
+                  ? registrations.find(
+                      (r) => r.id === (item.registrationId ?? item.userId)
+                    )?.data.fullName ?? '—'
+                  : getUserById(item.userId)?.fullName ?? '—'
               }
               onPress={() => onOpenTicket(item.id)}
             />

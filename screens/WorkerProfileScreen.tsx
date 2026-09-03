@@ -20,6 +20,7 @@ import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import StatusBadge from '../components/StatusBadge';
 import WorkerAvatar from '../components/WorkerAvatar';
+import AttachedDocument from '../components/AttachedDocument';
 import SharedWorkHistorySheet from '../components/SharedWorkHistorySheet';
 import { callPhone } from '../utils/contact';
 import {
@@ -316,25 +317,23 @@ const WorkerProfileScreen: React.FC<Props> = ({
         {normalizeCertifications(worker.certifications).length > 0 && (
           <Section title="הסמכות ותעודות">
             {normalizeCertifications(worker.certifications).map((c, i) => (
-              <View key={c.id ?? `${c.name}-${i}`} style={styles.certRow}>
-                {c.document ? (
-                  <View style={styles.certDocTag}>
-                    <Ionicons
-                      name="document-attach-outline"
-                      size={12}
-                      color={Colors.primary}
+              <View key={c.id ?? `${c.name}-${i}`} style={styles.certItem}>
+                <View style={styles.certRow}>
+                  <Text style={styles.certText}>{c.name}</Text>
+                  <Ionicons
+                    name="ribbon-outline"
+                    size={18}
+                    color={Colors.warning}
+                  />
+                </View>
+                {c.document && (
+                  <View style={styles.certDoc}>
+                    <AttachedDocument
+                      doc={c.document}
+                      bucket="worker-certificates"
                     />
-                    <Text style={styles.certDocText}>מסמך מצורף</Text>
                   </View>
-                ) : (
-                  <View />
                 )}
-                <Text style={styles.certText}>{c.name}</Text>
-                <Ionicons
-                  name="ribbon-outline"
-                  size={18}
-                  color={Colors.warning}
-                />
               </View>
             ))}
           </Section>
@@ -782,6 +781,9 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
 
+  certItem: {
+    marginBottom: Spacing.sm,
+  },
   certRow: {
     flexDirection: 'row-reverse',
     alignItems: 'center',
@@ -789,6 +791,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEF3C7',
     padding: 10,
     borderRadius: Radius.sm,
+  },
+  certDoc: {
+    marginTop: 6,
+    paddingHorizontal: 2,
   },
   certText: {
     fontSize: FontSize.sm,
