@@ -28,6 +28,7 @@ import JobLocationCard from '../components/JobLocationCard';
 import { getJobHeaderBadge, isOpenForApplications } from '../services/jobStatusService';
 import {
   getWorkerJobAssignment,
+  getWorkerJobEngagement,
   hasActiveAssignment,
   getWorkerContractorRelationship,
 } from '../services/assignmentService';
@@ -183,6 +184,14 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
   const myAssignmentCancelled =
     myActiveApplication?.status === 'accepted' &&
     myAssignment?.status === 'cancelled';
+
+  // The worker's blocking relationship to THIS job that the application-status
+  // branches miss — chiefly an accepted invitation (creates an assignment, no
+  // application row). Drives the "already engaged" states in renderWorkerAction.
+  const myEngagement =
+    isWorker && currentUser
+      ? getWorkerJobEngagement(assignments, invitations, job.id, currentUser.id)
+      : null;
 
   const jobOpen = isOpenForApplications(job);
   const staffing = getStaffingProgress(job.id);
@@ -543,6 +552,58 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
             </Text>
           )}
           {renderContractorResponse(myLatestApplication)}
+        </View>
+      );
+    }
+
+    // Already engaged with this job — reached only when there is NO live
+    // application row above, so this is the invitation path the old code
+    // missed (accepted invitation → assignment, or a still-open invitation).
+    // Never offer a fresh "הגש מועמדות" in these states.
+    if (myEngagement === 'active_assignment') {
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, { backgroundColor: '#DCFCE7' }]}>
+            <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
+            <Text style={styles.appliedText}>שובצת למשרה זו</Text>
+          </View>
+          {myAssignment?.createdAt && (
+            <Text style={styles.workerStatusTime}>
+              שובצת ב־{formatDateTime(myAssignment.createdAt)}
+            </Text>
+          )}
+          <Text style={styles.workerStatusTime}>
+            השיבוץ מופיע במסך "השיבוצים שלי".
+          </Text>
+        </View>
+      );
+    }
+
+    if (myEngagement === 'completed_assignment') {
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, styles.appliedBox]}>
+            <Ionicons
+              name="checkmark-done-circle-outline"
+              size={20}
+              color={Colors.textSecondary}
+            />
+            <Text style={styles.appliedText}>סיימת לעבוד במשרה זו</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (myEngagement === 'open_invitation') {
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, { backgroundColor: '#FEF3C7' }]}>
+            <Ionicons name="mail-outline" size={20} color={Colors.warning} />
+            <Text style={styles.appliedText}>יש לך הזמנה למשרה זו</Text>
+          </View>
+          <Text style={styles.workerStatusTime}>
+            עבור/י למסך "הזמנות מקבלנים" כדי להשיב להזמנה.
+          </Text>
         </View>
       );
     }

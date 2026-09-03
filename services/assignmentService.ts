@@ -22,6 +22,55 @@ export const hasActiveAssignment = (
     (a) => a.jobId === jobId && a.workerId === workerId && a.status === 'active'
   );
 
+/**
+ * The worker's own BLOCKING relationship to a job for the "הגש מועמדות"
+ * (fresh application) flow — the part that the `applications`-row rules miss.
+ * An accepted INVITATION creates an Assignment but NO application row, so a
+ * worker can be fully staffed on a job while `can_worker_apply` / the
+ * application-status branches still see "nothing" and offer "apply".
+ *
+ *   • 'active_assignment'    — staffed on this job right now (any source).
+ *   • 'completed_assignment' — already finished this job (slot still theirs).
+ *   • 'open_invitation'      — a pending/accepted invitation exists and the
+ *                              worker has NO assignment history here yet
+ *                              (respond to the invitation, don't re-apply).
+ *   • null                   — no blocker from assignments/invitations; the
+ *                              separate application-row rules still apply
+ *                              (withdrawn → re-apply, cancelled placement →
+ *                              existing reapply/explanation flow, etc.).
+ *
+ * Pure; capacity / global open state are NOT considered here.
+ */
+export type WorkerJobEngagement =
+  | 'active_assignment'
+  | 'completed_assignment'
+  | 'open_invitation'
+  | null;
+
+export const getWorkerJobEngagement = (
+  assignments: Assignment[],
+  invitations: Invitation[],
+  jobId: string,
+  workerId: string
+): WorkerJobEngagement => {
+  const effective = getWorkerJobAssignment(assignments, jobId, workerId);
+  if (effective?.status === 'active') return 'active_assignment';
+  if (effective?.status === 'completed') return 'completed_assignment';
+  // A cancelled placement (effective === 'cancelled', or any historical row)
+  // is left to the existing application-status flow — never re-blocked here.
+  const hasAssignmentHistory = assignments.some(
+    (a) => a.jobId === jobId && a.workerId === workerId
+  );
+  if (hasAssignmentHistory) return null;
+  const hasLiveInvitation = invitations.some(
+    (i) =>
+      i.jobId === jobId &&
+      i.workerId === workerId &&
+      (i.status === 'pending' || i.status === 'accepted')
+  );
+  return hasLiveInvitation ? 'open_invitation' : null;
+};
+
 export const buildAssignmentFromApplication = (
   application: Application,
   job: JobPost

@@ -52,6 +52,7 @@ import {
 
 import {
   getWorkerJobAssignment,
+  getWorkerJobEngagement,
   isJobFullyStaffed as computeIsJobFullyStaffed,
   getStaffingProgress as computeStaffingProgress,
   StaffingProgress,
@@ -1847,6 +1848,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       //     reactivation in place (reapply_after_cancellation RPC — 034/048).
       //   • otherwise -> a real INSERT.
       const uid = currentUser?.id;
+
+      // Defense-in-depth for the invitation path: an accepted INVITATION
+      // creates an Assignment but no application row, so a worker can already
+      // be staffed on (or hold a live invitation to) this job while every
+      // application-row check below sees nothing. `can_worker_apply` has the
+      // same blind spot server-side, so guard it here before any INSERT.
+      const engagement = uid
+        ? getWorkerJobEngagement(assignments, invitations, jobId, uid)
+        : null;
+      if (engagement) {
+        throw new applicationsService.ApplicationError('ineligible');
+      }
+
       const mineForJob = uid
         ? applications.filter((a) => a.jobId === jobId && a.workerId === uid)
         : [];
@@ -1873,7 +1887,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       ]);
       return created;
     },
-    [applications, assignments, currentUser?.id]
+    [applications, assignments, invitations, currentUser?.id]
   );
 
   const withdrawApplication = useCallback<AppState['withdrawApplication']>(

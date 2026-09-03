@@ -28,6 +28,7 @@ import {
   jobProfessions,
 } from '../utils/normalize';
 import { isOpenForApplications } from '../services/jobStatusService';
+import { hasActiveAssignment } from '../services/assignmentService';
 
 interface Props {
   onOpenProProfile: () => void;
@@ -120,6 +121,8 @@ const WorkerDashboard: React.FC<Props> = ({
     if (!me) return [];
     return jobs
       .filter(isOpenForApplications)
+      // Not something this worker can apply to — they are already on it.
+      .filter((j) => !hasActiveAssignment(assignments, j.id, me.id))
       .filter((j) => {
         const sameCategory = j.professionCategory === me.professionCategory;
         const sameProfession = jobProfessions(j).some((p) =>
@@ -131,7 +134,7 @@ const WorkerDashboard: React.FC<Props> = ({
         return sameCategory || sameProfession || inMyAreas;
       })
       .slice(0, 3);
-  }, [me, jobs]);
+  }, [me, jobs, assignments]);
 
   const myUnreadNotifications = useMemo(
     () =>

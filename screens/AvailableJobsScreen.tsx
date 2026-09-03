@@ -7,6 +7,7 @@ import { Colors, Spacing, Radius, FontSize } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import JobCard from '../components/JobCard';
 import { isOpenForApplications } from '../services/jobStatusService';
+import { hasActiveAssignment } from '../services/assignmentService';
 import JobFilterBottomSheet, {
   JobFilters,
   DEFAULT_JOB_FILTERS,
@@ -46,6 +47,7 @@ const AvailableJobsScreen: React.FC<Props> = ({
   const {
     currentUser,
     jobs,
+    assignments,
     jobsLoading,
     jobsError,
     refreshJobs,
@@ -88,7 +90,19 @@ const AvailableJobsScreen: React.FC<Props> = ({
 
   // Base pool = registration status source of truth (acceptingApplications),
   // never job.status — those are two separate concepts (jobStatusService).
-  const openJobs = useMemo(() => jobs.filter(isOpenForApplications), [jobs]);
+  // Also drop any job THIS worker is already actively assigned to — it is not
+  // something they can apply to again (global availability for other workers
+  // is untouched: this is a viewer-relative exclusion, like the favourite
+  // filter, not a change to the job's open state).
+  const openJobs = useMemo(
+    () =>
+      jobs.filter(
+        (j) =>
+          isOpenForApplications(j) &&
+          !(workerId && hasActiveAssignment(assignments, j.id, workerId))
+      ),
+    [jobs, assignments, workerId]
+  );
 
   // Phase 10 — deterministic worker→job distance over the REAL fetched jobs:
   // worker residence CITY centroid → job worksite (exact pin, else job city
