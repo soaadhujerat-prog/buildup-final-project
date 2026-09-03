@@ -785,6 +785,12 @@ export interface SupportTicket {
   closedAt?: string;
   /** Identifier of the admin who closed the conversation. */
   closedBy?: string;
+  /** Which backend this ticket lives in. `'user'` (default / absent) = the
+   *  normal `support_tickets` table (worker / contractor / blocked user).
+   *  `'registration'` = the rejected-registration support island (migration
+   *  052); `registrationId` is then the owning registration. */
+  source?: 'user' | 'registration';
+  registrationId?: string;
 }
 
 // ---------------------------------------------------------------------------

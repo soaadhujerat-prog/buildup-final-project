@@ -158,6 +158,16 @@ type BlockedView =
   | { name: 'ticket'; ticketId: string }
   | { name: 'newTicket' };
 
+// A password-verified user whose registration was REJECTED runs a CONFINED
+// session (no profile, no currentUser). This state machine is the ONLY
+// navigation available to them: the rejected screen itself, plus the shared
+// support screens wired to the registration-support island (migration 052).
+type RejectedView =
+  | { name: 'root' }
+  | { name: 'tickets' }
+  | { name: 'ticket'; ticketId: string }
+  | { name: 'newTicket' };
+
 // Tabs per role — tab is just a string label tracking which dashboard pane shows
 type WorkerTab =
   | 'dashboard'
@@ -195,6 +205,10 @@ const AppNavigator: React.FC = () => {
     refreshConversations,
     supportTickets,
     registrations,
+    rejectedRegistration,
+    registrationSupportTickets,
+    openRegistrationSupportTicket,
+    replyToRegistrationSupportTicket,
   } = useApp();
 
   // History stack for the post-login drilldown area — the last entry is the
@@ -221,6 +235,9 @@ const AppNavigator: React.FC = () => {
   // whenever the session user changes, so a stale ticket id never carries
   // over into a different person's blocked view.
   const [blockedView, setBlockedView] = useState<BlockedView>({ name: 'root' });
+  // Sub-navigation for a confined rejected-registration session (see
+  // RejectedView). Reset whenever the rejected registration changes.
+  const [rejectedView, setRejectedView] = useState<RejectedView>({ name: 'root' });
 
   // ---- Route-stack helpers ----------------------------------------------------
 
@@ -284,6 +301,13 @@ const AppNavigator: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
+  // Reset the confined rejected-registration sub-view whenever the rejected
+  // registration changes (login of a different person, or logout), so a stale
+  // ticket id never carries over.
+  useEffect(() => {
+    setRejectedView({ name: 'root' });
+  }, [rejectedRegistration?.id]);
+
   // Initial route = Splash (kicks off the app)
   useEffect(() => {
     if (route === null && home === null) {
@@ -311,6 +335,15 @@ const AppNavigator: React.FC = () => {
         );
         return true;
       }
+      // Confined rejected-registration session: walk the RejectedView machine
+      // back one step; only fall through to the OS at its root.
+      if (rejectedRegistration) {
+        if (rejectedView.name === 'root') return false;
+        setRejectedView((prev) =>
+          prev.name === 'ticket' ? { name: 'tickets' } : { name: 'root' }
+        );
+        return true;
+      }
       if (home !== null && routeStack.length > 0) {
         setRouteStack((prev) => prev.slice(0, -1));
         return true;
@@ -318,7 +351,14 @@ const AppNavigator: React.FC = () => {
       return false;
     });
     return () => sub.remove();
-  }, [home, routeStack.length, currentUser, blockedView.name]);
+  }, [
+    home,
+    routeStack.length,
+    currentUser,
+    blockedView.name,
+    rejectedRegistration,
+    rejectedView.name,
+  ]);
 
   // ---- Helpers ----------------------------------------------------------------
 
@@ -392,12 +432,10 @@ const AppNavigator: React.FC = () => {
         name: 'RegistrationPending',
         registrationId: r.registration?.id ?? '',
       });
-    } else if (r.reason === 'rejected') {
-      resetTo({
-        name: 'RegistrationRejected',
-        registrationId: r.registration?.id ?? '',
-      });
     }
+    // reason === 'rejected': loginAsCustomer has set `rejectedRegistration`
+    // (a confined session, no currentUser); the navigator's rejected guard
+    // takes over from here (no route needed).
     // reason === 'blocked': loginAsCustomer has already set the session user;
     // the navigator's blocked guard takes over from here (no route needed).
   };
@@ -648,6 +686,72 @@ const AppNavigator: React.FC = () => {
           clearPasswordRecovery();
           handleLogout();
         }}
+      />
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Confined rejected-registration shell. A password-verified user whose
+  // registration was rejected has a session but NO profile and NO currentUser,
+  // so this guard runs BEFORE every pre-auth route AND before the "need a role"
+  // gate. They can reach ONLY: the rejected screen + the shared support screens
+  // (wired to the registration-support island, migration 052) + logout. Back
+  // navigation stays inside the RejectedView machine.
+  // -------------------------------------------------------------------------
+  if (rejectedRegistration) {
+    const rr = rejectedRegistration;
+
+    if (rejectedView.name === 'tickets') {
+      return (
+        <SupportTicketsScreen
+          onBack={() => setRejectedView({ name: 'root' })}
+          onOpenTicket={(ticketId) =>
+            setRejectedView({ name: 'ticket', ticketId })
+          }
+          onOpenNewTicket={() => setRejectedView({ name: 'newTicket' })}
+          ticketsOverride={registrationSupportTickets}
+        />
+      );
+    }
+    if (rejectedView.name === 'ticket') {
+      return (
+        <SupportTicketDetailsScreen
+          ticketId={rejectedView.ticketId}
+          onBack={() => setRejectedView({ name: 'tickets' })}
+          onOpenNewTicket={() => setRejectedView({ name: 'newTicket' })}
+          ticketsOverride={registrationSupportTickets}
+          onReplyOverride={(id, msg) => replyToRegistrationSupportTicket(id, msg)}
+        />
+      );
+    }
+    if (rejectedView.name === 'newTicket') {
+      return (
+        <OpenSupportTicketScreen
+          initialSubject="ערעור על דחיית רישום"
+          onBack={() => setRejectedView({ name: 'root' })}
+          onSubmitted={(ticketId) =>
+            setRejectedView({ name: 'ticket', ticketId })
+          }
+          onCreateOverride={(type, subject, description) =>
+            openRegistrationSupportTicket(type, subject, description).then(
+              (t) => t.id
+            )
+          }
+        />
+      );
+    }
+    return (
+      <RegistrationRejectedScreen
+        registrationId={rr.id}
+        rejectionReason={rr.rejectionReason}
+        processedAt={rr.processedAt}
+        tickets={registrationSupportTickets}
+        onOpenNewTicket={() => setRejectedView({ name: 'newTicket' })}
+        onOpenTicket={(ticketId) =>
+          setRejectedView({ name: 'ticket', ticketId })
+        }
+        onOpenAllTickets={() => setRejectedView({ name: 'tickets' })}
+        onBackToWelcome={handleLogout}
       />
     );
   }
@@ -1050,6 +1154,12 @@ const AppNavigator: React.FC = () => {
             onOpenUser={
               currentUser.role === 'admin'
                 ? (userId) => push({ name: 'AdminUserDetails', userId })
+                : undefined
+            }
+            onViewRegistration={
+              currentUser.role === 'admin'
+                ? (registrationId) =>
+                    push({ name: 'AdminRegistrationDetails', registrationId })
                 : undefined
             }
             onOpenNewTicket={

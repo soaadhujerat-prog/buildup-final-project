@@ -25,38 +25,56 @@ import {
 } from '../utils/helpers';
 import {
   Customer,
+  ContractorRegistrationData,
   Worker,
   Contractor,
+  SupportTicket,
   SupportTicketStatus,
   SupportTicketMessage,
+  WorkerRegistrationData,
 } from '../types';
 
 interface Props {
   ticketId: string;
   onBack: () => void;
-  /** Admin-only: open the requester's user card. Absent for non-admin. */
+  /** Admin-only: open the requester's user card. Absent for non-admin. Used
+   *  only for a normal (`source !== 'registration'`) ticket. */
   onOpenUser?: (userId: string) => void;
+  /** Admin-only: open the ORIGINAL registration behind a
+   *  `source === 'registration'` support ticket (rejected registrant — no
+   *  normal profile). Absent for non-admin. */
+  onViewRegistration?: (registrationId: string) => void;
   /** Non-admin only: start a brand-new ticket (shown on a closed ticket, so
    *  the user still has a way forward once the conversation is locked). */
   onOpenNewTicket?: () => void;
+  /** Confined rejected-registration shell: the ticket list to resolve from,
+   *  and the reply action to use. When both are present the screen runs as a
+   *  non-admin requester with no `currentUser`. Absent -> unchanged. */
+  ticketsOverride?: SupportTicket[];
+  onReplyOverride?: (ticketId: string, message: string) => Promise<void>;
 }
 
 const SupportTicketDetailsScreen: React.FC<Props> = ({
   ticketId,
   onBack,
   onOpenUser,
+  onViewRegistration,
   onOpenNewTicket,
+  ticketsOverride,
+  onReplyOverride,
 }) => {
   const insets = useSafeAreaInsets();
   const {
     currentUser,
     supportTickets,
+    registrations,
     getUserById,
     replyToTicket,
     closeSupportTicket,
     reopenSupportTicket,
   } = useApp();
-  const ticket = supportTickets.find((t) => t.id === ticketId);
+  const overridden = ticketsOverride !== undefined && !!onReplyOverride;
+  const ticket = (ticketsOverride ?? supportTickets).find((t) => t.id === ticketId);
 
   const scrollRef = useRef<ScrollView>(null);
   const [reply, setReply] = useState('');
@@ -122,8 +140,19 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
     );
   }
 
-  const isAdmin = currentUser?.role === 'admin';
-  const filer = getUserById(ticket.userId) as Customer | undefined;
+  const isAdmin = !overridden && currentUser?.role === 'admin';
+
+  // A `source: 'registration'` ticket has NO normal profile behind it — its
+  // `userId` is the registration id. Resolve the requester from the admin's
+  // already-loaded registrations queue instead of getUserById().
+  const isRegistrationTicket = ticket.source === 'registration';
+  const regRecord = isRegistrationTicket
+    ? registrations.find((r) => r.id === (ticket.registrationId ?? ticket.userId))
+    : undefined;
+
+  const filer = isRegistrationTicket
+    ? undefined
+    : (getUserById(ticket.userId) as Customer | undefined);
   const canOpenUser = isAdmin && !!filer && !!onOpenUser;
 
   // Admin's status-setter offers the 3 user-visible states; each maps to a
@@ -207,7 +236,7 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
   };
 
   const handleSend = async () => {
-    if (!currentUser || sending) return;
+    if ((!currentUser && !overridden) || sending) return;
     // Belt-and-braces: the compose box is not rendered on a closed ticket,
     // and replyToTicket refuses one too — but never send from here either.
     if (isClosed) return;
@@ -223,13 +252,17 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
     }
     setSending(true);
     try {
-      await replyToTicket(
-        ticket.id,
-        currentUser.id,
-        currentUser.role as 'admin' | 'worker' | 'contractor',
-        text,
-        wantsStatusChange ? pendingStatus! : undefined
-      );
+      if (overridden) {
+        await onReplyOverride!(ticket.id, text);
+      } else {
+        await replyToTicket(
+          ticket.id,
+          currentUser!.id,
+          currentUser!.role as 'admin' | 'worker' | 'contractor',
+          text,
+          wantsStatusChange ? pendingStatus! : undefined
+        );
+      }
       setReply('');
       setPendingStatus(null);
       Keyboard.dismiss();
@@ -288,6 +321,9 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
               {isClosed && (
                 <StatusBadge label="סגורה" tone="neutral" small />
               )}
+              {ticket.source === 'registration' && (
+                <StatusBadge label="רישום שנדחה" tone="warning" small />
+              )}
               <Text style={styles.heroSubject}>{ticket.subject}</Text>
             </View>
             <View style={styles.heroMeta}>
@@ -310,8 +346,10 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             )}
           </View>
 
-          {/* Requester info — admin only */}
-          {isAdmin && filer && (
+          {/* Requester info — admin only. Normal ticket: from the live user
+              directory. Registration ticket: from the original registration
+              record (the rejected registrant has no normal profile). */}
+          {isAdmin && !isRegistrationTicket && filer && (
             <View style={styles.section}>
               <View style={styles.sectionHead}>
                 <Text style={styles.sectionTitle}>הפונה</Text>
@@ -370,13 +408,107 @@ const SupportTicketDetailsScreen: React.FC<Props> = ({
             </View>
           )}
 
+          {/* Requester info for a rejected-registration ticket — resolved from
+              the registration record, not getUserById(). */}
+          {isAdmin && isRegistrationTicket && (
+            <View style={styles.section}>
+              <View style={styles.sectionHead}>
+                <Text style={styles.sectionTitle}>הפונה (רישום שנדחה)</Text>
+              </View>
+
+              {regRecord ? (
+                <>
+                  <View style={styles.fRow}>
+                    <Text style={styles.fValue}>
+                      {regRecord.data.fullName || '—'}
+                    </Text>
+                    <Text style={styles.fLabel}>שם</Text>
+                  </View>
+                  <View style={styles.fRow}>
+                    <Text style={styles.fValue}>
+                      {regRecord.role === 'worker' ? 'עובד' : 'קבלן'}
+                    </Text>
+                    <Text style={styles.fLabel}>תפקיד</Text>
+                  </View>
+                  {regRecord.role === 'worker' &&
+                    (() => {
+                      const w = regRecord.data as WorkerRegistrationData;
+                      const trade =
+                        (w.professions && w.professions.length > 0
+                          ? w.professions.join(', ')
+                          : w.professionCategory) || '';
+                      return trade ? (
+                        <View style={styles.fRow}>
+                          <Text style={styles.fValue}>{trade}</Text>
+                          <Text style={styles.fLabel}>מקצוע</Text>
+                        </View>
+                      ) : null;
+                    })()}
+                  {regRecord.role === 'contractor' &&
+                    (() => {
+                      const c = regRecord.data as ContractorRegistrationData;
+                      return c.companyName ? (
+                        <View style={styles.fRow}>
+                          <Text style={styles.fValue}>{c.companyName}</Text>
+                          <Text style={styles.fLabel}>חברה</Text>
+                        </View>
+                      ) : null;
+                    })()}
+                  {!!regRecord.data.phone && (
+                    <View style={styles.fRow}>
+                      <Text
+                        style={[styles.fValue, { writingDirection: 'ltr' }]}
+                      >
+                        {regRecord.data.phone}
+                      </Text>
+                      <Text style={styles.fLabel}>טלפון</Text>
+                    </View>
+                  )}
+                  {!!regRecord.data.email && (
+                    <View style={styles.fRow}>
+                      <Text
+                        style={[styles.fValue, { writingDirection: 'ltr' }]}
+                      >
+                        {regRecord.data.email}
+                      </Text>
+                      <Text style={styles.fLabel}>אימייל</Text>
+                    </View>
+                  )}
+
+                  {!!onViewRegistration && !!ticket.registrationId && (
+                    <TouchableOpacity
+                      style={styles.userLinkBtn}
+                      onPress={() => onViewRegistration!(ticket.registrationId!)}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons
+                        name="document-text-outline"
+                        size={18}
+                        color={Colors.primary}
+                      />
+                      <Text style={styles.userLinkText}>צפה בפרטי הרישום</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              ) : (
+                <View style={styles.fRow}>
+                  <Text style={[styles.fValue, styles.fValueMuted]}>
+                    פרטי הרישום אינם זמינים
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Conversation thread */}
           <View style={styles.section}>
             <View style={styles.sectionHead}>
               <Text style={styles.sectionTitle}>שיחת הפנייה</Text>
             </View>
             {thread.map((m, idx) => {
-              const mine = currentUser?.id === m.senderId;
+              const mine = overridden
+                ? m.senderRole !== 'admin'
+                : currentUser?.id === m.senderId;
               const fromAdmin = m.senderRole === 'admin';
               return (
                 <View
@@ -723,6 +855,11 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  fValueMuted: {
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+    fontWeight: '500',
   },
   userLinkBtn: {
     flexDirection: 'row-reverse',

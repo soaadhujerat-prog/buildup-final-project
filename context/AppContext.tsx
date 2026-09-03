@@ -77,7 +77,11 @@ import * as participantsService from '../services/participantsService';
 import * as favoritesService from '../services/favoritesService';
 import * as chatService from '../services/chatService';
 import * as supportService from '../services/supportService';
-import type { SessionUser, LoginResult } from '../types/auth';
+import type {
+  SessionUser,
+  LoginResult,
+  RejectedRegistrationInfo,
+} from '../types/auth';
 
 import { JobFilters, DEFAULT_JOB_FILTERS } from '../components/JobFilterBottomSheet';
 import { JobSortOption } from '../components/JobSortBottomSheet';
@@ -159,6 +163,32 @@ interface AppState {
   /** Backend only: re-read the signed-in user's support tickets from Supabase.
    *  */
   refreshSupportTickets: () => Promise<void>;
+
+  // ---- Rejected-registration confined shell (migration 052) ----
+  /** Set ONLY when a password-verified user whose registration is `rejected`
+   *  has a confined session. `currentUser` stays null in that case; the
+   *  navigator renders the rejected-only shell (rejected screen + the
+   *  registration-support island). Cleared on logout. */
+  rejectedRegistration: RejectedRegistrationInfo | null;
+  /** The rejected registrant's own registration-support tickets (separate
+   *  backend from `supportTickets`). Empty unless `rejectedRegistration` is
+   *  set. */
+  registrationSupportTickets: SupportTicket[];
+  refreshRegistrationSupportTickets: () => Promise<void>;
+  /** Open a registration-support ticket for the confined rejected registrant.
+   *  `registration_id` is derived server-side from auth.uid(). */
+  openRegistrationSupportTicket: (
+    type: SupportTicketType,
+    subject: string,
+    description: string
+  ) => Promise<SupportTicket>;
+  /** Append one reply from the rejected registrant to their own
+   *  registration-support ticket. */
+  replyToRegistrationSupportTicket: (
+    ticketId: string,
+    message: string
+  ) => Promise<void>;
+
   contractorLicenseRequests: ContractorLicenseUpdateRequest[];
 
   // Worker job-search state — persists across navigation (see JobSearchState).
@@ -591,6 +621,11 @@ const nowIso = () => new Date().toISOString();
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<SessionUser>(null);
+  // Confined rejected-registration session (migration 052). Mutually exclusive
+  // with a real `currentUser` in practice — a rejected registration has no
+  // profile, so `currentUser` is never built for it.
+  const [rejectedRegistration, setRejectedRegistration] =
+    useState<RejectedRegistrationInfo | null>(null);
   // True while a persisted Supabase session is being restored + its profile
   // rebuilt on cold start.
   const [sessionLoading, setSessionLoading] = useState<boolean>(true);
@@ -647,8 +682,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       authService.initializeAuth();
       unsubscribe = authService.onAuthStateChange((event) => {
         if (!alive) return;
-        if (event === 'SIGNED_OUT') setCurrentUser(null);
-        else if (event === 'PASSWORD_RECOVERY') setPasswordRecoveryActive(true);
+        if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          setRejectedRegistration(null);
+        } else if (event === 'PASSWORD_RECOVERY') setPasswordRecoveryActive(true);
       });
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -660,7 +697,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     bootstrapSessionUser()
-      .then((user) => endBootstrap(user))
+      .then((res) => {
+        // Persisted CONFINED rejected-registration session: no profile, no
+        // currentUser — restore the rejected-only shell instead of signing out.
+        if (res.rejectedRegistration) setRejectedRegistration(res.rejectedRegistration);
+        endBootstrap(res.user);
+      })
       .catch((err) => {
         // No silent mock fallback — just land logged-out; the user can retry.
         // eslint-disable-next-line no-console
@@ -736,6 +778,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
   const [supportTicketsLoading, setSupportTicketsLoading] =
     useState<boolean>(true);
+  // Rejected-registration support island (migration 052) — a SEPARATE list,
+  // loaded only for a confined `rejectedRegistration` session. The normal
+  // `supportTickets` stays empty for a rejected user.
+  const [registrationSupportTickets, setRegistrationSupportTickets] = useState<
+    SupportTicket[]
+  >([]);
 
   // Contractor licence-update requests — frontend-only, no mock seed. Shaped
   // 1:1 with a future `contractor_license_update_requests` table. Never
@@ -766,6 +814,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if ((result.ok || result.reason === 'blocked') && result.user) {
         setCurrentUser(result.user);
       }
+      // rejected -> a CONFINED session with no profile: currentUser stays null,
+      // the navigator renders the rejected-only shell off `rejectedRegistration`.
+      if (result.reason === 'rejected') {
+        setRejectedRegistration(result.rejectedRegistration ?? { id: result.registration?.id ?? '' });
+      }
       return result;
     },
     []
@@ -789,6 +842,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // reacts immediately.
     void authService.signOut().catch(() => {});
     setCurrentUser(null);
+    setRejectedRegistration(null);
     setJobSearchState(DEFAULT_JOB_SEARCH_STATE);
     setPasswordRecoveryActive(false);
   }, []);
@@ -898,15 +952,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // (openSupportTicket / replyToTicket / close / reopen) which re-read after.
   // No realtime: a support notification arriving also triggers a re-read (see
   // the notifications INSERT handler).
+  const isApprovedAdmin =
+    currentUser?.role === 'admin' && currentUser.status === 'approved';
+
   const refreshSupportTickets = useCallback(async () => {
     try {
-      setSupportTickets(await supportService.listMyTickets());
+      const base = await supportService.listMyTickets();
+      if (isApprovedAdmin) {
+        // Admin inbox also surfaces the rejected-registration support island
+        // (migration 052) — merged into the SAME list, tagged
+        // source:'registration'. Non-admin behaviour is unchanged (single call).
+        let merged = base;
+        try {
+          const reg = await supportService.listMyRegistrationTickets();
+          merged = [...base, ...reg];
+        } catch {
+          /* keep the normal tickets even if the reg island read fails */
+        }
+        setSupportTickets(merged);
+      } else {
+        setSupportTickets(base);
+      }
     } catch {
       /* keep whatever is loaded — screens show their existing empty state */
     } finally {
       setSupportTicketsLoading(false);
     }
-  }, []);
+  }, [isApprovedAdmin]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -917,6 +989,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setSupportTicketsLoading(true);
     void refreshSupportTickets();
   }, [currentUser?.id, currentUser?.role, refreshSupportTickets]);
+
+  // ---- Rejected-registration support island (migration 052) ----
+  const refreshRegistrationSupportTickets = useCallback(async () => {
+    try {
+      setRegistrationSupportTickets(
+        await supportService.listMyRegistrationTickets()
+      );
+    } catch {
+      /* keep whatever is loaded */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!rejectedRegistration) {
+      setRegistrationSupportTickets([]);
+      return;
+    }
+    void refreshRegistrationSupportTickets();
+  }, [rejectedRegistration?.id, refreshRegistrationSupportTickets]);
 
   // ---------------------------------------------------------------------
   // Chat — real backend read layer (7A persistence) + realtime/unread (7B)
@@ -2346,6 +2437,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     []
   );
 
+  // A registration-support ticket (source:'registration') can only appear in
+  // `supportTickets` for an ADMIN (merged in refreshSupportTickets). Admin
+  // reply / close / reopen on one must go through the 052 RPCs.
+  const isRegistrationTicket = useCallback(
+    (ticketId: string) =>
+      supportTickets.find((t) => t.id === ticketId)?.source === 'registration',
+    [supportTickets]
+  );
+
   const replyToTicket = useCallback<AppState['replyToTicket']>(
     async (ticketId, _senderId, senderRole, message, statusChange) => {
       const text = message.trim();
@@ -2355,31 +2455,84 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       // reply_to_support_ticket forces sender_role from the caller's real
       // identity, applies `statusChange` for an admin only, guards the closed
       // state, and raises the notification(s) server-side. Re-read after.
-      await supportService.replyToTicket(
-        ticketId,
-        text,
-        isAdmin ? statusChange : undefined
-      );
+      if (isRegistrationTicket(ticketId)) {
+        await supportService.replyToRegistrationTicket(
+          ticketId,
+          text,
+          isAdmin ? statusChange : undefined
+        );
+      } else {
+        await supportService.replyToTicket(
+          ticketId,
+          text,
+          isAdmin ? statusChange : undefined
+        );
+      }
       await refreshSupportTickets();
     },
-    [refreshSupportTickets]
+    [refreshSupportTickets, isRegistrationTicket]
   );
 
   const closeSupportTicket = useCallback<AppState['closeSupportTicket']>(
     async (ticketId, _adminId) => {
-      await supportService.setTicketClosed(ticketId, true);
+      if (isRegistrationTicket(ticketId)) {
+        await supportService.setRegistrationTicketClosed(ticketId, true);
+      } else {
+        await supportService.setTicketClosed(ticketId, true);
+      }
       await refreshSupportTickets();
     },
-    [refreshSupportTickets]
+    [refreshSupportTickets, isRegistrationTicket]
   );
 
   const reopenSupportTicket = useCallback<AppState['reopenSupportTicket']>(
     async (ticketId, _adminId) => {
-      await supportService.setTicketClosed(ticketId, false);
+      if (isRegistrationTicket(ticketId)) {
+        await supportService.setRegistrationTicketClosed(ticketId, false);
+      } else {
+        await supportService.setTicketClosed(ticketId, false);
+      }
       await refreshSupportTickets();
     },
-    [refreshSupportTickets]
+    [refreshSupportTickets, isRegistrationTicket]
   );
+
+  // ---- Rejected-registration confined requester actions (migration 052) ----
+  const openRegistrationSupportTicket = useCallback<
+    AppState['openRegistrationSupportTicket']
+  >(async (type, subject, description) => {
+    const subj = subject.trim();
+    const desc = description.trim();
+    const id = await supportService.createRegistrationTicket(type, subj, desc);
+    const fresh = await supportService.listMyRegistrationTickets();
+    setRegistrationSupportTickets(fresh);
+    return (
+      fresh.find((t) => t.id === id) ?? {
+        id,
+        userId: rejectedRegistration?.id ?? '',
+        userRole: 'worker' as const,
+        type,
+        subject: subj,
+        description: desc,
+        status: 'open' as const,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        messages: [],
+        source: 'registration' as const,
+        registrationId: rejectedRegistration?.id,
+      }
+    );
+  }, [rejectedRegistration?.id]);
+
+  const replyToRegistrationSupportTicket = useCallback<
+    AppState['replyToRegistrationSupportTicket']
+  >(async (ticketId, message) => {
+    const text = message.trim();
+    if (!text) return;
+    // Requester path: no status change (server ignores it for a non-admin).
+    await supportService.replyToRegistrationTicket(ticketId, text);
+    await refreshRegistrationSupportTickets();
+  }, [refreshRegistrationSupportTickets]);
 
   // -------------------------------------------------------------------
   // Contractor licence verification
@@ -2664,6 +2817,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       supportTickets,
       supportTicketsLoading,
       refreshSupportTickets,
+      rejectedRegistration,
+      registrationSupportTickets,
+      refreshRegistrationSupportTickets,
+      openRegistrationSupportTicket,
+      replyToRegistrationSupportTicket,
       contractorLicenseRequests,
 
       loginAsCustomer,
@@ -2776,6 +2934,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       supportTickets,
       supportTicketsLoading,
       refreshSupportTickets,
+      rejectedRegistration,
+      registrationSupportTickets,
+      refreshRegistrationSupportTickets,
+      openRegistrationSupportTicket,
+      replyToRegistrationSupportTicket,
       contractorLicenseRequests,
       loginAsCustomer,
       loginAsAdmin,

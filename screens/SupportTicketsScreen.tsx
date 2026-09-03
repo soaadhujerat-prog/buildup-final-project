@@ -26,6 +26,10 @@ interface Props {
   onBack: () => void;
   onOpenTicket: (ticketId: string) => void;
   onOpenNewTicket?: () => void; // only used for customer roles
+  /** Confined rejected-registration shell: an already-scoped ticket list to
+   *  render as a non-admin requester. When absent, behaviour is unchanged
+   *  (list comes from `useApp()`, scoped by `currentUser`). */
+  ticketsOverride?: SupportTicket[];
 }
 
 type StatusFilter = 'all' | SupportDisplayState;
@@ -34,20 +38,24 @@ const SupportTicketsScreen: React.FC<Props> = ({
   onBack,
   onOpenTicket,
   onOpenNewTicket,
+  ticketsOverride,
 }) => {
   const insets = useSafeAreaInsets();
   const { currentUser, supportTickets, supportTicketsLoading, getUserById } =
     useApp();
 
-  const isAdmin = currentUser?.role === 'admin';
+  const overridden = ticketsOverride !== undefined;
+  const isAdmin = !overridden && currentUser?.role === 'admin';
+  const loading = overridden ? false : supportTicketsLoading;
   const [filter, setFilter] = useState<StatusFilter>('all');
 
   // Source-of-truth filtering by role
   const myScope = useMemo(() => {
+    if (overridden) return ticketsOverride ?? [];
     if (!currentUser) return [];
     if (isAdmin) return supportTickets;
     return supportTickets.filter((t) => t.userId === currentUser.id);
-  }, [supportTickets, currentUser, isAdmin]);
+  }, [overridden, ticketsOverride, supportTickets, currentUser, isAdmin]);
 
   const filtered = useMemo(() => {
     const base =
@@ -111,7 +119,7 @@ const SupportTicketsScreen: React.FC<Props> = ({
         ))}
       </ScrollView>
 
-      {supportTicketsLoading && supportTickets.length === 0 ? (
+      {loading && myScope.length === 0 ? (
         <View style={styles.emptyWrap}>
           <ActivityIndicator size="large" color={Colors.primary} />
           <Text style={styles.emptySub}>טוען פניות…</Text>
@@ -219,6 +227,9 @@ const TicketRow: React.FC<{
           <StatusBadge label={display.label} tone={display.tone} small />
           {ticket.isClosed && (
             <StatusBadge label="סגורה" tone="neutral" small />
+          )}
+          {ticket.source === 'registration' && (
+            <StatusBadge label="רישום שנדחה" tone="warning" small />
           )}
         </View>
         <Text style={styles.subject} numberOfLines={2}>

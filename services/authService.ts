@@ -54,6 +54,21 @@ export class AuthRegistrationStatusError extends Error {
   }
 }
 
+/**
+ * The ID + password matched a REJECTED registration and `login-by-id` returned
+ * a confined session (tokens). By the time this is thrown the Supabase session
+ * has ALREADY been established (setSession). The caller must NOT build a
+ * SessionUser — there is no profile — and must route to the rejected-only
+ * shell. Distinct from `AuthRegistrationStatusError` (which carries no
+ * session; still used for `pending`).
+ */
+export class AuthRejectedRegistrationError extends Error {
+  constructor() {
+    super('registration_rejected_confined');
+    this.name = 'AuthRejectedRegistrationError';
+  }
+}
+
 /** Eagerly build the Supabase client so persisted-session restore + token
  *  auto-refresh start as early as possible. Safe to call more than once. */
 export const initializeAuth = (): void => {
@@ -70,7 +85,14 @@ export const getCurrentSession = async (): Promise<Session | null> => {
 
 type EdgeLoginResponse =
   | { ok: true; access_token: string; refresh_token: string }
-  | { ok: false; error?: string; status?: 'pending' | 'rejected' };
+  | {
+      ok: false;
+      error?: string;
+      status?: 'pending' | 'rejected';
+      // Present ONLY for status:'rejected' — the confined session tokens.
+      access_token?: string;
+      refresh_token?: string;
+    };
 
 /**
  * Real "login by Israeli ID + password".
@@ -102,6 +124,21 @@ export const signInById = async (
   }
 
   if (!data || data.ok !== true) {
+    // Rejected registration WITH a confined session — establish it, then signal
+    // the rejected-only shell. `currentUser` is never built for this session.
+    if (
+      data &&
+      data.status === 'rejected' &&
+      data.access_token &&
+      data.refresh_token
+    ) {
+      const { error: setErr } = await sb.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      });
+      if (setErr) throw setErr;
+      throw new AuthRejectedRegistrationError();
+    }
     if (data && (data.status === 'pending' || data.status === 'rejected')) {
       throw new AuthRegistrationStatusError(data.status);
     }

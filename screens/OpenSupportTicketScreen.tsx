@@ -23,6 +23,14 @@ interface Props {
   /** Optional pre-filled subject (e.g. the blocked-account support flow).
    *  The user can still edit or clear it before sending. */
   initialSubject?: string;
+  /** Confined rejected-registration shell: create the ticket through this
+   *  instead of the `currentUser`-gated context action. Returns the new id.
+   *  Absent -> unchanged (normal worker / contractor / blocked flow). */
+  onCreateOverride?: (
+    type: SupportTicketType,
+    subject: string,
+    description: string
+  ) => Promise<string>;
 }
 
 const TYPES: { value: SupportTicketType; label: string; icon: keyof typeof import('@expo/vector-icons').Ionicons.glyphMap; description: string }[] = [
@@ -56,6 +64,7 @@ const OpenSupportTicketScreen: React.FC<Props> = ({
   onBack,
   onSubmitted,
   initialSubject,
+  onCreateOverride,
 }) => {
   const insets = useSafeAreaInsets();
   const { currentUser, openSupportTicket } = useApp();
@@ -76,22 +85,28 @@ const OpenSupportTicketScreen: React.FC<Props> = ({
       return;
     }
     if (
-      !currentUser ||
-      (currentUser.role !== 'worker' && currentUser.role !== 'contractor')
+      !onCreateOverride &&
+      (!currentUser ||
+        (currentUser.role !== 'worker' && currentUser.role !== 'contractor'))
     ) {
       Alert.alert('שגיאה', 'יש להתחבר כעובד או קבלן כדי לפתוח פנייה');
       return;
     }
     setSubmitting(true);
     try {
-      const ticket = await openSupportTicket(
-        currentUser.id,
-        currentUser.role,
-        type,
-        subject.trim(),
-        description.trim()
-      );
-      onSubmitted(ticket.id);
+      if (onCreateOverride) {
+        const id = await onCreateOverride(type, subject.trim(), description.trim());
+        onSubmitted(id);
+      } else {
+        const ticket = await openSupportTicket(
+          currentUser!.id,
+          currentUser!.role as 'worker' | 'contractor',
+          type,
+          subject.trim(),
+          description.trim()
+        );
+        onSubmitted(ticket.id);
+      }
     } catch {
       Alert.alert('שגיאה', 'שליחת הפנייה נכשלה. נסה שוב.');
       setSubmitting(false);

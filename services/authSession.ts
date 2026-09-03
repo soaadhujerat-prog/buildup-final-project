@@ -11,11 +11,17 @@
 // by a JWT claim.
 // =============================================================================
 
-import type { UserRole } from '../types';
-import type { LoginResult, SessionUser } from '../types/auth';
+import type { RegistrationStatusEvent, UserRole } from '../types';
+import type {
+  BootstrapResult,
+  LoginResult,
+  RejectedRegistrationInfo,
+  SessionUser,
+} from '../types/auth';
 
 import * as authService from './authService';
 import { fetchSessionUser } from './profileService';
+import { getSupabase } from './supabaseClient';
 
 /** Generic "these credentials didn't work" — used for unknown ID, wrong
  *  password, AND "this role can't use this login form", so none of them are
@@ -23,34 +29,94 @@ import { fetchSessionUser } from './profileService';
 const genericFailure = (): LoginResult => ({ ok: false, reason: 'wrong_password' });
 
 /**
+ * Read the CURRENT session's own rejected registration (RLS scopes
+ * `registrations` to `auth_user_id = auth.uid()`), plus its status-event
+ * history. Returns null when the session doesn't own a rejected registration —
+ * the caller then falls back to the normal signed-out behaviour.
+ *
+ * Used for BOTH the login path (a fresh confined session) and cold boot (a
+ * persisted confined session whose uid has no profile).
+ */
+export async function fetchOwnRejectedRegistration(): Promise<RejectedRegistrationInfo | null> {
+  const sb = getSupabase();
+  const { data: reg, error } = await sb
+    .from('registrations')
+    .select('id, status, rejection_reason, processed_at, created_at')
+    .eq('status', 'rejected')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !reg) return null;
+
+  let statusHistory: RegistrationStatusEvent[] | undefined;
+  try {
+    const { data: events } = await sb
+      .from('registration_status_events')
+      .select('id, registration_id, from_status, to_status, reason, message, actor_id, created_at')
+      .eq('registration_id', (reg as { id: string }).id)
+      .order('created_at', { ascending: true });
+    if (events && events.length) {
+      statusHistory = (events as Array<Record<string, unknown>>).map((e) => ({
+        id: String(e.id),
+        registrationId: String(e.registration_id),
+        fromStatus: e.from_status as RegistrationStatusEvent['fromStatus'],
+        toStatus: e.to_status as RegistrationStatusEvent['toStatus'],
+        reason: (e.reason as string | null) ?? undefined,
+        message: (e.message as string | null) ?? undefined,
+        actorId: (e.actor_id as string | null) ?? undefined,
+        createdAt: String(e.created_at),
+      }));
+    }
+  } catch {
+    /* history is optional — the screen still shows reason + date */
+  }
+
+  return {
+    id: (reg as { id: string }).id,
+    rejectionReason: (reg as { rejection_reason: string | null }).rejection_reason ?? undefined,
+    processedAt: (reg as { processed_at: string | null }).processed_at ?? undefined,
+    statusHistory,
+  };
+}
+
+/**
  * Cold-start session restore. Reads the persisted Supabase session and rebuilds
  * the `SessionUser` from live DB profile data.
  *
- * Returns `null` when there is no session, or when the session exists but the
- * profile is missing/unreadable — in the latter case we also sign out so the
- * app never sits in a half-authenticated state. A profile is never created here.
+ * Returns `{ user: null }` when there is no session. When the session exists
+ * but the profile is missing/unreadable we FIRST check whether the session
+ * belongs to a rejected registration — if so we KEEP the session and return
+ * `{ user: null, rejectedRegistration }` so the app runs the confined rejected
+ * shell; otherwise we sign out. A profile is never created here.
  */
-export async function bootstrapSessionUser(): Promise<SessionUser> {
+export async function bootstrapSessionUser(): Promise<BootstrapResult> {
   // eslint-disable-next-line no-console
   if (__DEV__) console.log('[AUTH_BOOT] getSession');
   const session = await authService.getCurrentSession();
   if (!session) {
     // eslint-disable-next-line no-console
     if (__DEV__) console.log('[AUTH_BOOT] no session');
-    return null;
+    return { user: null };
   }
   // eslint-disable-next-line no-console
   if (__DEV__) console.log('[AUTH_BOOT] session found');
 
   try {
     const user = await fetchSessionUser();
-    if (!user) {
-      await authService.signOut().catch(() => {});
-      return null;
+    if (user) {
+      // eslint-disable-next-line no-console
+      if (__DEV__) console.log('[AUTH_BOOT] profile loaded');
+      return { user };
     }
-    // eslint-disable-next-line no-console
-    if (__DEV__) console.log('[AUTH_BOOT] profile loaded');
-    return user;
+    // No profile — is this a confined rejected-registration session?
+    const rejectedRegistration = await fetchOwnRejectedRegistration();
+    if (rejectedRegistration) {
+      // eslint-disable-next-line no-console
+      if (__DEV__) console.log('[AUTH_BOOT] confined rejected session');
+      return { user: null, rejectedRegistration };
+    }
+    await authService.signOut().catch(() => {});
+    return { user: null };
   } catch (err) {
     // Transient DB/network error on boot: don't strand the user in a broken
     // shell. Drop to logged-out; they can retry.
@@ -80,9 +146,17 @@ export async function loginById(
     await authService.signInById(idNumber, password);
   } catch (err) {
     if (err instanceof authService.AuthInvalidCredentialsError) return genericFailure();
+    if (err instanceof authService.AuthRejectedRegistrationError) {
+      // ID + password matched a REJECTED registration and a CONFINED session is
+      // now active. Do NOT sign out and do NOT build a SessionUser — read only
+      // this session's own rejected registration and hand it back so AppContext
+      // runs the rejected-only shell (currentUser stays null).
+      const rejectedRegistration = await fetchOwnRejectedRegistration();
+      return { ok: false, reason: 'rejected', status: 'rejected', rejectedRegistration: rejectedRegistration ?? undefined };
+    }
     if (err instanceof authService.AuthRegistrationStatusError) {
-      // ID + password matched a not-yet-approved registration — route to the
-      // pending / rejected status screen (same as the mock path). No session.
+      // ID + password matched a PENDING registration — route to the pending
+      // status screen. No session.
       return { ok: false, status: err.status, reason: err.status };
     }
     throw err; // real backend/network error — surfaced by the screen

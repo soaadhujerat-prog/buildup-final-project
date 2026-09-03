@@ -11,9 +11,16 @@
 //       -> found  => approved/blocked user: get email, signInWithPassword,
 //                    return { access_token, refresh_token }
 //   3b. not in user_identity => look up public.registrations.id_number_hash
-//       (status pending|rejected). If the password checks out, return
-//       { ok:false, status:'pending'|'rejected' } — NO tokens. This lets the
-//       Phase-2 status gating show the right screen for a not-yet-approved user.
+//       (status pending|rejected). If the password checks out:
+//         • pending  => { ok:false, status:'pending' }  — NO tokens (unchanged).
+//         • rejected => { ok:false, status:'rejected', access_token,
+//                         refresh_token } — the ALREADY-verified Supabase
+//                         session is returned so the app can open a CONFINED
+//                         rejected-registration shell (no profile, no
+//                         currentUser) that only reaches the rejected screen +
+//                         its own support island (migration 052).
+//       This lets the Phase-2 status gating show the right screen for a
+//       not-yet-approved user.
 //
 // Security invariants:
 //   • The client never receives an email as the result of an ID lookup, and
@@ -252,5 +259,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
   });
   if (regSignInErr || !regSignIn?.session) return json({ ok: false });
 
-  return json({ ok: false, status: reg.status as 'pending' | 'rejected' });
+  const regStatus = reg.status as 'pending' | 'rejected';
+
+  // REJECTED: return the already-verified session so the app can run a
+  // confined rejected-registration shell. The user has NO profile /
+  // user_identity, so every normal RLS path denies them; the ONLY thing this
+  // session unlocks is their own registration row + their own
+  // registration_support_* island (migration 052).
+  if (regStatus === 'rejected') {
+    return json({
+      ok: false,
+      status: 'rejected',
+      access_token: regSignIn.session.access_token,
+      refresh_token: regSignIn.session.refresh_token,
+    });
+  }
+
+  // PENDING: unchanged — status only, NO tokens.
+  return json({ ok: false, status: regStatus });
 });

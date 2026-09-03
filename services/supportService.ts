@@ -33,6 +33,20 @@ import type {
 } from '../types';
 
 import { getSupabase } from './supabaseClient';
+import {
+  mapRegMessage,
+  mapRegTicket,
+  REG_TICKET_SELECT,
+  type RegMessageRow,
+  type RegTicketRow,
+} from './registrationSupportMappers';
+
+export {
+  mapRegMessage,
+  mapRegTicket,
+  type RegMessageRow,
+  type RegTicketRow,
+} from './registrationSupportMappers';
 
 // ---------------------------------------------------------------------------
 // row shapes
@@ -190,6 +204,95 @@ export async function setTicketClosed(
   closed: boolean
 ): Promise<void> {
   const { error } = await getSupabase().rpc('set_support_ticket_closed', {
+    p_ticket_id: ticketId,
+    p_closed: closed,
+  });
+  if (error) throw error;
+}
+
+// ===========================================================================
+// Rejected-registration support island (migration 052)
+// ===========================================================================
+// A SEPARATE pair of tables (registration_support_tickets /
+// registration_support_ticket_messages) for a password-verified user whose
+// registration was REJECTED — they have an auth session but NO profile, so the
+// normal support tables (keyed on profiles.id) cannot serve them. Same
+// SupportTicket UI shape, tagged `source: 'registration'`.
+//
+// RLS scopes SELECT to the owning rejected registrant OR an approved admin.
+// Every write goes through a SECURITY DEFINER RPC (create_ / reply_to_ /
+// set_..._closed) that re-derives the registration from auth.uid().
+
+/**
+ * Every registration-support ticket the caller may see (RLS: the owning
+ * rejected registrant → only their own; an approved admin → all), each with
+ * its full thread. Returns `[]` for anyone else.
+ */
+export async function listMyRegistrationTickets(): Promise<SupportTicket[]> {
+  const sb = getSupabase();
+  const [{ data: tRows, error: tErr }, { data: mRows, error: mErr }] =
+    await Promise.all([
+      sb
+        .from('registration_support_tickets')
+        .select(REG_TICKET_SELECT)
+        .order('updated_at', { ascending: false }),
+      sb
+        .from('registration_support_ticket_messages')
+        .select('id, ticket_id, sender_is_admin, sender_id, message, status_change, created_at')
+        .order('created_at', { ascending: true }),
+    ]);
+  if (tErr) throw tErr;
+  if (mErr) throw mErr;
+
+  const tickets = (tRows as RegTicketRow[] | null) ?? [];
+  const byTicket = new Map<string, SupportTicketMessage[]>();
+  for (const row of (mRows as RegMessageRow[] | null) ?? []) {
+    const list = byTicket.get(row.ticket_id) ?? [];
+    list.push(mapRegMessage(row, 'worker'));
+    byTicket.set(row.ticket_id, list);
+  }
+  return tickets.map((r) => mapRegTicket(r, byTicket.get(r.id) ?? []));
+}
+
+/** Open a registration-support ticket for the signed-in rejected registrant.
+ *  `registration_id` is derived server-side from auth.uid(). Returns the id. */
+export async function createRegistrationTicket(
+  type: SupportTicketType,
+  subject: string,
+  description: string
+): Promise<string> {
+  const { data, error } = await getSupabase().rpc('create_registration_support_ticket', {
+    p_type: type,
+    p_subject: subject,
+    p_description: description,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as RegTicketRow | null;
+  if (!row?.id) throw new Error('create_registration_support_ticket returned no row');
+  return row.id;
+}
+
+/** Append one message to a registration-support thread. `status` is honoured
+ *  only when the caller is an approved admin. */
+export async function replyToRegistrationTicket(
+  ticketId: string,
+  message: string,
+  status?: SupportTicketStatus
+): Promise<void> {
+  const { error } = await getSupabase().rpc('reply_to_registration_support_ticket', {
+    p_ticket_id: ticketId,
+    p_message: message,
+    p_status: status ?? null,
+  });
+  if (error) throw error;
+}
+
+/** Approved-admin only: close / reopen a registration-support ticket. */
+export async function setRegistrationTicketClosed(
+  ticketId: string,
+  closed: boolean
+): Promise<void> {
+  const { error } = await getSupabase().rpc('set_registration_support_ticket_closed', {
     p_ticket_id: ticketId,
     p_closed: closed,
   });
