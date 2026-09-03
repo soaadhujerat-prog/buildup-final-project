@@ -294,9 +294,13 @@ const SignUpScreen: React.FC<Props> = ({
           ? 'לא ניתן להשלים את ההרשמה עם הפרטים האלה. ייתכן שחלקם כבר קיימים במערכת.'
           : code === 'id_upload_failed' ||
             code === 'id_document_missing' ||
+            code === 'license_upload_failed' ||
+            code === 'license_document_missing' ||
+            code === 'certificate_upload_failed' ||
+            code === 'certificate_document_missing' ||
             code === 'unsupported_type' ||
             code === 'too_large'
-          ? 'העלאת צילום תעודת הזהות נכשלה. ודא/י שהקובץ תקין (תמונה או PDF, עד 10MB) ונסה/י שוב.'
+          ? 'העלאת אחד המסמכים נכשלה. ודא/י שכל קובץ תקין (תמונה או PDF, עד 10MB) ונסה/י שוב.'
           : 'אירעה שגיאה בשליחת ההרשמה. בדוק/י את החיבור לאינטרנט ונסה/י שוב.'
       );
     } finally {

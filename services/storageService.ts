@@ -22,10 +22,13 @@ export type PrivateBucket =
   | 'worker-certificates'
   | 'worksite-images';
 
-/** Signed-read TTLs (seconds). Documents get a short window (open-and-go);
- *  avatars a longer one so a session's avatar URL survives normal use. */
+/** Signed-read TTLs (seconds). Documents get a modest window — long enough that
+ *  a screen sitting open a few minutes can still open an attachment, and
+ *  `AttachedDocument` re-signs from `storagePath` right before it opens a file
+ *  so a stale URL is never the reason an open fails; avatars get a long one so a
+ *  session's avatar URL survives normal use. */
 export const SIGNED_URL_TTL = {
-  document: 120,
+  document: 60 * 10,
   avatar: 60 * 60 * 24,
 } as const;
 

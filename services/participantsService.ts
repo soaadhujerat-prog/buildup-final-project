@@ -28,6 +28,7 @@ import type {
   Contractor,
   ContractorLicenseVerificationStatus,
   ProfessionCategory,
+  UploadedDocument,
   Worker,
 } from '../types';
 
@@ -78,18 +79,28 @@ async function loadTaxonomy() {
 }
 
 async function signAvatars(paths: string[]): Promise<Map<string, string>> {
+  return signBucket('avatars', paths);
+}
+
+/** Batch signed-URL resolution for one private bucket. Paths the caller may not
+ *  read (RLS) simply do not come back — the consumer falls back to a neutral
+ *  "not attached" state, never an error. */
+async function signBucket(
+  bucket: 'avatars' | 'worker-certificates',
+  paths: string[]
+): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const real = dedupe(paths);
   if (!real.length) return out;
   try {
     const { data } = await getSupabase()
-      .storage.from('avatars')
+      .storage.from(bucket)
       .createSignedUrls(real, SIGNED_URL_TTL.avatar);
     for (const e of data ?? []) {
       if (e.path && e.signedUrl) out.set(e.path, e.signedUrl);
     }
   } catch {
-    /* fall back to initials */
+    /* fall back to a neutral placeholder */
   }
   return out;
 }
@@ -146,7 +157,7 @@ async function fetchWorkers(
     sb.from('worker_skills').select('worker_id, skill').in('worker_id', pids),
     sb
       .from('worker_certifications')
-      .select('id, worker_id, name')
+      .select('id, worker_id, name, document_path')
       .in('worker_id', pids),
     sb
       .from('worker_preferred_areas')
@@ -164,9 +175,13 @@ async function fetchWorkers(
   const certBy = groupBy(arr<Row>(certR.data), 'worker_id');
   const areaBy = groupBy(arr<Row>(areaR.data), 'worker_id');
 
-  const avatarByPath = await signAvatars(
-    profiles.map((p) => (p.avatar_path as string | null) ?? '').filter(Boolean)
-  );
+  const [avatarByPath, certByPath] = await Promise.all([
+    signAvatars(profiles.map((p) => (p.avatar_path as string | null) ?? '').filter(Boolean)),
+    signBucket(
+      'worker-certificates',
+      arr<Row>(certR.data).map((r) => (r.document_path as string | null) ?? '').filter(Boolean)
+    ),
+  ]);
 
   return profiles.map((p) => {
     const id = String(p.id);
@@ -187,10 +202,23 @@ async function fetchWorkers(
         String(wp?.profession_category_slug ?? '')
       ) ?? '') as ProfessionCategory,
       skills: (skillBy.get(id) ?? []).map((r) => String(r.skill)),
-      certifications: (certBy.get(id) ?? []).map((r) => ({
-        id: String(r.id),
-        name: String(r.name),
-      })),
+      certifications: (certBy.get(id) ?? []).map((r) => {
+        const dp = (r.document_path as string | null) ?? null;
+        const url = dp ? certByPath.get(dp) : undefined;
+        return {
+          id: String(r.id),
+          name: String(r.name),
+          document:
+            dp && url
+              ? ({
+                  uri: url,
+                  fileName: String(r.name) || 'תעודה',
+                  type: 'certification',
+                  storagePath: dp,
+                } as UploadedDocument)
+              : undefined,
+        };
+      }),
       experienceYears: Number(wp?.experience_years ?? 0),
       preferredAreas: (areaBy.get(id) ?? []).map(
         (r) => tax.area.get(String(r.area_slug)) ?? String(r.area_slug)

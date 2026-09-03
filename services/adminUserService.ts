@@ -18,12 +18,13 @@ import type {
   Contractor,
   ContractorLicenseVerificationStatus,
   ProfessionCategory,
+  UploadedDocument,
   Worker,
 } from '../types';
 
 import { getSupabase } from './supabaseClient';
 import { invokeFn } from './functionsClient';
-import { getSignedUrl, SIGNED_URL_TTL } from './storageService';
+import { type PrivateBucket, SIGNED_URL_TTL } from './storageService';
 
 // ---------------------------------------------------------------------------
 // Directory read
@@ -72,11 +73,11 @@ export async function loadUserDirectory(): Promise<UserDirectory> {
       'profile_id, profession_category_slug, experience_years, is_available, available_from, hourly_rate, daily_rate, bio, city_name'
     ),
     sb.from('contractor_profiles').select(
-      'profile_id, company_name, contractor_registration_number, license_details, bio, license_valid_from, license_valid_until, license_verification_status, license_last_verified_at, license_next_review_at, city_name'
+      'profile_id, company_name, contractor_registration_number, license_details, bio, license_document_path, license_valid_from, license_valid_until, license_verification_status, license_last_verified_at, license_next_review_at, city_name'
     ),
     sb.from('worker_professions').select('worker_id, profession_slug, is_primary'),
     sb.from('worker_skills').select('worker_id, skill'),
-    sb.from('worker_certifications').select('id, worker_id, name'),
+    sb.from('worker_certifications').select('id, worker_id, name, document_path'),
     sb.from('worker_preferred_areas').select('worker_id, area_slug'),
     sb.from('contractor_areas').select('contractor_id, area_slug'),
     sb.from('contractor_project_types').select('contractor_id, project_type_slug'),
@@ -120,24 +121,40 @@ export async function loadUserDirectory(): Promise<UserDirectory> {
 
   const idOnFile = new Set(arr<Row>(identityR.data).map((r) => String(r.profile_id)));
 
-  // avatars: one batch signed-url call
-  const profiles = arr<Row>(profilesR.data);
-  const avatarPaths = profiles
-    .map((p) => p.avatar_path as string | null)
-    .filter((x): x is string => !!x);
-  const avatarUrlByPath = new Map<string, string>();
-  if (avatarPaths.length) {
+  // one batch signed-url call per private bucket
+  const signBatch = async (
+    bucket: PrivateBucket,
+    paths: string[]
+  ): Promise<Map<string, string>> => {
+    const map = new Map<string, string>();
+    const uniq = Array.from(new Set(paths.filter((x): x is string => !!x)));
+    if (!uniq.length) return map;
     try {
-      const { data } = await sb.storage
-        .from('avatars')
-        .createSignedUrls(avatarPaths, SIGNED_URL_TTL.avatar);
+      const { data } = await sb.storage.from(bucket).createSignedUrls(uniq, SIGNED_URL_TTL.avatar);
       for (const e of data ?? []) {
-        if (e.path && e.signedUrl) avatarUrlByPath.set(e.path, e.signedUrl);
+        if (e.path && e.signedUrl) map.set(e.path, e.signedUrl);
       }
     } catch {
-      /* fall back to initials */
+      /* a missing path just falls back to a "not attached" label */
     }
-  }
+    return map;
+  };
+
+  const profiles = arr<Row>(profilesR.data);
+  const [avatarUrlByPath, certUrlByPath, licenseUrlByPath] = await Promise.all([
+    signBatch(
+      'avatars',
+      profiles.map((p) => (p.avatar_path as string | null) ?? '')
+    ),
+    signBatch(
+      'worker-certificates',
+      arr<Row>(wCertR.data).map((r) => (r.document_path as string | null) ?? '')
+    ),
+    signBatch(
+      'contractor-licenses',
+      arr<Row>(cpR.data).map((r) => (r.license_document_path as string | null) ?? '')
+    ),
+  ]);
 
   const workers: Worker[] = [];
   const contractors: Contractor[] = [];
@@ -171,10 +188,23 @@ export async function loadUserDirectory(): Promise<UserDirectory> {
         professionCategory: (catMap.get(String(wp?.profession_category_slug ?? '')) ??
           '') as ProfessionCategory,
         skills: (wSkill.get(id) ?? []).map((r) => String(r.skill)),
-        certifications: (wCert.get(id) ?? []).map((r) => ({
-          id: String(r.id),
-          name: String(r.name),
-        })),
+        certifications: (wCert.get(id) ?? []).map((r) => {
+          const dp = (r.document_path as string | null) ?? null;
+          const url = dp ? certUrlByPath.get(dp) : undefined;
+          return {
+            id: String(r.id),
+            name: String(r.name),
+            document:
+              dp && url
+                ? ({
+                    uri: url,
+                    fileName: String(r.name) || 'תעודה',
+                    type: 'certification',
+                    storagePath: dp,
+                  } as UploadedDocument)
+                : undefined,
+          };
+        }),
         experienceYears: Number(wp?.experience_years ?? 0),
         preferredAreas: (wArea.get(id) ?? []).map(
           (r) => areaMap.get(String(r.area_slug)) ?? String(r.area_slug)
@@ -202,6 +232,18 @@ export async function loadUserDirectory(): Promise<UserDirectory> {
           (r) => ptMap.get(String(r.project_type_slug)) ?? String(r.project_type_slug)
         ),
         licenseDetails: String(cp?.license_details ?? ''),
+        contractorLicenseDocument: (() => {
+          const dp = (cp?.license_document_path as string | null) ?? null;
+          const url = dp ? licenseUrlByPath.get(dp) : undefined;
+          return dp && url
+            ? ({
+                uri: url,
+                fileName: 'רישיון קבלן',
+                type: 'contractor_license',
+                storagePath: dp,
+              } as UploadedDocument)
+            : undefined;
+        })(),
         bio: (cp?.bio as string | null) ?? undefined,
         licenseValidFrom: (cp?.license_valid_from as string | null) ?? undefined,
         licenseValidUntil: (cp?.license_valid_until as string | null) ?? undefined,

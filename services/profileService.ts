@@ -74,6 +74,7 @@ interface ContractorProfileRow {
   contractor_registration_number: string;
   license_details: string;
   bio: string | null;
+  license_document_path: string | null;
   license_valid_from: string | null;
   license_valid_until: string | null;
   license_verification_status: ContractorLicenseVerificationStatus;
@@ -244,6 +245,9 @@ interface ContractorChildren {
   cp: ContractorProfileRow | null;
   areas: string[];
   projectTypes: string[];
+  /** The CURRENT approved licence document, resolved to a signed URL (+ the
+   *  stable storagePath so `AttachedDocument` re-signs on tap). */
+  licenseDocument?: UploadedDocument;
 }
 
 async function loadContractorChildren(uid: string): Promise<ContractorChildren> {
@@ -252,7 +256,7 @@ async function loadContractorChildren(uid: string): Promise<ContractorChildren> 
     sb
       .from('contractor_profiles')
       .select(
-        'profile_id, company_name, contractor_registration_number, license_details, bio, license_valid_from, license_valid_until, license_verification_status, license_last_verified_at, license_next_review_at, city_name'
+        'profile_id, company_name, contractor_registration_number, license_details, bio, license_document_path, license_valid_from, license_valid_until, license_verification_status, license_last_verified_at, license_next_review_at, city_name'
       )
       .eq('profile_id', uid)
       .maybeSingle(),
@@ -262,12 +266,32 @@ async function loadContractorChildren(uid: string): Promise<ContractorChildren> 
   for (const res of [cp, areas, ptypes]) {
     if (res.error) throw res.error;
   }
+  const cpRow = (cp.data as ContractorProfileRow | null) ?? null;
+
+  let licenseDocument: UploadedDocument | undefined;
+  if (cpRow?.license_document_path) {
+    const url = await getSignedUrl(
+      'contractor-licenses',
+      cpRow.license_document_path,
+      SIGNED_URL_TTL.avatar
+    );
+    if (url) {
+      licenseDocument = {
+        uri: url,
+        fileName: 'רישיון קבלן',
+        type: 'contractor_license',
+        storagePath: cpRow.license_document_path,
+      };
+    }
+  }
+
   return {
-    cp: (cp.data as ContractorProfileRow | null) ?? null,
+    cp: cpRow,
     areas: ((areas.data as Array<{ area_slug: string }> | null) ?? []).map((r) => r.area_slug),
     projectTypes: ((ptypes.data as Array<{ project_type_slug: string }> | null) ?? []).map(
       (r) => r.project_type_slug
     ),
+    licenseDocument,
   };
 }
 
@@ -361,6 +385,7 @@ function mapContractor(
     areaOfOperation: areasOfOperation[0],
     projectTypes: c.projectTypes.map((slug) => tax.projectType.get(slug) ?? slug),
     licenseDetails: c.cp?.license_details ?? '',
+    contractorLicenseDocument: c.licenseDocument,
     bio: c.cp?.bio ?? undefined,
     licenseValidFrom: c.cp?.license_valid_from ?? undefined,
     licenseValidUntil: c.cp?.license_valid_until ?? undefined,

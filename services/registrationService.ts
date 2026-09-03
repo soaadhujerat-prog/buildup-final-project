@@ -26,6 +26,7 @@ import { getSupabase } from './supabaseClient';
 import {
   getSignedUrl,
   mimeForUpload,
+  type PrivateBucket,
   SIGNED_URL_TTL,
   uploadViaSignedUrl,
 } from './storageService';
@@ -90,65 +91,177 @@ const buildLocalRecord = (
   data: { ...data, password: '' } as RegistrationData,
 });
 
-/**
- * Phase 3B: the ID document is uploaded to Storage BEFORE `register`, using a
- * one-shot signed-upload token minted by `register-upload-url` (no session, no
- * service-role key, no base64 — bytes stream straight to Storage). `register`
- * then verifies the object exists and ties it to the same registration id.
- * Returns the reserved id + confirmed path, or {} when there is nothing to
- * upload (no doc, or a doc that already lives in Storage).
- */
-async function uploadIdDocument(
-  data: RegistrationData
-): Promise<{ reservedRegistrationId?: string; idDocumentPath?: string }> {
-  const doc = (data as { idDocument?: UploadedDocument }).idDocument;
-  if (!doc?.uri || doc.storagePath) return {};
-  if (/^https?:\/\//i.test(doc.uri)) return {};
-
-  const mimeType = mimeForUpload(doc.mimeType, doc.fileName || doc.uri);
-  const reserve = await callFn<{
-    ok: boolean;
-    registrationId: string;
-    path: string;
-    token: string;
-    error?: string;
-  }>('register-upload-url', {
-    fileName: doc.fileName ?? 'id-document',
-    mimeType,
-    size: doc.size ?? 0,
-  });
-  if (!reserve.ok || !reserve.token) {
-    throw new RegistrationError(reserve.error ?? 'id_upload_failed');
-  }
-  try {
-    await uploadViaSignedUrl('id-documents', reserve.path, reserve.token, doc.uri, mimeType);
-  } catch {
-    throw new RegistrationError('id_upload_failed');
-  }
-  return { reservedRegistrationId: reserve.registrationId, idDocumentPath: reserve.path };
+interface ReserveResponse {
+  ok: boolean;
+  kind?: string;
+  bucket?: PrivateBucket;
+  registrationId?: string;
+  path?: string;
+  token?: string;
+  error?: string;
 }
 
-/** Strip local-file document objects from the JSON payload sent to `register`
- *  (the ID doc travels as a Storage path; licence docs are captured later). */
+const isLocalPick = (doc?: UploadedDocument): doc is UploadedDocument =>
+  !!doc?.uri && !doc.storagePath && !/^https?:\/\//i.test(doc.uri);
+
+/** Result of staging every document a sign-up carries, all under ONE reserved
+ *  registration id (see the `register-upload-url` Edge Function). */
+interface StagedDocuments {
+  reservedRegistrationId?: string;
+  idDocumentPath?: string;
+  licenseDocumentPath?: string;
+  /** Certifications rebuilt as name + (verified) staged path — NEVER a local
+   *  `file://` uri. Only set for a worker sign-up. */
+  certifications?: Array<{ name: string; documentPath?: string }>;
+}
+
+/**
+ * Phase 3B + 051: every document picked at sign-up is uploaded to private
+ * Storage BEFORE `register`, via one-shot signed-upload tokens minted by
+ * `register-upload-url` (no session, no service-role key, no base64 — bytes
+ * stream straight to Storage). The ID document reserves the registration id;
+ * the contractor licence and every worker certificate document are staged into
+ * the SAME `{registrationId}/` folder. `register` then verifies every object
+ * exists and ties them all to that one registration row; on approval the
+ * `approve-registration` function relocates them to canonical user-owned paths.
+ *
+ * A failed upload throws a typed `RegistrationError` — the sign-up is never
+ * submitted pretending a document was stored.
+ */
+async function uploadRegistrationDocuments(
+  role: 'worker' | 'contractor',
+  data: RegistrationData
+): Promise<StagedDocuments> {
+  const out: StagedDocuments = {};
+
+  // ---- 1. ID document (reserves the registration id) ----
+  const idDoc = (data as { idDocument?: UploadedDocument }).idDocument;
+  if (isLocalPick(idDoc)) {
+    const mimeType = mimeForUpload(idDoc.mimeType, idDoc.fileName || idDoc.uri);
+    const reserve = await callFn<ReserveResponse>('register-upload-url', {
+      kind: 'id',
+      fileName: idDoc.fileName ?? 'id-document',
+      mimeType,
+      size: idDoc.size ?? 0,
+    });
+    if (!reserve.ok || !reserve.token || !reserve.path || !reserve.registrationId) {
+      throw new RegistrationError(reserve.error ?? 'id_upload_failed');
+    }
+    try {
+      await uploadViaSignedUrl(
+        reserve.bucket ?? 'id-documents',
+        reserve.path,
+        reserve.token,
+        idDoc.uri,
+        mimeType
+      );
+    } catch {
+      throw new RegistrationError('id_upload_failed');
+    }
+    out.reservedRegistrationId = reserve.registrationId;
+    out.idDocumentPath = reserve.path;
+  }
+
+  // ---- 2. Contractor licence document ----
+  if (role === 'contractor') {
+    const lic = (data as ContractorRegistrationData).licenseDocument;
+    if (isLocalPick(lic)) {
+      if (!out.reservedRegistrationId) throw new RegistrationError('license_upload_failed');
+      const mimeType = mimeForUpload(lic.mimeType, lic.fileName || lic.uri);
+      const reserve = await callFn<ReserveResponse>('register-upload-url', {
+        kind: 'license',
+        registrationId: out.reservedRegistrationId,
+        fileName: lic.fileName ?? 'license',
+        mimeType,
+        size: lic.size ?? 0,
+      });
+      if (!reserve.ok || !reserve.token || !reserve.path) {
+        throw new RegistrationError(reserve.error ?? 'license_upload_failed');
+      }
+      try {
+        await uploadViaSignedUrl(
+          reserve.bucket ?? 'contractor-licenses',
+          reserve.path,
+          reserve.token,
+          lic.uri,
+          mimeType
+        );
+      } catch {
+        throw new RegistrationError('license_upload_failed');
+      }
+      out.licenseDocumentPath = reserve.path;
+    }
+  }
+
+  // ---- 3. Worker certificate documents (one per certification) ----
+  if (role === 'worker') {
+    const certs = (data as WorkerRegistrationData).certifications ?? [];
+    const rebuilt: Array<{ name: string; documentPath?: string }> = [];
+    for (let i = 0; i < certs.length; i++) {
+      const name = (certs[i]?.name ?? '').trim();
+      if (!name) continue;
+      const doc = certs[i]?.document;
+      let documentPath: string | undefined;
+      if (doc?.storagePath) {
+        documentPath = doc.storagePath;
+      } else if (isLocalPick(doc)) {
+        if (!out.reservedRegistrationId) throw new RegistrationError('certificate_upload_failed');
+        const mimeType = mimeForUpload(doc.mimeType, doc.fileName || doc.uri);
+        const reserve = await callFn<ReserveResponse>('register-upload-url', {
+          kind: 'certificate',
+          registrationId: out.reservedRegistrationId,
+          index: i,
+          fileName: doc.fileName ?? `certificate-${i}`,
+          mimeType,
+          size: doc.size ?? 0,
+        });
+        if (!reserve.ok || !reserve.token || !reserve.path) {
+          throw new RegistrationError(reserve.error ?? 'certificate_upload_failed');
+        }
+        try {
+          await uploadViaSignedUrl(
+            reserve.bucket ?? 'worker-certificates',
+            reserve.path,
+            reserve.token,
+            doc.uri,
+            mimeType
+          );
+        } catch {
+          throw new RegistrationError('certificate_upload_failed');
+        }
+        documentPath = reserve.path;
+      }
+      rebuilt.push(documentPath ? { name, documentPath } : { name });
+    }
+    out.certifications = rebuilt;
+  }
+
+  return out;
+}
+
+/** Strip local-file document objects from the JSON payload sent to `register`.
+ *  ID + licence docs travel as separate verified Storage paths; certifications
+ *  are re-attached by the caller as `[{ name, documentPath }]` (never a uri). */
 const stripLocalDocs = (data: RegistrationData): Record<string, unknown> => {
-  const { idDocument, licenseDocument, ...rest } = data as unknown as Record<
-    string,
-    unknown
-  >;
+  const { idDocument, licenseDocument, certifications, ...rest } =
+    data as unknown as Record<string, unknown>;
   void idDocument;
   void licenseDocument;
+  void certifications;
   return rest;
 };
 
 export async function submitWorkerRegistration(
   data: WorkerRegistrationData
 ): Promise<RegistrationRecord> {
-  const { reservedRegistrationId, idDocumentPath } = await uploadIdDocument(data);
+  const staged = await uploadRegistrationDocuments('worker', data);
+  const payload = stripLocalDocs(data);
+  payload.certifications = staged.certifications ?? [];
   const res = await callFn<RegisterResponse>('register', {
     role: 'worker',
-    data: stripLocalDocs(data),
-    reservedRegistrationId,
-    idDocumentPath,
+    data: payload,
+    reservedRegistrationId: staged.reservedRegistrationId,
+    idDocumentPath: staged.idDocumentPath,
   });
   if (!res.ok || !res.registrationId) {
     throw new RegistrationError(res.error ?? 'unavailable');
@@ -159,12 +272,13 @@ export async function submitWorkerRegistration(
 export async function submitContractorRegistration(
   data: ContractorRegistrationData
 ): Promise<RegistrationRecord> {
-  const { reservedRegistrationId, idDocumentPath } = await uploadIdDocument(data);
+  const staged = await uploadRegistrationDocuments('contractor', data);
   const res = await callFn<RegisterResponse>('register', {
     role: 'contractor',
     data: stripLocalDocs(data),
-    reservedRegistrationId,
-    idDocumentPath,
+    reservedRegistrationId: staged.reservedRegistrationId,
+    idDocumentPath: staged.idDocumentPath,
+    licenseDocumentPath: staged.licenseDocumentPath,
   });
   if (!res.ok || !res.registrationId) {
     throw new RegistrationError(res.error ?? 'unavailable');
@@ -190,6 +304,7 @@ interface AdminRegRow {
   created_user_id: string | null;
   external_checks: RegistrationRecord['externalChecks'] | null;
   id_document_path: string | null;
+  license_document_path: string | null;
   data: Record<string, unknown> | null;
   email: string | null;
   events: Array<{
@@ -215,33 +330,82 @@ const mapEvent = (e: NonNullable<AdminRegRow['events']>[number]): RegistrationSt
   createdAt: e.createdAt,
 });
 
+/** image/* or application/pdf for a stored object path, or undefined. */
+const mimeForPath = (path: string): string | undefined => {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'pdf') return 'application/pdf';
+  if (['jpg', 'jpeg', 'png', 'heic', 'webp'].includes(ext)) {
+    return `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+  }
+  return undefined;
+};
+
 async function mapRow(r: AdminRegRow): Promise<RegistrationRecord> {
-  // id_document_path -> a short-lived signed URL the admin can open. The
-  // raw path is never surfaced in the UI (see RegistrationDetailsScreen).
+  // Every document path -> a short-lived signed URL the admin can open. The raw
+  // path is kept as `storagePath` so `AttachedDocument` re-signs on tap; it is
+  // never surfaced in the UI (see RegistrationDetailsScreen).
   let idDocument: UploadedDocument | undefined;
   if (r.id_document_path) {
-    const url = await getSignedUrl(
-      'id-documents',
-      r.id_document_path,
-      SIGNED_URL_TTL.document
-    );
+    const url = await getSignedUrl('id-documents', r.id_document_path, SIGNED_URL_TTL.document);
     if (url) {
       const ext = r.id_document_path.split('.').pop()?.toLowerCase() ?? '';
-      const mimeType =
-        ext === 'pdf'
-          ? 'application/pdf'
-          : ['jpg', 'jpeg', 'png', 'heic', 'webp'].includes(ext)
-          ? `image/${ext === 'jpg' ? 'jpeg' : ext}`
-          : undefined;
       idDocument = {
         uri: url,
         fileName: `תעודת זהות.${ext || 'jpg'}`,
-        mimeType,
+        mimeType: mimeForPath(r.id_document_path),
         type: 'id_card',
         storagePath: r.id_document_path,
       };
     }
   }
+
+  // Contractor licence document (051) — staged path pre-approval, canonical
+  // {userId}/... after approval; the admin can open it in both states.
+  let licenseDocument: UploadedDocument | undefined;
+  if (r.role === 'contractor' && r.license_document_path) {
+    const url = await getSignedUrl(
+      'contractor-licenses',
+      r.license_document_path,
+      SIGNED_URL_TTL.document
+    );
+    if (url) {
+      licenseDocument = {
+        uri: url,
+        fileName: 'רישיון קבלן',
+        mimeType: mimeForPath(r.license_document_path),
+        type: 'contractor_license',
+        storagePath: r.license_document_path,
+      };
+    }
+  }
+
+  // Worker certificate documents (051) — each certification in `data` carries
+  // its own staged/canonical `documentPath`; sign it to `{ name, document }`.
+  let certifications: Array<{ name: string; document?: UploadedDocument }> | undefined;
+  const rawCerts = (r.data as { certifications?: unknown })?.certifications;
+  if (r.role === 'worker' && Array.isArray(rawCerts)) {
+    certifications = await Promise.all(
+      rawCerts.map(async (c) => {
+        const name = String((c as { name?: unknown })?.name ?? '').trim();
+        const dp = String((c as { documentPath?: unknown })?.documentPath ?? '').trim();
+        if (!dp) return { name };
+        const url = await getSignedUrl('worker-certificates', dp, SIGNED_URL_TTL.document);
+        return url
+          ? {
+              name,
+              document: {
+                uri: url,
+                fileName: name || 'תעודה',
+                mimeType: mimeForPath(dp),
+                type: 'certification',
+                storagePath: dp,
+              } as UploadedDocument,
+            }
+          : { name };
+      })
+    );
+  }
+
   return {
     id: r.id,
     role: r.role,
@@ -257,11 +421,13 @@ async function mapRow(r: AdminRegRow): Promise<RegistrationRecord> {
     statusHistory: (r.events ?? []).map(mapEvent),
     externalChecks: r.external_checks ?? {},
     // email is joined live from auth.users (never stored in `data`, decision #3);
-    // idNumber is intentionally absent (HMAC only); idDocument is a signed URL.
+    // idNumber is intentionally absent (HMAC only); documents are signed URLs.
     data: {
       ...(r.data ?? {}),
       email: r.email ?? '',
       ...(idDocument ? { idDocument } : {}),
+      ...(licenseDocument ? { licenseDocument } : {}),
+      ...(certifications ? { certifications } : {}),
     } as RegistrationData,
   };
 }
