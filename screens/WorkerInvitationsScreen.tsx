@@ -17,6 +17,7 @@ import StatusBadge from '../components/StatusBadge';
 import ResponseDialog from '../components/ResponseDialog';
 import ContractorAvatar from '../components/ContractorAvatar';
 import { getWorkerJobAssignment } from '../services/assignmentService';
+import { isOpenForApplications } from '../services/jobStatusService';
 import {
   formatJobRateCompact,
   invitationTimeline,
@@ -51,8 +52,17 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
     assignments,
     getUserById,
     respondToInvitation,
-    isJobFullyStaffed,
   } = useApp();
+
+  // Whether a job is no longer open to registration, from the SERVER-derived
+  // job registration state (job.acceptingApplications ← job_registration_state).
+  // A worker's own `assignments` array is RLS-scoped to their own rows, so a
+  // client-side capacity count would always undercount — never derive "full"
+  // from it. `respond_to_invitation` remains the authoritative capacity check.
+  const jobClosedToRegistration = (jobId: string): boolean => {
+    const j = getJobById(jobId);
+    return !!j && !isOpenForApplications(j);
+  };
   const me = currentUser as Worker | undefined;
 
   const [filter, setFilter] = useState<Filter>('all');
@@ -88,7 +98,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
 
   const handleAccept = (inv: Invitation) => {
     if (submitting) return;
-    if (isJobFullyStaffed(inv.jobId)) {
+    if (jobClosedToRegistration(inv.jobId)) {
       Alert.alert('כל המקומות במשרה כבר אוישו.');
       return;
     }
@@ -212,7 +222,7 @@ const WorkerInvitationsScreen: React.FC<Props> = ({
                 jobTitle={job?.title ?? '—'}
                 jobCity={job?.city ?? ''}
                 jobRateLabel={job ? formatJobRateCompact(job) : ''}
-                jobFull={isJobFullyStaffed(item.jobId)}
+                jobFull={jobClosedToRegistration(item.jobId)}
                 contractorName={
                   contractor?.companyName ?? contractor?.fullName ?? ''
                 }

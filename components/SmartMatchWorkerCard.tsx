@@ -22,6 +22,9 @@ interface Props {
   invited: boolean;
   /** An active assignment for this worker on this job. */
   assigned: boolean;
+  /** A live pending / accepted application by this worker for this job — the
+   *  contractor responds to it in the candidates screen, not via an invitation. */
+  applied?: boolean;
   onPressProfile: () => void;
   onInvite: () => void;
 }
@@ -54,6 +57,7 @@ const SmartMatchWorkerCard: React.FC<Props> = ({
   jobCity,
   invited,
   assigned,
+  applied = false,
   onPressProfile,
   onInvite,
 }) => {
@@ -141,6 +145,11 @@ const SmartMatchWorkerCard: React.FC<Props> = ({
           <View style={[styles.cta, styles.ctaDone]}>
             <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
             <Text style={[styles.ctaText, styles.ctaDoneText]}>הוזמן למשרה</Text>
+          </View>
+        ) : applied ? (
+          <View style={[styles.cta, styles.ctaDone]}>
+            <Ionicons name="document-text-outline" size={16} color={Colors.success} />
+            <Text style={[styles.ctaText, styles.ctaDoneText]}>הגיש/ה מועמדות</Text>
           </View>
         ) : (
           <TouchableOpacity

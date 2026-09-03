@@ -381,6 +381,15 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
         (i.status === 'pending' || i.status === 'accepted')
     );
     if (hasLiveInvitation) return false;
+    // A worker who now has a live (pending/accepted) application for this job
+    // is handled through the candidates list, not a re-invitation (parity with
+    // the send_invitation guard, migration 050 · M-1).
+    const hasLiveApplication = candidates.some(
+      (a) =>
+        a.workerId === inv.workerId &&
+        (a.status === 'pending' || a.status === 'accepted')
+    );
+    if (hasLiveApplication) return false;
     return !hasActiveAssignment(assignments, job.id, inv.workerId);
   };
 
@@ -604,6 +613,52 @@ const JobDetailsContent: React.FC<Props & { job: JobPost }> = ({
           <Text style={styles.workerStatusTime}>
             עבור/י למסך "הזמנות מקבלנים" כדי להשיב להזמנה.
           </Text>
+        </View>
+      );
+    }
+
+    // A cancelled placement with NO live application row — the invitation-sourced
+    // case the branches above miss (an accepted invitation creates an assignment
+    // but no application). Reached only AFTER myAssignmentCancelled (which needs
+    // an accepted application) has returned false, so the application-sourced
+    // worker-cancellation reapply flow (reapply_after_cancellation) is never
+    // affected. Neither a contractor NOR a worker cancellation of an
+    // invitation-sourced placement restores apply-eligibility (can_worker_apply
+    // still sees the accepted invitation — migration 049), so show the cancelled
+    // state and NEVER the apply CTA. No reapply path is introduced.
+    if (myAssignment?.status === 'cancelled') {
+      const byContractor = myAssignment.cancelledBy === 'contractor';
+      const cancelLine = assignmentCancelLine(myAssignment);
+      return (
+        <View style={styles.workerStatusWrap}>
+          <View style={[styles.actionBtn, styles.appliedBox]}>
+            <Ionicons
+              name="close-circle-outline"
+              size={20}
+              color={Colors.textSecondary}
+            />
+            <Text style={styles.appliedText}>השיבוץ בוטל</Text>
+          </View>
+          {cancelLine && (
+            <Text style={styles.workerStatusTime}>{cancelLine}</Text>
+          )}
+          {myAssignment.cancellationMessage ? (
+            <View style={styles.responseNote}>
+              <Text style={styles.responseNoteLabel}>
+                {byContractor ? 'הודעת הקבלן' : 'ההודעה ששלחת'}
+              </Text>
+              <Text style={styles.responseNoteText}>
+                {myAssignment.cancellationMessage}
+              </Text>
+            </View>
+          ) : null}
+          {jobOpen && (
+            <Text style={styles.workerStatusTime}>
+              {byContractor
+                ? 'הקבלן ביטל את השיבוץ, ולכן לא ניתן להגיש מועמדות מחדש למשרה זו.'
+                : 'לא ניתן להגיש מועמדות מחדש למשרה זו כרגע.'}
+            </Text>
+          )}
         </View>
       );
     }

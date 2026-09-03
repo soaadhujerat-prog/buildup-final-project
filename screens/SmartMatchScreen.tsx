@@ -62,6 +62,7 @@ const SmartMatchScreen: React.FC<Props> = ({
     currentUser,
     jobs,
     workers,
+    applications,
     invitations,
     assignments,
     sendInvitation,
@@ -156,6 +157,23 @@ const SmartMatchScreen: React.FC<Props> = ({
         .map((a) => a.workerId)
     );
   }, [assignments, selectedJobId]);
+
+  // A worker who already has a LIVE (pending/accepted) application for the
+  // selected job is already in the pipeline — the contractor responds to that
+  // application, not a parallel invitation (mirrors the send_invitation guard,
+  // migration 050 · M-1). Withdrawn / rejected applications do not count.
+  const appliedWorkerIds = useMemo(() => {
+    if (!selectedJobId) return new Set<string>();
+    return new Set(
+      applications
+        .filter(
+          (a) =>
+            a.jobId === selectedJobId &&
+            (a.status === 'pending' || a.status === 'accepted')
+        )
+        .map((a) => a.workerId)
+    );
+  }, [applications, selectedJobId]);
 
   // ---- rows = result + worker + relationship ----
   const rows = useMemo<Row[]>(() => {
@@ -496,6 +514,7 @@ const SmartMatchScreen: React.FC<Props> = ({
               jobCity={selectedJob.city}
               invited={invitedWorkerIds.has(item.worker.id)}
               assigned={assignedWorkerIds.has(item.worker.id)}
+              applied={appliedWorkerIds.has(item.worker.id)}
               onPressProfile={() => onOpenWorkerProfile(item.worker.id)}
               onInvite={() =>
                 handleInvite(item.worker.id, item.worker.fullName)

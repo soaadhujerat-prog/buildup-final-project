@@ -59,6 +59,7 @@ const WorkerProfileScreen: React.FC<Props> = ({
     getUserById,
     jobs,
     sendInvitation,
+    applications,
     invitations,
     assignments,
     isFavoriteWorker,
@@ -92,8 +93,10 @@ const WorkerProfileScreen: React.FC<Props> = ({
   // lifecycle `job.status` — the two are different concepts, and keying off
   // `status === 'open'` was hiding jobs that are still open to registration
   // but already `in_progress`. A job is also hidden when the worker is
-  // already staffed on it, or already has an *active* (pending/accepted)
-  // invitation for it. Old declined/cancelled invitations never hide a job.
+  // already staffed on it, already has an *active* (pending/accepted)
+  // invitation for it, or already has a *live* (pending/accepted) application
+  // for it (migration 050 · M-1 — respond to the application, don't invite in
+  // parallel). Old declined/cancelled/withdrawn/rejected rows never hide a job.
   const invitableJobs = useMemo(() => {
     if (!isContractor || !me) return [];
     return jobs.filter((j) => {
@@ -106,9 +109,16 @@ const WorkerProfileScreen: React.FC<Props> = ({
           i.workerId === workerId &&
           (i.status === 'pending' || i.status === 'accepted')
       );
-      return !hasActiveInvitation;
+      if (hasActiveInvitation) return false;
+      const hasLiveApplication = applications.some(
+        (a) =>
+          a.jobId === j.id &&
+          a.workerId === workerId &&
+          (a.status === 'pending' || a.status === 'accepted')
+      );
+      return !hasLiveApplication;
     });
-  }, [jobs, me, isContractor, assignments, invitations, workerId]);
+  }, [jobs, me, isContractor, assignments, invitations, applications, workerId]);
 
   // Has the contractor already invited this worker for any job?
   const existingInvitations = useMemo(() => {

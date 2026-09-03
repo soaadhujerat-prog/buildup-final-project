@@ -1955,6 +1955,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       } catch (e) {
         if (e instanceof invitationsService.InvitationError) {
           if (e.code === 'duplicate') return { ok: false, reason: 'duplicate' };
+          if (e.code === 'has_application')
+            return { ok: false, reason: 'has_application' };
           if (e.code === 'full') return { ok: false, reason: 'full' };
           if (e.code === 'ineligible') return { ok: false, reason: 'ineligible' };
         }

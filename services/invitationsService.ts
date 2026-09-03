@@ -66,6 +66,7 @@ export function mapInvitationRow(r: InvitationRow): Invitation {
  *  clean Hebrew message per case instead of a raw Postgres/RLS error. */
 export type InvitationErrorCode =
   | 'duplicate' // an active (pending/accepted) invitation already exists
+  | 'has_application' // the worker already has a live (pending/accepted) application for this job
   | 'ineligible' // job closed / not open / target not an approved worker
   | 'unauthorized' // not signed in / not the owning contractor / not the invited worker
   | 'not_pending' // acted on an invitation that is no longer pending
@@ -83,7 +84,12 @@ export class InvitationError extends Error {
 /** Why a `sendInvitation` call did NOT create a new invitation. `duplicate` is
  *  a first-class outcome (a live pending/accepted invitation already exists) —
  *  it is NEVER surfaced as a successful send. */
-export type SendInvitationFailure = 'full' | 'duplicate' | 'ineligible' | 'error';
+export type SendInvitationFailure =
+  | 'full'
+  | 'duplicate'
+  | 'has_application'
+  | 'ineligible'
+  | 'error';
 
 /** Clean Hebrew message for a `sendInvitation` failure, shared by every screen
  *  that can send an invitation (worker search, Smart Match, worker profile,
@@ -92,6 +98,8 @@ export function sendInvitationErrorText(reason: SendInvitationFailure): string {
   switch (reason) {
     case 'duplicate':
       return 'כבר קיימת הזמנה פעילה לעובד זה עבור המשרה.';
+    case 'has_application':
+      return 'לעובד זה כבר קיימת מועמדות פעילה למשרה זו — יש להשיב לה במסך המועמדים במקום לשלוח הזמנה.';
     case 'full':
       return 'כל המקומות במשרה כבר אוישו.';
     case 'ineligible':
@@ -125,6 +133,7 @@ export async function listVisibleInvitations(): Promise<Invitation[]> {
  * Contractor sends an invitation to a worker for one of their own jobs
  * (send_invitation RPC — migration 030). Returns the persisted row.
  *   23505 (unique_violation) -> 'duplicate' (an active invitation already exists)
+ *   P0001 + "live application" -> 'has_application' (worker already applied — 050/M-1)
  *   23514 / "fully staffed"  -> 'full'
  *   42501                    -> 'unauthorized'
  *   P0001 / P0002            -> 'ineligible' (job not open / closed / bad target)
@@ -142,6 +151,12 @@ export async function sendInvitationBackend(
   });
   if (error) {
     if (error.code === '23505') throw new InvitationError('duplicate');
+    if (
+      error.code === 'P0001' &&
+      /live application for job/i.test(error.message ?? '')
+    ) {
+      throw new InvitationError('has_application');
+    }
     if (error.code === '23514' || /fully staffed/i.test(error.message ?? '')) {
       throw new InvitationError('full');
     }
@@ -176,7 +191,13 @@ export async function respondToInvitationBackend(
     p_response_message: trimmed ? trimmed : null,
   });
   if (error) {
-    if (error.code === '23514' || /fully staffed/i.test(error.message ?? '')) {
+    // 23505 = assignments_one_active — the worker is already staffed on this
+    // job through another source; surface the same clean "no free slot" text.
+    if (
+      error.code === '23514' ||
+      error.code === '23505' ||
+      /fully staffed/i.test(error.message ?? '')
+    ) {
       throw new InvitationError('full');
     }
     if (error.code === 'P0001' || error.code === 'P0002') {

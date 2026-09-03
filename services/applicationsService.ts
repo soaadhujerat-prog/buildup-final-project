@@ -225,7 +225,14 @@ export async function respondToApplicationBackend(
   if (error) {
     // 23514 = check_violation raised by respond_to_application / the
     // assignments_capacity_guard trigger when the job filled first.
-    if (error.code === '23514' || /fully staffed/i.test(error.message ?? '')) {
+    // 23505 = the assignments_one_active partial unique index — the worker is
+    // already staffed on this job (e.g. via an accepted invitation). Same
+    // clean "no free slot for this placement" message rather than a raw error.
+    if (
+      error.code === '23514' ||
+      error.code === '23505' ||
+      /fully staffed/i.test(error.message ?? '')
+    ) {
       throw new ApplicationError('full');
     }
     if (error.code === 'P0001') throw new ApplicationError('not_pending');
