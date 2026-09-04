@@ -6,7 +6,7 @@ BuildUp is a full-stack mobile application: a **React Native + Expo** client wit
 
 <p>
   <img alt="React Native" src="https://img.shields.io/badge/React%20Native-0.81-20232A?logo=react&logoColor=61DAFB">
-  <img alt="Expo" src="https://img.shields.io/badge/Expo%20SDK-54-000020?logo=expo&logoColor=white">
+  <img alt="Expo" src="https://img.shields.io/badge/Expo%20SDK-57-000020?logo=expo&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
   <img alt="Supabase" src="https://img.shields.io/badge/Supabase-backend-3FCF8E?logo=supabase&logoColor=white">
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-RLS%20%2B%20RPC-4169E1?logo=postgresql&logoColor=white">
@@ -59,7 +59,7 @@ BuildUp is a marketplace and workflow tool for the Israeli construction sector. 
 
 The technical foundation:
 
-- **React Native + Expo (SDK 54)** client, written in **TypeScript** under `strict` mode.
+- **React Native + Expo (SDK 57)** client, written in **TypeScript** under `strict` mode.
 - **Hebrew RTL UI** across every screen.
 - **Supabase** as the single backend: **PostgreSQL** with **Row Level Security**, **RPC / SECURITY DEFINER** functions for all privileged writes, **Realtime** for chat and notifications, **private Storage** buckets for documents and images, and **Edge Functions** (Deno) for authentication bridging, admin operations and Smart Match.
 - A **role-based experience** — the navigator renders a different shell, tab set and screen stack per role, and the server re-verifies role and status on every privileged action.
@@ -596,9 +596,9 @@ BuildUp is primarily intended to be run and demonstrated using **Expo Go on a ph
    npx expo start
    ```
 
-6. **Open the project in Expo Go** on a physical Android or iPhone device — scan the QR code shown in the terminal (Android: scan from inside the Expo Go app; iPhone: scan with the Camera app). The phone and the computer must be on the same network.
+   Then open the project in **Expo Go** on your phone — see [iOS / iPhone](#-ios--iphone) or [Android](#-android) below for the platform-specific steps.
 
-Requirements: a recent LTS release of **Node.js** (as expected by Expo SDK 54) and **npm**. No global Expo CLI install is required — the project uses `npx expo`.
+Requirements: a recent LTS release of **Node.js** and **npm**, compatible with **Expo SDK 57**. No global Expo CLI install is required — the project uses `npx expo`.
 
 ---
 
@@ -641,9 +641,57 @@ that user's row-level policies allow. It is **not** the service-role key.
 npx expo start
 ```
 
-**BuildUp is primarily intended to be run and demonstrated using Expo Go on a physical mobile device.** After `npx expo start`, scan the QR code from the terminal with **Expo Go** on a physical Android or iPhone device to launch the app. The app connects directly to the Supabase project named in your `.env`.
+**BuildUp is primarily intended to be run and demonstrated using Expo Go on a physical mobile device.** After `npx expo start`, scan the QR code from the terminal with **Expo Go** to launch the app — see [iOS / iPhone](#-ios--iphone) and [Android](#-android) below for the platform-specific steps. The app connects directly to the Supabase project named in your `.env` (or the shipped demo config).
 
 An Android emulator or iOS simulator can optionally be used as a development alternative (`npm run android` / `npm run ios`), but the physical-device Expo Go flow is the recommended way to run and present the project.
+
+### 🍏 iOS / iPhone
+
+1. Install the current version of **Expo Go** from the App Store — it must support **Expo SDK 57**.
+2. Sign in to the **same Expo account** in **both** places (required for Expo Go to load the project on iOS):
+   - the **Expo CLI**, on your computer, and
+   - the **Expo Go** app, on the iPhone.
+
+   To sign in from the CLI (or just confirm you're already signed in):
+
+   ```bash
+   npx expo login
+   ```
+
+   If you're already logged in, this simply confirms the active Expo account.
+
+3. Start the dev server:
+
+   ```bash
+   npx expo start
+   ```
+
+4. Scan the QR code shown in the terminal using the iPhone's **Camera app** (it offers to open Expo Go) or from inside the **Expo Go** app itself.
+5. The phone and the computer should normally be on the **same Wi-Fi network**.
+
+### 🤖 Android
+
+1. Install the current version of **Expo Go** from the Play Store — it must support **Expo SDK 57**.
+2. Start the dev server:
+
+   ```bash
+   npx expo start
+   ```
+
+3. Open **Expo Go** and scan the QR code shown in the terminal.
+4. The phone and the computer should normally be on the **same Wi-Fi network**.
+
+> Unlike iOS, an Expo account / `npx expo login` is **not** required on Android — Expo Go there can load the project without a signed-in account.
+
+### 🌐 Network Fallback
+
+If the phone and computer are on the same Wi-Fi but LAN mode still can't connect (e.g. a restrictive router), fall back to tunnel mode:
+
+```bash
+npx expo start --tunnel
+```
+
+This is an optional fallback, not the default — it routes through Expo's tunnel service and is slower than a direct LAN connection.
 
 ### Additional Scripts
 

@@ -28,7 +28,10 @@
           "photosPermission": "האפליקציה משתמשת בגלריה כדי לצרף תמונה של תעודת הזהות שלך לצורך ההרשמה."
         }
       ],
-      "expo-document-picker"
+      "expo-document-picker",
+      "expo-font",
+      "expo-splash-screen",
+      "expo-status-bar"
     ]
   }
 }
