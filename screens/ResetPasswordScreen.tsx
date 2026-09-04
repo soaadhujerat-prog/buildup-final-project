@@ -12,6 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isAuthApiError, isAuthSessionMissingError } from '@supabase/supabase-js';
+
 import { Colors, Spacing, Radius, FontSize, Shadow } from '../theme/colors';
 import { updatePassword } from '../services/passwordResetService';
 import {
@@ -75,10 +77,33 @@ const ResetPasswordScreen: React.FC<Props> = ({ onBack }) => {
     try {
       await updatePassword(newPassword);
       setSubmitted(true);
-    } catch {
-      // Backend enabled and the update genuinely failed (e.g. the recovery
-      // session expired). Surface it — no silent success.
-      setError('לא ניתן לעדכן את הסיסמה כעת. חזור/חזרי למסך הכניסה ובקש/י קוד איפוס חדש.');
+    } catch (err) {
+      // Typed inspection first (never rely only on the English message) —
+      // the recovery session and the "session is gone" case need different
+      // Hebrew copy and different follow-up behaviour.
+      if (isAuthApiError(err) && err.code === 'same_password') {
+        // Confirmed live: Supabase Auth's own same-password guard (422,
+        // error_code 'same_password'). The recovery session is still
+        // perfectly valid — the user just needs a different password, not a
+        // new code. Stay on this screen; nothing else changes.
+        setError('הסיסמה החדשה זהה לסיסמה הנוכחית. יש לבחור סיסמה שונה.');
+      } else if (
+        isAuthSessionMissingError(err) ||
+        (isAuthApiError(err) &&
+          (err.status === 401 ||
+            err.code === 'session_not_found' ||
+            err.code === 'session_expired'))
+      ) {
+        // The recovery session itself is genuinely gone/expired — only now
+        // does "go back and request a new code" make sense.
+        setError(
+          'תוקף קוד האיפוס פג או שהחיבור לאימות הסתיים. חזור/חזרי למסך הכניסה ובקש/י קוד איפוס חדש.'
+        );
+      } else {
+        // Unexpected error — never expose raw Supabase details (message,
+        // status, tokens, email, OTP) to the user.
+        setError('לא ניתן לעדכן את הסיסמה כעת. נסה/י שוב.');
+      }
     } finally {
       setSubmitting(false);
     }
