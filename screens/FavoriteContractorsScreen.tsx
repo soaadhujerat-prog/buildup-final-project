@@ -12,12 +12,17 @@ import { Contractor } from '../types';
 interface Props {
   onBack: () => void;
   onOpenAvailableJobs: () => void;
+  onOpenContractorProfile: (contractorId: string) => void;
 }
 
 /** "קבלנים מועדפים" — the contractors the current worker has bookmarked.
  *  Favorites are personal to this worker (see WorkerFavoriteContractor in
  *  types/index.ts) — this screen never shows another worker's list. */
-const FavoriteContractorsScreen: React.FC<Props> = ({ onBack, onOpenAvailableJobs }) => {
+const FavoriteContractorsScreen: React.FC<Props> = ({
+  onBack,
+  onOpenAvailableJobs,
+  onOpenContractorProfile,
+}) => {
   const insets = useSafeAreaInsets();
   const { currentUser, contractors, jobs, getFavoriteContractorIds, toggleFavoriteContractor } =
     useApp();
@@ -97,6 +102,7 @@ const FavoriteContractorsScreen: React.FC<Props> = ({ onBack, onOpenAvailableJob
                 isFavorite
                 onToggleFavorite={() => handleToggleFavorite(item.id)}
                 openJobsCount={openJobsCountByContractor[item.id] ?? 0}
+                onPress={() => onOpenContractorProfile(item.id)}
               />
             )}
           />

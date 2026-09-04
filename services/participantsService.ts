@@ -327,6 +327,54 @@ export async function loadContractorSummaries(
 }
 
 /**
+ * Shared mapper for the narrow "safe contractor summary" RPCs (migration 054
+ * `get_job_publisher`, migration 055 `get_my_favorite_contractors`) — both
+ * return the same safe column set (never licence number / details / dates /
+ * document, never ID / auth / admin data), so both map through here.
+ * `project_type_slugs` is optional on the row: `get_job_publisher` doesn't
+ * select it (kept `[]`, unchanged behaviour), `get_my_favorite_contractors`
+ * does.
+ */
+function mapSafeContractorRow(
+  p: Row,
+  avatarByPath: Map<string, string>,
+  tax: { area: Map<string, string>; pt: Map<string, string> }
+): Contractor {
+  const id = String(p.id);
+  const areaSlugs = arr<string>(p.area_slugs).map(String);
+  const areasOfOperation = areaSlugs.map((slug) => tax.area.get(slug) ?? slug);
+  const ptSlugs = arr<string>(p.project_type_slugs).map(String);
+  return {
+    id,
+    fullName: String(p.full_name ?? ''),
+    phone: String(p.phone ?? ''),
+    // Not part of either safe RPC — same "kept empty" convention used
+    // elsewhere in this module for fields the worker-facing UI never
+    // renders for a counterpart.
+    email: '',
+    createdAt: '',
+    // Reachable through can_view_job / a real favorite row only for a real
+    // approved contractor (both RPCs filter on p.status = 'approved').
+    status: 'approved' as Contractor['status'],
+    avatarUrl: p.avatar_path
+      ? avatarByPath.get(String(p.avatar_path))
+      : undefined,
+    role: 'contractor' as const,
+    companyName: String(p.company_name ?? ''),
+    contractorRegistrationNumber: '',
+    licenseDetails: '',
+    city: String(p.city_name ?? ''),
+    areasOfOperation,
+    areaOfOperation: areasOfOperation[0],
+    projectTypes: ptSlugs.map((slug) => tax.pt.get(slug) ?? slug),
+    bio: (p.bio as string | null) ?? undefined,
+    licenseVerificationStatus: (p.license_verification_status as
+      | ContractorLicenseVerificationStatus
+      | undefined) ?? undefined,
+  };
+}
+
+/**
  * Safe "publisher" summary for jobs the caller may already view (migration
  * 054), used as the fallback ONLY when `loadContractorSummaries` can't
  * resolve a contractor because no application / invitation / assignment /
@@ -377,37 +425,37 @@ export async function loadJobPublisherSummaries(
     loadTaxonomy(),
   ]);
 
-  return unique.map((p) => {
-    const id = String(p.id);
-    const areaSlugs = arr<string>(p.area_slugs).map(String);
-    const areasOfOperation = areaSlugs.map((slug) => tax.area.get(slug) ?? slug);
-    return {
-      id,
-      fullName: String(p.full_name ?? ''),
-      phone: String(p.phone ?? ''),
-      // Not part of the safe publisher RPC — same "kept empty" convention
-      // used elsewhere in this module for fields the worker-facing UI never
-      // renders for a counterpart.
-      email: '',
-      createdAt: '',
-      // Reachable through can_view_job only for a real, currently-published
-      // job — i.e. an approved contractor. Never an unapproved/blocked one.
-      status: 'approved' as Contractor['status'],
-      avatarUrl: p.avatar_path
-        ? avatarByPath.get(String(p.avatar_path))
-        : undefined,
-      role: 'contractor' as const,
-      companyName: String(p.company_name ?? ''),
-      contractorRegistrationNumber: '',
-      licenseDetails: '',
-      city: String(p.city_name ?? ''),
-      areasOfOperation,
-      areaOfOperation: areasOfOperation[0],
-      projectTypes: [],
-      bio: (p.bio as string | null) ?? undefined,
-      licenseVerificationStatus: (p.license_verification_status as
-        | ContractorLicenseVerificationStatus
-        | undefined) ?? undefined,
-    };
-  });
+  return unique.map((p) => mapSafeContractorRow(p, avatarByPath, tax));
+}
+
+/**
+ * Safe summary for the CURRENT WORKER'S OWN favorite contractors (migration
+ * 055) — the fallback of last resort so a favorited contractor never
+ * disappears from FavoriteContractorsScreen just because their job closed
+ * and no other relationship exists. `worker_favorite_contractors` grants NO
+ * `can_view_profile()` visibility on its own (by design — see the migration
+ * comment); this RPC is a separate, narrow, purpose-built reader scoped
+ * entirely server-side to `auth.uid()`'s own favorites, never accepting a
+ * worker id from the client, so one worker can never read another's
+ * favorites through it. Same safe column set as `loadJobPublisherSummaries` —
+ * licence number/details/dates/document, ID, and admin data are never
+ * selected by the RPC, so there is nothing here to accidentally forward.
+ */
+export async function loadMyFavoriteContractorSummaries(): Promise<
+  Contractor[]
+> {
+  const sb = getSupabase();
+  const { data, error } = await sb.rpc('get_my_favorite_contractors');
+  if (error) throw error;
+  const rows = arr<Row>(data);
+  if (!rows.length) return [];
+
+  const [avatarByPath, tax] = await Promise.all([
+    signAvatars(
+      rows.map((p) => (p.avatar_path as string | null) ?? '').filter(Boolean)
+    ),
+    loadTaxonomy(),
+  ]);
+
+  return rows.map((p) => mapSafeContractorRow(p, avatarByPath, tax));
 }

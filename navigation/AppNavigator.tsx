@@ -68,6 +68,7 @@ import FavoriteWorkersScreen from '../screens/FavoriteWorkersScreen';
 import WorkerProfileScreen from '../screens/WorkerProfileScreen';
 import SmartMatchScreen from '../screens/SmartMatchScreen';
 import ContractorProfileScreen from '../screens/ContractorProfileScreen';
+import ContractorPublicProfileScreen from '../screens/ContractorPublicProfileScreen';
 import ContractorProfileEditScreen from '../screens/ContractorProfileEditScreen';
 import JobStaffingScreen from '../screens/JobStaffingScreen';
 
@@ -115,6 +116,7 @@ type Route =
   // Worker drilldowns (Tab is implicit via WorkerTab state)
   | { name: 'WorkerJobDetails'; jobId: string }
   | { name: 'WorkerFavoriteContractors' }
+  | { name: 'WorkerContractorProfile'; contractorId: string }
   | { name: 'WorkerInvitations' }
   | { name: 'WorkerMyAssignments' }
   | { name: 'WorkerAvailability' }
@@ -918,6 +920,20 @@ const AppNavigator: React.FC = () => {
               goBack();
               setWorkerTab('available-jobs');
             }}
+            onOpenContractorProfile={(contractorId) =>
+              push({ name: 'WorkerContractorProfile', contractorId })
+            }
+          />
+        );
+      case 'WorkerContractorProfile':
+        return (
+          <ContractorPublicProfileScreen
+            contractorId={route.contractorId}
+            onBack={goBack}
+            onOpenChat={(contractorId) => openChatWith(contractorId)}
+            onOpenJobDetails={(jobId) =>
+              push({ name: 'WorkerJobDetails', jobId })
+            }
           />
         );
       case 'WorkerInvitations':

@@ -1762,6 +1762,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }
           }
         }
+
+        // Favorite contractors (migration 055): worker_favorite_contractors
+        // alone grants NO can_view_profile visibility, by design — a
+        // favorited contractor with no open job left and no application /
+        // invitation / assignment / conversation is otherwise unreachable
+        // through every path above. get_my_favorite_contractors() re-derives
+        // the caller from auth.uid() and returns ONLY the safe summary for
+        // contractors THIS worker actually favorited, so the favorite stays
+        // resolvable for as long as the favorite row exists, independent of
+        // job/relationship state (RLS itself is untouched — this is a
+        // narrow, purpose-built reader, same pattern as get_job_publisher).
+        const favIds = favoriteContractors.map((f) => f.contractorId);
+        const missingFav = favIds.filter((id) => !attempts.ids.has(id));
+        if (missingFav.length) {
+          mergeContractors(
+            await participantsService.loadMyFavoriteContractorSummaries()
+          );
+        }
       }
     } catch {
       // keep whatever resolved; unresolved ids show a neutral fallback and are
@@ -1776,6 +1794,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     jobs,
     relatedJobs,
     conversations,
+    favoriteContractors,
   ]);
 
   useEffect(() => {
