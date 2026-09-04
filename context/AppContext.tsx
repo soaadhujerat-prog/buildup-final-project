@@ -1695,14 +1695,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
               .then(mergeWorkers)
           );
         }
+        // NOTE (cache fix): ids are marked "attempted" only inside
+        // mergeWorkers/mergeContractors, i.e. only for ids a fetch actually
+        // returned — never here, before the fetch resolves. An id RLS
+        // legitimately denies today (no relationship yet) stays eligible for
+        // `missingW`/`missingC` on the next resolveParticipants run, which
+        // already re-fires only when applications/invitations/assignments/
+        // jobs/conversations genuinely change (see the useCallback deps
+        // below) — so this cannot loop, it only lets a real later change
+        // (e.g. a new application) get picked up without a logout/login.
         if (missingW.length) {
-          missingW.forEach((id) => attempts.ids.add(id));
           tasks.push(
             participantsService.loadWorkerSummaries(missingW).then(mergeWorkers)
           );
         }
         if (missingC.length) {
-          missingC.forEach((id) => attempts.ids.add(id));
           tasks.push(
             participantsService
               .loadContractorSummaries(missingC)
@@ -1718,10 +1725,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           (id) => !attempts.ids.has(id)
         );
         if (missingC.length) {
-          missingC.forEach((id) => attempts.ids.add(id));
-          mergeContractors(
-            await participantsService.loadContractorSummaries(missingC)
-          );
+          // Same cache-fix note as above: no premature attempts.ids.add here.
+          const resolved =
+            await participantsService.loadContractorSummaries(missingC);
+          mergeContractors(resolved);
+
+          // Relationship-based resolution (application / invitation /
+          // assignment / conversation) legitimately returns nothing for a
+          // contractor the worker can see only through an OPEN JOB with no
+          // relationship yet — can_view_profile() has no "owns a visible
+          // job" branch, by design (see migration 054's comment: broadening
+          // it would leak licence fields via contractor_profiles' row-level
+          // policy). Fall back to the narrow, job-scoped publisher RPC for
+          // exactly those still-unresolved ids, using any of the worker's
+          // currently visible jobs from that contractor.
+          const resolvedIds = new Set(resolved.map((c) => c.id));
+          const stillMissing = missingC.filter((id) => !resolvedIds.has(id));
+          if (stillMissing.length) {
+            const jobIdByContractor = new Map<string, string>();
+            [...jobs, ...relatedJobs].forEach((j) => {
+              if (
+                j.contractorId &&
+                stillMissing.includes(j.contractorId) &&
+                !jobIdByContractor.has(j.contractorId)
+              ) {
+                jobIdByContractor.set(j.contractorId, j.id);
+              }
+            });
+            const fallbackJobIds = Array.from(jobIdByContractor.values());
+            if (fallbackJobIds.length) {
+              mergeContractors(
+                await participantsService.loadJobPublisherSummaries(
+                  fallbackJobIds
+                )
+              );
+            }
+          }
         }
       }
     } catch {

@@ -325,3 +325,89 @@ export async function loadContractorSummaries(
     };
   });
 }
+
+/**
+ * Safe "publisher" summary for jobs the caller may already view (migration
+ * 054), used as the fallback ONLY when `loadContractorSummaries` can't
+ * resolve a contractor because no application / invitation / assignment /
+ * conversation relationship exists yet (e.g. a worker opening a brand-new
+ * open job it has never interacted with).
+ *
+ * Calls `get_job_publisher(p_job_id)` — a narrow SECURITY DEFINER RPC that
+ * re-derives authorization itself from the EXISTING, unmodified
+ * `can_view_job(p_job_id)` (never trusts a contractor id from the client;
+ * only a job id goes in). `can_view_profile()` / RLS are untouched — this
+ * does not broaden who can read `profiles` / `contractor_profiles` directly,
+ * it only gives the caller a curated, narrow column set for a job it can
+ * already legitimately see.
+ *
+ * Returns the SAME safe subset `loadContractorSummaries` already returns:
+ * licence number / details / valid-from / valid-until / document, ID, and
+ * admin data are never fetched here either — the RPC itself does not select
+ * them, so there is nothing to accidentally forward.
+ */
+export async function loadJobPublisherSummaries(
+  jobIds: string[]
+): Promise<Contractor[]> {
+  const clean = dedupe(jobIds);
+  if (!clean.length) return [];
+  const sb = getSupabase();
+
+  const perJob = await Promise.all(
+    clean.map(async (jobId) => {
+      const { data, error } = await sb.rpc('get_job_publisher', {
+        p_job_id: jobId,
+      });
+      if (error) throw error;
+      return arr<Row>(data);
+    })
+  );
+  const rows = perJob.flat();
+  if (!rows.length) return [];
+
+  // The same contractor can own more than one visible job in this batch.
+  const byId = new Map<string, Row>();
+  rows.forEach((r) => byId.set(String(r.id), r));
+  const unique = Array.from(byId.values());
+
+  const [avatarByPath, tax] = await Promise.all([
+    signAvatars(
+      unique.map((p) => (p.avatar_path as string | null) ?? '').filter(Boolean)
+    ),
+    loadTaxonomy(),
+  ]);
+
+  return unique.map((p) => {
+    const id = String(p.id);
+    const areaSlugs = arr<string>(p.area_slugs).map(String);
+    const areasOfOperation = areaSlugs.map((slug) => tax.area.get(slug) ?? slug);
+    return {
+      id,
+      fullName: String(p.full_name ?? ''),
+      phone: String(p.phone ?? ''),
+      // Not part of the safe publisher RPC — same "kept empty" convention
+      // used elsewhere in this module for fields the worker-facing UI never
+      // renders for a counterpart.
+      email: '',
+      createdAt: '',
+      // Reachable through can_view_job only for a real, currently-published
+      // job — i.e. an approved contractor. Never an unapproved/blocked one.
+      status: 'approved' as Contractor['status'],
+      avatarUrl: p.avatar_path
+        ? avatarByPath.get(String(p.avatar_path))
+        : undefined,
+      role: 'contractor' as const,
+      companyName: String(p.company_name ?? ''),
+      contractorRegistrationNumber: '',
+      licenseDetails: '',
+      city: String(p.city_name ?? ''),
+      areasOfOperation,
+      areaOfOperation: areasOfOperation[0],
+      projectTypes: [],
+      bio: (p.bio as string | null) ?? undefined,
+      licenseVerificationStatus: (p.license_verification_status as
+        | ContractorLicenseVerificationStatus
+        | undefined) ?? undefined,
+    };
+  });
+}

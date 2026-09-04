@@ -44,12 +44,19 @@ const NOTIFY_EMAIL_SECRET = Deno.env.get('NOTIFY_EMAIL_SECRET') ?? '';
 //     in-app notification, so email is the authoritative channel here.
 //   • license_update_approved / _rejected  — materially affects contractor use;
 //     the rejection body already carries the admin's reason.
+//   • job_application — a contractor may not have the app open when a worker
+//     applies; the row is written by the single `applications_notify_contractor`
+//     AFTER INSERT OR UPDATE trigger (033/034/048), keyed by a dedupe_key that
+//     includes the application's (possibly refreshed, on reapply) applied_at,
+//     so a genuine duplicate/failed application attempt writes no new row —
+//     one real application event still means exactly one email.
 //
 // Invitation accepted/declined, assignment completed, and registration
 // approved/rejected are NOT here: the first two are in-app only by design; the
 // registration mails are sent directly by the approve-/reject-registration
 // Edge Functions (no notifications row is written for them — no double send).
 const EMAIL_TYPES = new Set([
+  'job_application',
   'application_accepted',
   'application_rejected',
   'invitation_received',
